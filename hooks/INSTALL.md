@@ -1,13 +1,29 @@
 # Installing Engramory
 
-## 1. The skill
+Engramory is a memory **protocol**, not a skill — its discipline must fire on
+*every* task, so it loads primarily as **standing rules**, with `SKILL.md` as the
+full reference (optionally registered as a skill) and a hook for the hard cap.
 
-Personal (all projects) — copy or symlink the skill folder so `SKILL.md` lands at:
+## 1. Load the discipline as standing rules (primary)
+
+Paste [`rules-snippet.md`](../rules-snippet.md) into your host's **always-loaded**
+rules so the protocol applies on every task (not just when a skill happens to load
+by relevance):
+
+- **Claude Code:** `%USERPROFILE%\.claude\CLAUDE.md` (Windows) / `~/.claude/CLAUDE.md`
+  (macOS / Linux) for all projects, or the project's `CLAUDE.md`.
+- **Codex:** `AGENTS.md` (global `~/.codex/AGENTS.md` or per-project).
+- **Cursor / Cline / Windsurf:** `.cursor/rules` / `.clinerules` / `.windsurfrules`.
+
+## 2. (Optional) Register the full spec as a skill — Claude Code
+
+The standing rules carry the trigger; [`SKILL.md`](../SKILL.md) is the complete
+protocol. On Claude Code you can ALSO register it as an Agent Skill so the full
+reference loads on demand — copy or symlink the folder so `SKILL.md` lands at:
 
 - **Windows:** `%USERPROFILE%\.claude\skills\engramory\SKILL.md`
 - **macOS / Linux:** `~/.claude/skills/engramory/SKILL.md`
-
-Project-only — put it at `<project>/.claude/skills/engramory/SKILL.md`.
+- Project-only: `<project>/.claude/skills/engramory/SKILL.md`
 
 Symlink keeps this repo as the single source of truth, e.g. on Windows
 (PowerShell, admin):
@@ -19,12 +35,14 @@ New-Item -ItemType SymbolicLink `
 ```
 
 Minimal `SKILL.md` frontmatter is just `name` + `description`; both are already
-set. Claude reads the `description` to decide when to apply the skill.
+set. Claude reads the `description` to decide when to load the skill.
 
-## 2. The hard-cap hook (Claude Code only)
+## 3. The hard-cap hook (deterministic enforcement)
 
-The soft 150/200 behavior lives in the skill and the model follows it. The hook
-is the *deterministic backstop* that the model cannot skip.
+The standing rules' 150/200 behavior is model-followed; the hook is the
+*deterministic backstop* the model cannot skip. It's written for Claude Code, but
+Cursor, Cline (and, less maturely, Codex / Windsurf) expose equivalent pre-write
+deny hooks you can adapt the I/O shim to.
 
 1. Open your settings file (`%USERPROFILE%\.claude\settings.json` for all
    projects, or `.claude/settings.json` for one project).
@@ -60,15 +78,16 @@ file that isn't the index, and only acts when the target's filename is the index
 Requires **Python 3.8+** (the hook and tools use f-strings; `python3` on most
 systems).
 
-## 3. Point `<MEMORY_ROOT>` at your memory directory
+## 4. Point `<MEMORY_ROOT>` at your memory directory
 
 Tell the agent where memory lives (or reuse the host's native memory directory).
 If it's inside a git repo, confirm it is `.gitignore`d — memories often hold
 machine-local detail and secrets.
 
-## 4. Other agents (Cursor, Cline, Codex, Windsurf, …)
+## 5. Other agents (Cursor, Cline, Codex, Windsurf, …)
 
-Paste the body of `SKILL.md` into the agent's rules / system prompt. The skill is
-self-contained. The soft 150/200 guard applies via the instructions; the hard
-hook is Claude-Code-specific (other hosts have their own hook mechanisms you can
-adapt `engramory_index_guard.py` to).
+Step 1 already covers them: paste [`rules-snippet.md`](../rules-snippet.md) (or the
+body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The
+150/200 guard then applies via the instructions; for the deterministic cap, adapt
+the hook to the host's pre-write deny hook or run `tools/engramory_check.py` after
+each index write. Full per-host wiring is in [PORTING.md](../PORTING.md).

@@ -2,17 +2,18 @@
 
 # Engramory
 
-**An opinionated, zero-infrastructure discipline layer for AI-agent long-term
-memory.** Memory is a folder of small, human-readable markdown files plus one
-always-loaded index. No database, no embeddings, no server — just plain-text
-files you can open, read, edit, and diff in any editor (the live store itself
-stays git-ignored).
+**An opinionated, zero-infrastructure memory *protocol* for AI agents.** It's a
+curation discipline you load as **standing rules** (`CLAUDE.md` / `AGENTS.md` /
+your host's rules file) — not a database, a framework, or a relevance-loaded skill.
+Memory is a folder of small, human-readable markdown files plus one always-loaded
+index. No database, no embeddings, no server — just plain-text files you can open,
+read, edit, and diff in any editor (the live store itself stays git-ignored).
 
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
 > **Status: 0.1.3 — experimental.** The hard index cap (a `PreToolUse` hook) is
-> always-on; the discipline is a skill the host loads by relevance, so it's
+> always-on; the discipline loads as standing rules the model follows, so it's
 > best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Don't
 > rely on it as a "mandatory, reliable" memory layer yet.
 
@@ -80,7 +81,7 @@ vary, so the window stays configurable via the hook's env vars.
 ## Where it fits — and the goal
 
 Engramory is a **portable memory *discipline*, not a product** — not a database, not a
-framework, not a Claude-Code-only plugin. The plumbing it rides on (a markdown index +
+framework, not a relevance-loaded skill, not a Claude-Code-only plugin. The plumbing it rides on (a markdown index +
 atomic notes, the `user | feedback | project | reference` types, a bounded loaded index)
 is increasingly shipped *natively* by the host — Claude Code's built-in auto-memory
 already does it. So Engramory's value is the part hosts **don't** ship: the explicit
@@ -105,11 +106,16 @@ ships structured memory, Engramory is a thin discipline layer on top — and say
 > most systems).
 
 ### Claude Code
-1. Make it a personal skill (path confirmed in `hooks/INSTALL.md`): copy or
-   symlink this folder into your Claude Code skills directory as `engramory/`.
-2. Register the hard-cap hook from `hooks/` in your `settings.json` (snippet in
-   `hooks/settings.snippet.json`).
-3. Point `<MEMORY_ROOT>` at your memory directory; ensure it's `.gitignore`d if
+1. **Load the discipline as standing rules (primary):** paste
+   [`rules-snippet.md`](rules-snippet.md) into your always-loaded rules —
+   `~/.claude/CLAUDE.md` (all projects) or the project `CLAUDE.md` — so the protocol
+   fires on every task, not just when a skill happens to load by relevance.
+2. **(Optional) register the full spec as a skill:** copy or symlink this folder
+   into your Claude Code skills directory as `engramory/`, so [`SKILL.md`](SKILL.md)
+   is available on demand as the detailed reference (path in `hooks/INSTALL.md`).
+3. **Add the hard-cap hook:** register the hook from `hooks/` in your `settings.json`
+   (snippet in `hooks/settings.snippet.json`).
+4. Point `<MEMORY_ROOT>` at your memory directory; ensure it's `.gitignore`d if
    inside a repo.
 
 ### Any other agent (Hermes, Cursor, Cline, Codex, Windsurf, …)
