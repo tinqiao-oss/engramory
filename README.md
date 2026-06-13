@@ -77,6 +77,26 @@ document this exactly: *"the first 200 lines of `MEMORY.md`, or the first 25KB,
 whichever comes first, are loaded at the start of every conversation."* Other hosts
 vary, so the window stays configurable via the hook's env vars.
 
+## Where it fits — and the goal
+
+Engramory is a **portable memory *discipline*, not a product** — not a database, not a
+framework, not a Claude-Code-only plugin. The plumbing it rides on (a markdown index +
+atomic notes, the `user | feedback | project | reference` types, a bounded loaded index)
+is increasingly shipped *natively* by the host — Claude Code's built-in auto-memory
+already does it. So Engramory's value is the part hosts **don't** ship: the explicit
+curation contract (dedup-before-write, delete-when-wrong, don't-store-what-the-repo-
+already-has), procedural `feedback` notes with required Why/How, and a portable way to
+enforce the size cap.
+
+**The goal is the same discipline on *any* agent — by riding the real cross-agent rails,
+not by inventing a new standard.** Paste [`rules-snippet.md`](rules-snippet.md) into the
+host's always-loaded rules so the discipline fires every task; an **Engramory MCP server
+(planned)** would then let any MCP-capable agent (Claude Code, Cursor, Cline, Codex,
+Windsurf, …) share the same store, the same tools, and a **server-enforced cap** — making
+the one deterministic guarantee cross-agent instead of per-host. On a host that only gives
+you a flat rules file or a raw file store, that is a real upgrade; on a host that already
+ships structured memory, Engramory is a thin discipline layer on top — and says so.
+
 ---
 
 ## Install
@@ -100,8 +120,12 @@ discipline is always-on, not just a by-relevance skill), import [`SKILL.md`](SKI
 if the host supports skills, point `<MEMORY_ROOT>` at the host's memory dir, and
 wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
-`tools/engramory_doctor.py` as a periodic backstop. The hard hook is
-Claude-Code-specific; elsewhere the cap is best-effort (see [SKILL.md](SKILL.md) §9).
+`tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
+pre-write *deny* hook: Claude Code has one, and Cursor, Cline (and, less maturely,
+Codex and Windsurf) now expose equivalent pre-write hooks too — so the cap is
+portable, but each host needs its own thin I/O shim and maturity varies. Where no
+such hook exists (or plain chat), the cap degrades to best-effort discipline (see
+[SKILL.md](SKILL.md) §9).
 
 A plain chat UI with no file access / no rules mechanism cannot run Engramory — it
 needs a host that executes skills/rules and can read & write files.

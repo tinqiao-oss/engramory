@@ -43,8 +43,11 @@ of two writers fighting in the same file.
 
 The cap stops the index growing past the host's load window. Strongest → softest:
 
-1. **PreToolUse hook (Claude Code only):** `hooks/engramory_index_guard.py` runs
-   on every edit — deterministic. See `hooks/INSTALL.md`.
+1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every edit and
+   can DENY one that would grow the index past the cap — deterministic. It's written
+   for Claude Code's hook format, but Cursor and Cline (and, less maturely, Codex and
+   Windsurf) now expose equivalent pre-write deny hooks, so the cap ports — rewrite
+   the small JSON I/O shim per host. See `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
    Add that instruction to the rules. Hermes / Cursor / Cline / Codex all have
@@ -58,12 +61,14 @@ The cap stops the index growing past the host's load window. Strongest → softe
    were missed.
 
 **Honest limit.** A *deterministic* guarantee exists only where a real pre-write
-hook runs (Claude Code today). If a host writes its memory **internally** — not
-through a tool that an agent step or hook can see — even the step-2 check can't
-intercept that write; there the cap is pure discipline. This is why Engramory is
-0.1 / experimental everywhere except Claude Code, where the hook is the one
-always-on, deterministic layer. Set expectations accordingly; don't sell the cap
-as guaranteed off Claude Code.
+deny hook runs — today that is Claude Code, Cursor, and Cline (Codex and Windsurf
+are newer / partial), each needing its own I/O shim. If a host writes its memory
+**internally** — not through a tool that an agent step or hook can see (e.g. Letta)
+— even the step-2 check can't intercept that write; there the cap is pure
+discipline. So the cap is deterministic on the handful of hosts with such a hook,
+and best-effort discipline everywhere else. This is why Engramory is 0.1 /
+experimental: set expectations accordingly and don't sell the cap as guaranteed on
+a host without a pre-write deny hook.
 
 ## Quick port checklist
 

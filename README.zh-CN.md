@@ -43,6 +43,12 @@ Engramory 的赛道:**极简 + 可执行的角色类型 + 策展纪律,零基础
 
 \* Claude Code 的 [memory 文档](https://docs.claude.com/en/docs/claude-code/memory)明确写着:*"MEMORY.md 的前 200 行、或前 25KB(谁先到算谁),在每次对话开始时加载。"* 其他宿主各异,故该窗口仍可用 hook 环境变量调整。
 
+## 它的位置 —— 以及目标
+
+Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据库、不是框架、也不是只能用在 Claude Code 的插件。它所依赖的底层管道(markdown 索引 + 原子笔记、`user | feedback | project | reference` 四类型、有界加载索引)正越来越多地被宿主**原生**内置——Claude Code 自带的 auto-memory 就已经做到了。所以 Engramory 的价值在于宿主**不**提供的那部分:显式的策展契约(写前查重、发现错就删、git/代码里已有的别记)、带强制 Why/How 的程序性 `feedback` 笔记,以及一条可移植的尺寸上限强制方式。
+
+**目标是让*任何* agent 都能用上同一套纪律——靠骑在真正的跨 agent 轨道上,而不是另造一个标准。** 把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的常驻规则,纪律就每个任务都生效;再配一个**(规划中的)Engramory MCP server**,任何支持 MCP 的 agent(Claude Code、Cursor、Cline、Codex、Windsurf……)就能共享同一个记忆库、同一套工具,以及一个 **server 端强制的 cap**——让那个唯一的确定性保证从"逐宿主"变成"跨 agent"。对只给你一个扁平规则文件或裸文件存储的宿主,这是实打实的升级;对已经自带结构化记忆的宿主,Engramory 就是叠在上面的一层薄纪律——并且坦白承认这一点。
+
 ---
 
 ## 安装
@@ -55,7 +61,7 @@ Engramory 的赛道:**极简 + 可执行的角色类型 + 策展纪律,零基础
 3. 把 `<MEMORY_ROOT>` 指向你的记忆目录;若在 git 仓库内,务必 `.gitignore` 掉。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Codex、Windsurf……)
-Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。硬 hook 是 Claude Code 专有的;其他宿主上,上限是尽力而为(见 [SKILL.md](SKILL.md) §9)。
+Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:Claude Code 有,Cursor、Cline(以及成熟度稍低的 Codex、Windsurf)如今也都暴露了等效的 pre-write hook——所以 cap 是可移植的,只是每个宿主要各自改一层薄 I/O shim、成熟度不一。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
 
 一个没有文件访问、没有规则机制的纯聊天界面**用不了** Engramory——它需要一个能执行技能/规则、能读写文件的宿主。
 
