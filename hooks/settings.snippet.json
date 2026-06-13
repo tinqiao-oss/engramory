@@ -1,0 +1,16 @@
+{
+  "_comment": "Merge into your Claude Code settings.json (user-level %USERPROFILE%/.claude/settings.json or project .claude/settings.json). Replace the placeholder with the absolute path to engramory_index_guard.py. On Windows USE FORWARD SLASHES (e.g. E:/path/to/engramory/hooks/engramory_index_guard.py) — single backslashes get eaten by the hook shell. The script path is double-quoted so a path with spaces (e.g. Program Files) still works; keep the quotes.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/engramory/hooks/engramory_index_guard.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

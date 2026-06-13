@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# This repo is the Engramory skill, NOT a memory store — a real store lives OUTSIDE
+# it (see SKILL.md §0). This only guards against accidentally committing a stray
+# MEMORY.md at the repo root; the templates/ scaffolds are intentionally kept.
+MEMORY.md
+!templates/MEMORY.md
