@@ -263,6 +263,24 @@ def test_doctor_linked_but_not_in_index_is_info(tmp_path):
     assert rc == 0 and "not in MEMORY.md" in out and "clean" in out
 
 
+def test_doctor_no_schema_skips_schema(tmp_path):
+    # a note that violates schema (no frontmatter) but is structurally fine (indexed):
+    # strict -> fail; --no-schema -> clean.
+    (tmp_path / "a-note.md").write_text("just a body, no frontmatter\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "frontmatter" in out
+    rc2, out2 = _run(DOCTOR, str(tmp_path), "--no-schema")
+    assert rc2 == 0 and "clean" in out2 and "skipped" in out2
+
+
+def test_doctor_no_schema_still_catches_structure(tmp_path):
+    # --no-schema must still catch structural problems (here, a broken index pointer).
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [Gone](missing.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path), "--no-schema")
+    assert rc == 1 and "missing" in out
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

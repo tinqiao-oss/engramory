@@ -4,6 +4,15 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.8 — 2026-06-14
+
+Added
+- **doctor `--no-schema` flag:** run only the structural checks (over-cap index,
+  broken pointers, orphans, duplicate slugs) and skip the per-note frontmatter /
+  protocol validation. Use it to health-check a store that isn't in strict Engramory
+  format — e.g. a host-native auto-memory store — without the schema noise. The
+  default stays strict (full validation). +2 tests (56 total).
+
 ## 0.1.7 — 2026-06-14
 
 Fourth Codex round — make the "validator" actually validate, plus competitor-fact

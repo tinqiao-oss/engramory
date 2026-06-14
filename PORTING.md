@@ -65,8 +65,10 @@ The cap stops the index growing past the host's load window. Strongest → softe
    "could not check" from "index is fine").
 3. **Model discipline:** SKILL §6 — count lines/bytes before writing the index.
 4. **Periodic backstop:** `python tools/engramory_doctor.py <MEMORY_ROOT>` flags
-   an over-cap index, broken pointers, and orphan notes even when per-write checks
-   were missed.
+   an over-cap index, broken pointers, and orphan notes — and validates each note's
+   frontmatter against the protocol. Add `--no-schema` to skip the frontmatter
+   checks and run structure-only (handy on a store that isn't in strict Engramory
+   format yet, e.g. a host-native auto-memory store).
 
 **Honest limit.** A *deterministic* guarantee exists only where a real pre-write
 deny hook runs — today that is Claude Code, Cursor, and Cline (Codex and Windsurf

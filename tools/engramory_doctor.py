@@ -2,7 +2,13 @@
 """
 engramory_doctor — consistency + protocol check for an Engramory memory store.
 
-    python tools/engramory_doctor.py <MEMORY_ROOT>   # dir containing MEMORY.md
+    python tools/engramory_doctor.py <MEMORY_ROOT>              # structure + schema
+    python tools/engramory_doctor.py <MEMORY_ROOT> --no-schema  # structure only
+
+`--no-schema` skips the per-note frontmatter/protocol checks and runs only the
+structural checks (over-cap index, broken pointers, orphans, duplicate slugs) — use
+it to health-check a store that isn't (yet) in strict Engramory format, e.g. a
+host-native auto-memory store.
 
 Catches drift the per-write checks miss, on two levels:
 
@@ -109,7 +115,10 @@ def _frontmatter(text):
 
 
 def main(argv):
-    root = argv[1] if len(argv) > 1 else "."
+    args = argv[1:]
+    schema = "--no-schema" not in args  # default: validate frontmatter too
+    positional = [a for a in args if not a.startswith("-")]
+    root = positional[0] if positional else "."
     idx_path = os.path.join(root, "MEMORY.md")
     if not os.path.isfile(idx_path):
         print(f"engramory-doctor: no index at {idx_path}")
@@ -188,6 +197,8 @@ def main(argv):
             else:
                 info.append(f"[[{w}]] in {base} has no target file yet (ok if a forward-ref stub)")
 
+        if not schema:
+            continue  # --no-schema: structural checks only, skip frontmatter validation
         # --- protocol schema: the spec's MUST fields are ISSUE (exit 1); soft
         # hygiene (name<->filename) is info. See SKILL.md §1/§2. ---
         slug = base[:-3]  # strip .md
@@ -238,8 +249,10 @@ def main(argv):
     if issues:
         print(f"engramory-doctor: {len(issues)} issue(s).")
         return 1
+    tail = ("no broken pointers, orphans, or schema errors." if schema
+            else "no broken pointers or orphans (schema checks skipped via --no-schema).")
     print(f"engramory-doctor: clean — index {nlines} lines / {nbytes // 1024} KB, "
-          f"{len(notes) - 1} note(s), no broken pointers, orphans, or schema errors.")
+          f"{len(notes) - 1} note(s), {tail}")
     return 0
 
 
