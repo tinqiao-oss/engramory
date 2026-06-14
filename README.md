@@ -12,7 +12,7 @@ read, edit, and diff in any editor (the live store itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.3 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.4 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > always-on; the discipline loads as standing rules the model follows, so it's
 > best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Don't
 > rely on it as a "mandatory, reliable" memory layer yet.
@@ -41,11 +41,13 @@ index, atomic notes, or curation hygiene — all are prior art.
 
 ## What's actually differentiated
 
-1. **A role/purpose ontology, headed by `feedback` = procedural memory.** Most
-   memory systems (mem0, Zep, basic-memory, knowledge-graph servers) store
-   *world facts*. Engramory makes "how the agent should behave" a first-class memory
-   type with required **Why:** / **How to apply:** lines. This is the part with
-   the least prior art.
+1. **A role/purpose ontology, headed by `feedback` = procedural memory.** The
+   semantic / episodic / **procedural** split is established prior art — the CoALA
+   taxonomy, and a named procedural type in LangMem and mem0 — so Engramory does not
+   claim the category. What it does is make procedural `feedback` the *spine* of a
+   deliberately tiny, hand-authored, human-readable set, with required **Why:** /
+   **How to apply:** lines, instead of auto-extracting it into a vector/graph store.
+   The contribution is the packaging and discipline, not the ontology.
 
 2. **The curation contract as concrete behaviour** the skill applies (model-followed, not a hard gate): dedup-before-write,
    update-don't-duplicate, delete-when-wrong, and a negative-scope rule ("don't
@@ -67,7 +69,7 @@ index, atomic notes, or curation hygiene — all are prior art.
 | CC auto-memory | md files | loaded index → open file | ✅ | ✅ same 4 types | partial (auto) | ~200-line window* | none (built-in) |
 | basic-memory | md + SQLite | semantic/FTS search | ✅ | ✅ freeform type | hygiene, not enforced | ❌ (no loaded index) | SQLite + embeddings |
 | obsidian-second-brain | md vault | index-first + search | ✅ | folder-typed | ✅ reconcile/lint | partial | none |
-| mem0 / Zep | vector/graph DB | semantic | ❌ opaque | facts only | auto-extract | n/a | DB + embeddings |
+| mem0 / Zep | vector/graph DB | semantic | ❌ (DB) | typed (prefs/episodic/proc.; Zep custom) | auto-extract | n/a | DB + embeddings |
 
 Engramory's lane: **minimalism + actionable role typing + curation discipline, zero
 infra.** It does *not* try to out-search basic-memory or out-scale mem0 — those

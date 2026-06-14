@@ -3,6 +3,37 @@
 All notable changes to Engramory. Versions are git tags. This is an experimental
 0.x project — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.4 — 2026-06-14
+
+Positioning & protocol-rigor pass (third external Codex round). Repo history was
+consolidated into a single clean commit before this release, so the earlier
+"internal paths in history" caveat no longer applies. No breaking code changes.
+
+Changed (honesty / scope)
+- **Reliability (SKILL §8, SECURITY.md):** the cap hook is **deterministic only for
+  the matched direct-edit tools** (`Edit | Write | MultiEdit`) — writes via Bash, MCP
+  file tools, external editors, or sync clients are NOT intercepted. Dropped the
+  "always-on and deterministic / globally reliable" framing.
+- **Trust model (SKILL §2/§4, SECURITY.md):** reconciled feedback-as-behavior with
+  recall-as-fallible-background — recalled memory is advisory, never overrides the
+  user's live instructions or safety, and the store is treated as
+  attacker-influenceable (a tampered note can be a stored prompt injection).
+- **Skill vs rules:** removed the leftover "the discipline is a skill loaded by
+  relevance" line (SKILL §8) that contradicted the 0.1.3 repositioning.
+- **Comparison & differentiators (README):** corrected the unfair "mem0/Zep = facts
+  only / opaque" cell (they support preferences/episodic/procedural; Zep supports a
+  custom ontology) and the "least prior art" claim (the semantic/episodic/procedural
+  split is CoALA / LangMem / mem0 prior art).
+- **Concurrency:** documented the single-writer / serialized-writes assumption.
+
+Added
+- **doctor protocol lint:** `engramory_doctor.py` now validates note frontmatter
+  (`description` and a valid `type` are required; `name` should equal the filename
+  slug; `created`/`updated` should be ISO dates; feedback/project notes should carry
+  `Why:` / `How to apply:`) and flags notes reachable only via a `[[wikilink]]` (not
+  in the index, so they won't load at session start). It was previously only a
+  reference/orphan checker. +6 tests (49 total).
+
 ## 0.1.3 — 2026-06-14
 
 Second audit round (external Codex review). Fixes real issues the first pass missed
@@ -35,10 +66,6 @@ Changed
   code's strict `> 150 / > 20 KB` (was "≥").
 - +2 tests (43 total): doctor wrong-subpath and root-escape pointer checks; the
   warn/shrink assertions updated for the context-only nudge.
-
-Known / deferred
-- Git history before this commit still contains internal paths from the earliest
-  commits (no secrets); scrub before any public release.
 
 ## 0.1.2 — 2026-06-14
 

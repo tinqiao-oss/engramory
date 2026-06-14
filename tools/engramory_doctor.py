@@ -1,21 +1,36 @@
 #!/usr/bin/env python3
 """
-engramory_doctor — consistency check for an Engramory memory store (layer-4 backstop).
+engramory_doctor — consistency + protocol check for an Engramory memory store.
 
     python tools/engramory_doctor.py <MEMORY_ROOT>   # dir containing MEMORY.md
 
-Catches drift the per-write checks miss: an over-cap index, index pointers to
-files that no longer exist, orphan notes that nothing references, and duplicate
-note slugs (two files sharing a basename, which breaks the one-file-one-slug
-model). Broken [[wikilinks]] are reported as info (forward-reference stubs are
-allowed by design).
+Catches drift the per-write checks miss, on two levels:
 
-Exit 0 = no issues; 1 = issues found (including an unreadable index). Caps via
+STRUCTURE (ISSUE -> exit 1): an over-cap index, index pointers to files that no
+longer exist, pointers that escape the store root, orphan notes that nothing
+references, and duplicate note slugs (two files sharing a basename).
+
+PROTOCOL SCHEMA (ISSUE -> exit 1): each note must have YAML frontmatter with a
+non-empty `description` and a valid `type` (user|feedback|project|reference).
+Softer protocol hygiene is INFO (exit 0): `name` should equal the filename slug,
+`created`/`updated` should be YYYY-MM-DD, feedback/project notes should carry
+`Why:` + `How to apply:`, and a note reachable only via a `[[wikilink]]` (not in
+the index) is flagged because it won't load at session start. Broken `[[wikilinks]]`
+are INFO (forward-reference stubs are allowed by design).
+
+Note: this validates Engramory's documented FLAT frontmatter (name/description/
+type/created/updated). A store using a different host-native frontmatter shape
+will surface schema info/issues accordingly.
+
+Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Caps via
 ENGRAMORY_HARD / ENGRAMORY_HARD_BYTES.
 """
 import os
 import re
 import sys
+
+VALID_TYPES = {"user", "feedback", "project", "reference"}
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _envint(name, default):
@@ -49,6 +64,25 @@ def _read_bytes(p):
 def _read(p):
     raw = _read_bytes(p)
     return None if raw is None else raw.decode("utf-8", "replace")
+
+
+def _frontmatter(text):
+    # Parse Engramory's flat `key: value` YAML frontmatter between leading `---`
+    # fences. Lenient: indentation is ignored (so a nested `metadata:` block's
+    # keys are still picked up). Returns a dict, or None if there is no frontmatter.
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    fm = {}
+    for line in text[3:end].splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        fm[k.strip()] = v.strip().strip('"').strip("'")
+    return fm
 
 
 def main(argv):
@@ -95,7 +129,7 @@ def main(argv):
                                   f"{notes[f]} and {os.path.join(dp, f)} — slugs must be unique")
                 notes[f] = os.path.join(dp, f)
 
-    referenced = set()
+    referenced, indexed = set(), set()
     root_abs = os.path.abspath(root)
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
     # Match the link target up to whitespace / '#' / ')' (so anchored `(note.md#sec)`
@@ -110,12 +144,16 @@ def main(argv):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
         if os.path.isfile(full):
-            referenced.add(os.path.basename(tgt))  # the slug this pointer resolves to
+            base = os.path.basename(tgt)  # the slug this pointer resolves to
+            referenced.add(base)
+            indexed.add(base)
         else:
             issues.append(f"index points to a missing file: {tgt}")
 
-    # wikilinks across all notes; missing targets = info (forward-ref stubs allowed)
-    for base, p in notes.items():
+    # one pass per note: wikilink graph + frontmatter/protocol validation.
+    for base, p in sorted(notes.items()):
+        if base == "MEMORY.md":
+            continue
         text = _read(p)
         if text is None:
             issues.append(f"cannot read note file: {p}")
@@ -127,12 +165,45 @@ def main(argv):
             else:
                 info.append(f"[[{w}]] in {base} has no target file yet (ok if a forward-ref stub)")
 
-    # orphans: notes nothing references (not the index, not any wikilink)
+        # --- protocol schema ---
+        slug = base[:-3]  # strip .md
+        fm = _frontmatter(text)
+        if fm is None:
+            issues.append(f"{base}: no YAML frontmatter (needs name/description/type)")
+        else:
+            if not fm.get("description"):
+                issues.append(f"{base}: frontmatter missing a 'description'")
+            t = fm.get("type", "")
+            if not t:
+                issues.append(f"{base}: frontmatter missing 'type'")
+            elif t not in VALID_TYPES:
+                issues.append(f"{base}: invalid type '{t}' (must be one of {'|'.join(sorted(VALID_TYPES))})")
+            name = fm.get("name", "")
+            if not name:
+                info.append(f"{base}: frontmatter missing 'name'")
+            elif name != slug:
+                info.append(f"{base}: name '{name}' != filename slug '{slug}'")
+            for dk in ("created", "updated"):
+                dv = fm.get(dk, "")
+                if not dv:
+                    info.append(f"{base}: missing '{dk}' date")
+                elif not DATE_RE.match(dv):
+                    info.append(f"{base}: '{dk}' is not YYYY-MM-DD ('{dv}')")
+            if t in ("feedback", "project"):
+                if "Why:" not in text:
+                    info.append(f"{base}: type {t} should carry a 'Why:' line")
+                if "How to apply:" not in text:
+                    info.append(f"{base}: type {t} should carry a 'How to apply:' line")
+
+    # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
     for base in sorted(notes):
         if base == "MEMORY.md":
             continue
         if base not in referenced:
             issues.append(f"orphan note (not in index, nothing links to it): {base}")
+        elif base not in indexed:
+            info.append(f"{base}: linked from another note but not in MEMORY.md "
+                        f"(won't load at session start — add an index pointer)")
 
     for i in issues:
         print(f"ISSUE: {i}")
@@ -142,7 +213,7 @@ def main(argv):
         print(f"engramory-doctor: {len(issues)} issue(s).")
         return 1
     print(f"engramory-doctor: clean — index {nlines} lines / {nbytes // 1024} KB, "
-          f"{len(notes) - 1} note(s), no broken pointers or orphans.")
+          f"{len(notes) - 1} note(s), no broken pointers, orphans, or schema errors.")
     return 0
 
 
