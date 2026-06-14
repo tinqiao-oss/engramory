@@ -78,10 +78,16 @@ index, atomic notes, or curation hygiene — all are prior art.
 | basic-memory | md + SQLite | semantic/FTS search | ✅ | ✅ freeform type | schema + overwrite checks | ❌ (no loaded index) | SQLite + embeddings |
 | obsidian-second-brain | md vault | index-first + search | ✅ | folder-typed | ✅ reconcile/lint | partial | none |
 | mem0 / Zep | vector/graph DB | semantic | ❌ (DB) | typed (prefs/episodic/proc.; Zep custom) | auto-extract | n/a | DB + embeddings |
+| [agentmemory](https://github.com/rohitg00/agentmemory) | SQLite + vector index (+opt. graph) | hybrid BM25+vector (+opt. graph), RRF | ❌ (DB/engine) | ✅ 4-tier lifecycle (work./epis./sem./proc.) | auto (capture + dedup + decay) | n/a | iii engine (local) + opt. embeddings |
 
 Engramory's lane: **minimalism + actionable role typing + curation discipline, zero
-infra.** It does *not* try to out-search basic-memory or out-scale mem0 — those
-solve a different problem (auto-ingest at volume) at a different cost point.
+infra.** It does *not* try to out-search basic-memory, out-scale mem0, or
+out-capture agentmemory — those solve a different problem (auto-capture /
+auto-ingest at volume) at a different cost point. agentmemory is the closest
+heavyweight foil: also local-first, but it bets on automatic capture (lifecycle
+hooks) + hybrid retrieval (BM25 + vectors + optional graph) on a SQLite/`iii`
+engine, where Engramory bets on hand-curation + a tiny always-loaded index and
+ships no engine at all.
 
 \* Claude Code's [memory docs](https://docs.claude.com/en/docs/claude-code/memory)
 document this exactly: *"the first 200 lines of `MEMORY.md`, or the first 25KB,
@@ -203,7 +209,10 @@ most prominent statement of this approach — note it targets a knowledge
 how the agent should behave, project state) · Claude Code auto-memory · basic-memory ·
 obsidian-second-brain · claude-memory-compiler (itself Karpathy-inspired) · the
 Anthropic memory tool · OpenAI Codex memory (and its earlier topics-memory proposal
-#19758) · the wider markdown-memory community.
+#19758) · [agentmemory](https://github.com/rohitg00/agentmemory) (a heavyweight,
+local-first counterpart — auto-capture + SQLite/`iii` engine + hybrid BM25/vector
+retrieval; the opposite design point to Engramory's zero-infra hand-curation) ·
+the wider markdown-memory community.
 
 ## License
 MIT — see [LICENSE](LICENSE).
