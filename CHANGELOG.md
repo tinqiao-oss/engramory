@@ -3,6 +3,19 @@
 All notable changes to Engramory. Versions are git tags. This is an experimental
 0.x project — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.6 — 2026-06-14
+
+Changed (docs)
+- **README EN banner drift fix:** it still said the cap is "always-on" while the zh
+  banner and SKILL §8 had been corrected; the EN banner now matches — deterministic
+  for the matched direct-edit tools, not a global write guard, single-writer assumed.
+- **Tagline** sharpened to the accurate scope: "a strict curation discipline plus a
+  validator for small-scale, local, file-based agent memory" (cross-agent stays the
+  stated goal, not a present-tense claim).
+- **Prior art:** credit Andrej Karpathy's LLM Wiki / Knowledge Base (markdown-over-RAG),
+  noting it targets a knowledge encyclopedia where Engramory targets agent working
+  memory. Fixed a leftover "the skill applies" → "the protocol applies".
+
 ## 0.1.5 — 2026-06-14
 
 Fixed

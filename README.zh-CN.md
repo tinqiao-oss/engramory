@@ -2,12 +2,12 @@
 
 # Engramory
 
-**一套有主见、零基础设施的 AI 智能体记忆*协议*。** 它是一套你**以常驻规则形式加载**(`CLAUDE.md` / `AGENTS.md` / 宿主的规则文件)的策展纪律——不是数据库、不是框架、也不是按相关性加载的 skill。记忆就是一个文件夹:一堆小小的、人能直接读的 markdown 文件,加一个每次会话都加载的索引。没有数据库、没有向量、没有服务器——就是你能打开、能读、能改、能 diff 的纯文本文件(真实记忆库本身保持 git-ignore)。
+**一套有主见、零基础设施的、面向小规模 / 本地 / 文件式智能体记忆的*协议*** —— 一套**强约束的策展纪律 + 一个校验器**(`tools/engramory_doctor.py`),以**常驻规则形式加载**(`CLAUDE.md` / `AGENTS.md` / 宿主的规则文件)。它不是数据库、不是框架、也不是按相关性加载的 skill。记忆就是一个文件夹:一堆小小的、人能直接读的 markdown 文件,加一个每次会话都加载的索引。没有数据库、没有向量、没有服务器——就是你能打开、能读、能改、能 diff 的纯文本文件(真实记忆库本身保持 git-ignore)。
 
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.1.5 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.1.6 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -81,7 +81,7 @@ Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记
 这条纪律是**未强制**的(没有 hook 扫描记忆内容——见 [SKILL.md](SKILL.md) §5/§8),当尽力而为、刻意为之。
 
 ## 前人工作与致谢
-Claude Code auto-memory · basic-memory · obsidian-second-brain · claude-memory-compiler · Anthropic memory tool · OpenAI Codex topics-memory 提案(#19758)· 整个 markdown 记忆 skill 社区。
+Andrej Karpathy 的 **LLM Wiki / 知识库**(markdown-胜过-RAG 模式,这条路线最有分量的提出者——但注意它针对的是知识*百科*,而 Engramory 针对的是智能体的*工作记忆*:用户是谁、该怎么表现、项目状态)· Claude Code auto-memory · basic-memory · obsidian-second-brain · claude-memory-compiler(本身受 Karpathy 启发)· Anthropic memory tool · OpenAI Codex topics-memory 提案(#19758)· 整个 markdown 记忆社区。
 
 ## 许可证
 MIT —— 见 [LICENSE](LICENSE)。

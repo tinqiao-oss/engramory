@@ -2,20 +2,25 @@
 
 # Engramory
 
-**An opinionated, zero-infrastructure memory *protocol* for AI agents.** It's a
-curation discipline you load as **standing rules** (`CLAUDE.md` / `AGENTS.md` /
-your host's rules file) — not a database, a framework, or a relevance-loaded skill.
-Memory is a folder of small, human-readable markdown files plus one always-loaded
-index. No database, no embeddings, no server — just plain-text files you can open,
-read, edit, and diff in any editor (the live store itself stays git-ignored).
+**An opinionated, zero-infrastructure memory *protocol* for small-scale, local,
+file-based agent memory** — a strict curation discipline plus a validator
+(`tools/engramory_doctor.py`), loaded as **standing rules** (`CLAUDE.md` /
+`AGENTS.md` / your host's rules file). It is not a database, a framework, or a
+relevance-loaded skill. Memory is a folder of small, human-readable markdown files
+plus one always-loaded index. No database, no embeddings, no server — just
+plain-text files you can open, read, edit, and diff in any editor (the live store
+itself stays git-ignored).
 
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.5 — experimental.** The hard index cap (a `PreToolUse` hook) is
-> always-on; the discipline loads as standing rules the model follows, so it's
-> best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Don't
-> rely on it as a "mandatory, reliable" memory layer yet.
+> **Status: 0.1.6 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
+> NOT a global write guard (Bash / MCP file tools / external editors / sync clients
+> bypass it); the discipline loads as standing rules the model follows, so it's
+> best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Assumes a
+> single writer / serialized writes. Don't rely on it as a "mandatory, reliable,
+> cross-agent" memory layer yet.
 
 ---
 
@@ -49,7 +54,7 @@ index, atomic notes, or curation hygiene — all are prior art.
    **How to apply:** lines, instead of auto-extracting it into a vector/graph store.
    The contribution is the packaging and discipline, not the ontology.
 
-2. **The curation contract as concrete behaviour** the skill applies (model-followed, not a hard gate): dedup-before-write,
+2. **The curation contract as concrete behaviour** the protocol applies (model-followed, not a hard gate): dedup-before-write,
    update-don't-duplicate, delete-when-wrong, and a negative-scope rule ("don't
    store what git/CLAUDE.md/the code already records"). Surveys consistently name
    *modify/delete/forget* as the most under-implemented memory operation — Engramory
@@ -163,9 +168,13 @@ This discipline is **unenforced** (no hook scans memory content — see
 [SKILL.md](SKILL.md) §5/§8); treat it as best-effort and be deliberate.
 
 ## Prior art & credits
-Claude Code auto-memory · basic-memory · obsidian-second-brain ·
-claude-memory-compiler · the Anthropic memory tool · OpenAI Codex topics-memory
-proposal (#19758) · the wider markdown-memory-skill community.
+Andrej Karpathy's **LLM Wiki / Knowledge Base** (the markdown-over-RAG pattern, the
+most prominent statement of this approach — note it targets a knowledge
+*encyclopedia*, where Engramory targets agent *working* memory: who the user is,
+how the agent should behave, project state) · Claude Code auto-memory · basic-memory ·
+obsidian-second-brain · claude-memory-compiler (itself Karpathy-inspired) · the
+Anthropic memory tool · OpenAI Codex topics-memory proposal (#19758) · the wider
+markdown-memory community.
 
 ## License
 MIT — see [LICENSE](LICENSE).
