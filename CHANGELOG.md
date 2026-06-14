@@ -1,7 +1,37 @@
 # Changelog
 
-All notable changes to Engramory. Versions are git tags. This is an experimental
-0.x project — expect rough edges off Claude Code (see SKILL.md §8 / §9).
+All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0–
+0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
+— expect rough edges off Claude Code (see SKILL.md §8 / §9).
+
+## 0.1.7 — 2026-06-14
+
+Fourth Codex round — make the "validator" actually validate, plus competitor-fact
+and OSS-hygiene fixes.
+
+Fixed
+- **doctor is now a real protocol validator** (it had reported non-compliant stores
+  as clean). Missing required `name`/`description`/`type`/`created`/`updated`, an
+  invalid `type`, a non-calendar date (e.g. `2026-99-99`), malformed frontmatter /
+  unclosed quotes, and missing `Why:` / `How to apply:` on feedback/project notes
+  are now ISSUE (exit 1), not info; the `Why:`/`How:` check tolerates `**bold**`.
+  The frontmatter grammar is a restricted `key: value` form (still zero-dependency).
+
+Changed (docs accuracy)
+- **README:** the "Claude Code uses the same four types" line now cites
+  anthropics/claude-code#58840 (system prompt) and notes the public docs show only
+  the index + topic files; the basic-memory cell is "schema + overwrite checks"
+  (not "hygiene, not enforced"); OpenAI Codex is credited as shipped memory; the
+  pre-write deny hooks list no longer singles out Codex as immature.
+- **PORTING / SKILL §9:** hosts treating memory as managed/generated state (Letta,
+  Codex's local Memories) cannot be ridden — use their rules and keep the Engramory
+  store separate.
+- **README:** added a **Known limitations** section (no versioning / provenance /
+  scope / concurrency; personal-scale) — a store-level manifest is roadmap.
+
+Added
+- **CI:** GitHub Actions runs both test suites on Ubuntu + Windows × Python 3.8/3.12.
+- +4 doctor validation tests (54 total).
 
 ## 0.1.6 — 2026-06-14
 

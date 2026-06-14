@@ -39,15 +39,23 @@ store — put the SKILL / snippet where it shapes how the host writes memory
 (`SOUL.md` / context / `CLAUDE.md`), so one store follows one set of rules instead
 of two writers fighting in the same file.
 
+⚠️ But some hosts treat their memory as **generated / managed state not meant for
+hand-editing** (Letta's memory blocks; OpenAI Codex's local Memories). You cannot
+make Engramory the authority over a store like that — there is no agent-visible
+file to curate, and editing it fights the host's manager. There, apply the
+discipline via the host's **rules** (`AGENTS.md`, etc.) and keep the Engramory
+store **separate** (a plain folder you control); don't try to take over the managed
+store.
+
 ## 3. Enforce the size cap — the degradation ladder (no PreToolUse hook)
 
 The cap stops the index growing past the host's load window. Strongest → softest:
 
 1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every edit and
    can DENY one that would grow the index past the cap — deterministic. It's written
-   for Claude Code's hook format, but Cursor and Cline (and, less maturely, Codex and
-   Windsurf) now expose equivalent pre-write deny hooks, so the cap ports — rewrite
-   the small JSON I/O shim per host. See `hooks/INSTALL.md`.
+   for Claude Code's hook format, but Cursor, Cline, Codex, and Windsurf now expose
+   equivalent pre-write deny hooks (coverage varies by host and version), so the cap
+   ports — rewrite the small JSON I/O shim per host. See `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
    Add that instruction to the rules. Hermes / Cursor / Cline / Codex all have

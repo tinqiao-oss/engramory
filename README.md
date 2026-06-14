@@ -14,7 +14,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.6 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.7 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -31,8 +31,11 @@ loaded into context + the model curates it" pattern is now the mainstream shape
 for agent memory, and it ships in several places already. Engramory stands on:
 
 - **Claude Code native auto-memory** — the same markdown-`MEMORY.md`-index +
-  lazy detail-file pattern, and the same `user | feedback | project | reference`
-  type vocabulary. Engramory is a disciplined superset of this default.
+  lazy detail-file pattern; its system prompt even uses the same
+  `user | feedback | project | reference` type vocabulary (per
+  [anthropics/claude-code#58840](https://github.com/anthropics/claude-code/issues/58840);
+  the *public docs* describe only the index + topic files). Engramory is a
+  disciplined superset of this default.
 - **[basic-memory](https://github.com/basicmachines-co/basic-memory)** — markdown
   source-of-truth, YAML frontmatter `type`, `[[wikilink]]` graph, local-first.
 - **[obsidian-second-brain](https://github.com/eugeniughelbur/obsidian-second-brain)**,
@@ -72,7 +75,7 @@ index, atomic notes, or curation hygiene — all are prior art.
 |---|---|---|---|---|---|---|---|
 | **Engramory** | md files | loaded index → open file | ✅ | ✅ role-based (4) | ✅ contract (model-run) | ✅ 150/200 + hook | none |
 | CC auto-memory | md files | loaded index → open file | ✅ | ✅ same 4 types | partial (auto) | ~200-line window* | none (built-in) |
-| basic-memory | md + SQLite | semantic/FTS search | ✅ | ✅ freeform type | hygiene, not enforced | ❌ (no loaded index) | SQLite + embeddings |
+| basic-memory | md + SQLite | semantic/FTS search | ✅ | ✅ freeform type | schema + overwrite checks | ❌ (no loaded index) | SQLite + embeddings |
 | obsidian-second-brain | md vault | index-first + search | ✅ | folder-typed | ✅ reconcile/lint | partial | none |
 | mem0 / Zep | vector/graph DB | semantic | ❌ (DB) | typed (prefs/episodic/proc.; Zep custom) | auto-extract | n/a | DB + embeddings |
 
@@ -134,10 +137,10 @@ if the host supports skills, point `<MEMORY_ROOT>` at the host's memory dir, and
 wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
-pre-write *deny* hook: Claude Code has one, and Cursor, Cline (and, less maturely,
-Codex and Windsurf) now expose equivalent pre-write hooks too — so the cap is
-portable, but each host needs its own thin I/O shim and maturity varies. Where no
-such hook exists (or plain chat), the cap degrades to best-effort discipline (see
+pre-write *deny* hook: Claude Code, Cursor, Cline, Codex, and Windsurf all now
+expose equivalent pre-write hooks — so the cap is portable, though each host needs
+its own thin I/O shim and coverage varies by host and version. Where no such hook
+exists (or plain chat), the cap degrades to best-effort discipline (see
 [SKILL.md](SKILL.md) §9).
 
 A plain chat UI with no file access / no rules mechanism cannot run Engramory — it
@@ -167,14 +170,33 @@ machine.
 This discipline is **unenforced** (no hook scans memory content — see
 [SKILL.md](SKILL.md) §5/§8); treat it as best-effort and be deliberate.
 
+## Known limitations
+
+Engramory is a **single-project, single-writer, personal-scale** protocol. It does
+*not* yet have:
+
+- **Versioning / migration** — no `schema_version`; no defined upgrade path if the
+  frontmatter format changes.
+- **Provenance / trust** — no `source`, `confidence`, `last_verified`, expiry, or
+  `superseded-by` fields. Recalled memory is advisory and attacker-influenceable
+  (see [SKILL.md](SKILL.md) §4); there is no authentication of memory content.
+- **Scope / multi-project** — no `scope` / `project_id`; one flat slug namespace, so
+  a store shared across projects/agents would hit slug collisions and project bleed.
+  A store-level manifest (protocol version + scope + host config) is the planned
+  first step — not built yet.
+- **Concurrency** — single writer / serialized writes assumed (no locking).
+- **Scale** — the always-loaded flat index bounds the *active* set to what fits the
+  cap (~200 pointers). It is a personal / curated-scale tool, not a large corpus;
+  above that, a retrieval-based system (basic-memory, mem0) is the right tool.
+
 ## Prior art & credits
 Andrej Karpathy's **LLM Wiki / Knowledge Base** (the markdown-over-RAG pattern, the
 most prominent statement of this approach — note it targets a knowledge
 *encyclopedia*, where Engramory targets agent *working* memory: who the user is,
 how the agent should behave, project state) · Claude Code auto-memory · basic-memory ·
 obsidian-second-brain · claude-memory-compiler (itself Karpathy-inspired) · the
-Anthropic memory tool · OpenAI Codex topics-memory proposal (#19758) · the wider
-markdown-memory community.
+Anthropic memory tool · OpenAI Codex memory (and its earlier topics-memory proposal
+#19758) · the wider markdown-memory community.
 
 ## License
 MIT — see [LICENSE](LICENSE).

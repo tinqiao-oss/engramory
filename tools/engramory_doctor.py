@@ -10,28 +10,41 @@ STRUCTURE (ISSUE -> exit 1): an over-cap index, index pointers to files that no
 longer exist, pointers that escape the store root, orphan notes that nothing
 references, and duplicate note slugs (two files sharing a basename).
 
-PROTOCOL SCHEMA (ISSUE -> exit 1): each note must have YAML frontmatter with a
-non-empty `description` and a valid `type` (user|feedback|project|reference).
-Softer protocol hygiene is INFO (exit 0): `name` should equal the filename slug,
-`created`/`updated` should be YYYY-MM-DD, feedback/project notes should carry
-`Why:` + `How to apply:`, and a note reachable only via a `[[wikilink]]` (not in
-the index) is flagged because it won't load at session start. Broken `[[wikilinks]]`
-are INFO (forward-reference stubs are allowed by design).
+PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — each
+note must have well-formed frontmatter (no malformed lines, unclosed quotes, or a
+missing closing fence) carrying a non-empty `name`, `description`, a valid `type`
+(user|feedback|project|reference), and real-calendar `created` + `updated` dates;
+feedback/project notes must carry `Why:` + `How to apply:`. Soft hygiene is INFO
+(exit 0): a `name` not matching the filename slug (tolerating `-`/`_`/case), and a
+note reachable only via a `[[wikilink]]` (not in the index, so it won't load at
+session start). Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
 
-Note: this validates Engramory's frontmatter fields (name/description/type/
-created/updated). The parser is lenient about indentation, so fields nested under
-a host's `metadata:` block (e.g. Claude Code's) are still read; the name<->filename
-check ignores `-`/`_`/case so CC's `a-b` name vs `a_b.md` file isn't flagged.
+Note: indentation is ignored, so fields nested under a host's `metadata:` block
+(e.g. Claude Code's) are read; the name<->filename check ignores `-`/`_`/case so
+CC's `a-b` name vs `a_b.md` file isn't flagged. The frontmatter grammar is the
+restricted `key: value` form, not full YAML (so the tool keeps zero dependencies).
 
 Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Caps via
 ENGRAMORY_HARD / ENGRAMORY_HARD_BYTES.
 """
+import datetime
 import os
 import re
 import sys
 
 VALID_TYPES = {"user", "feedback", "project", "reference"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_date(s):
+    # YYYY-MM-DD format AND a real calendar date (so 2026-99-99 fails).
+    if not DATE_RE.match(s):
+        return False
+    try:
+        datetime.date(*(int(x) for x in s.split("-")))
+        return True
+    except ValueError:
+        return False
 
 
 def _envint(name, default):
@@ -68,22 +81,31 @@ def _read(p):
 
 
 def _frontmatter(text):
-    # Parse Engramory's flat `key: value` YAML frontmatter between leading `---`
-    # fences. Lenient: indentation is ignored (so a nested `metadata:` block's
-    # keys are still picked up). Returns a dict, or None if there is no frontmatter.
+    # Validate + parse Engramory's restricted `key: value` frontmatter between
+    # leading `---` fences. Indentation is ignored (so a nested `metadata:` block's
+    # keys are still read). Returns (fields, problems): `fields` is a dict, or None
+    # if there is no opening fence. `problems` lists a missing closing fence,
+    # malformed (non-`key: value`) lines, and unclosed quotes — so the caller can
+    # fail on malformed frontmatter instead of silently accepting it.
     if not text.startswith("---"):
-        return None
+        return None, []
     end = text.find("\n---", 3)
     if end == -1:
-        return None
-    fm = {}
-    for line in text[3:end].splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or ":" not in line:
+        return None, ["frontmatter opening '---' has no closing '---'"]
+    fm, problems = {}, []
+    for raw in text[3:end].splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            problems.append(f"malformed frontmatter line (not 'key: value'): {line!r}")
             continue
         k, v = line.split(":", 1)
-        fm[k.strip()] = v.strip().strip('"').strip("'")
-    return fm
+        v = v.strip()
+        if v[:1] in ("'", '"') and not (len(v) >= 2 and v[-1] == v[0]):
+            problems.append(f"unclosed quote in frontmatter value for '{k.strip()}'")
+        fm[k.strip()] = v.strip('"').strip("'")
+    return fm, problems
 
 
 def main(argv):
@@ -166,37 +188,38 @@ def main(argv):
             else:
                 info.append(f"[[{w}]] in {base} has no target file yet (ok if a forward-ref stub)")
 
-        # --- protocol schema ---
+        # --- protocol schema: the spec's MUST fields are ISSUE (exit 1); soft
+        # hygiene (name<->filename) is info. See SKILL.md §1/§2. ---
         slug = base[:-3]  # strip .md
-        fm = _frontmatter(text)
-        if fm is None:
-            issues.append(f"{base}: no YAML frontmatter (needs name/description/type)")
-        else:
-            if not fm.get("description"):
-                issues.append(f"{base}: frontmatter missing a 'description'")
+        fm, fm_problems = _frontmatter(text)
+        for prob in fm_problems:
+            issues.append(f"{base}: {prob}")
+        if fm is None and not fm_problems:
+            issues.append(f"{base}: no YAML frontmatter (needs name/description/type/created/updated)")
+        elif fm is not None:
+            for field in ("name", "description", "type"):
+                if not fm.get(field):
+                    issues.append(f"{base}: frontmatter missing required '{field}'")
             t = fm.get("type", "")
-            if not t:
-                issues.append(f"{base}: frontmatter missing 'type'")
-            elif t not in VALID_TYPES:
+            if t and t not in VALID_TYPES:
                 issues.append(f"{base}: invalid type '{t}' (must be one of {'|'.join(sorted(VALID_TYPES))})")
             name = fm.get("name", "")
-            if not name:
-                info.append(f"{base}: frontmatter missing 'name'")
-            elif name.replace("_", "-").lower() != slug.replace("_", "-").lower():
-                # tolerate the common host convention of '-' in names vs '_' in
-                # filenames (e.g. Claude Code) and case; only flag a real mismatch.
+            if name and name.replace("_", "-").lower() != slug.replace("_", "-").lower():
+                # tolerate the host convention of '-' in names vs '_' in filenames
+                # (e.g. Claude Code) and case; only flag a real mismatch (soft).
                 info.append(f"{base}: name '{name}' != filename slug '{slug}'")
             for dk in ("created", "updated"):
                 dv = fm.get(dk, "")
                 if not dv:
-                    info.append(f"{base}: missing '{dk}' date")
-                elif not DATE_RE.match(dv):
-                    info.append(f"{base}: '{dk}' is not YYYY-MM-DD ('{dv}')")
+                    issues.append(f"{base}: frontmatter missing required '{dk}'")
+                elif not _valid_date(dv):
+                    issues.append(f"{base}: '{dk}' is not a valid YYYY-MM-DD date ('{dv}')")
             if t in ("feedback", "project"):
-                if "Why:" not in text:
-                    info.append(f"{base}: type {t} should carry a 'Why:' line")
-                if "How to apply:" not in text:
-                    info.append(f"{base}: type {t} should carry a 'How to apply:' line")
+                stripped = text.replace("*", "")  # tolerate **Why:** / **Why**: bolding
+                if "Why:" not in stripped:
+                    issues.append(f"{base}: type {t} must carry a 'Why:' line")
+                if "How to apply:" not in stripped:
+                    issues.append(f"{base}: type {t} must carry a 'How to apply:' line")
 
     # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
     for base in sorted(notes):

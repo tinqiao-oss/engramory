@@ -206,11 +206,44 @@ def test_doctor_name_mismatch_is_info(tmp_path):
     assert rc == 0 and "filename slug" in out and "clean" in out
 
 
-def test_doctor_feedback_missing_whyhow_is_info(tmp_path):
-    _note(tmp_path / "fb.md", "fb", ntype="feedback", body="do the thing")  # no Why/How
+def test_doctor_feedback_missing_whyhow_is_issue(tmp_path):
+    _note(tmp_path / "fb.md", "fb", ntype="feedback", body="do the thing")  # no Why/How (MUST)
     (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
     rc, out = _run(DOCTOR, str(tmp_path))
-    assert rc == 0 and "Why:" in out and "clean" in out
+    assert rc == 1 and "Why:" in out
+
+
+def test_doctor_feedback_with_whyhow_clean(tmp_path):
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="do it\n\n**Why:** reason\n**How to apply:** step")  # bold variant tolerated
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_missing_dates_is_issue(tmp_path):
+    (tmp_path / "a-note.md").write_text("---\nname: a-note\ndescription: x\ntype: reference\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "missing required 'created'" in out
+
+
+def test_doctor_impossible_date_is_issue(tmp_path):
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: x\ntype: reference\ncreated: 2026-99-99\nupdated: 2026-01-01\n---\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "not a valid" in out and "2026-99-99" in out
+
+
+def test_doctor_unclosed_quote_is_issue(tmp_path):
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: \"oops no close\ntype: reference\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "unclosed quote" in out
 
 
 def test_doctor_name_hyphen_underscore_tolerated(tmp_path):

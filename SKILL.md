@@ -313,9 +313,9 @@ store and instruction mechanism your host already has. Full per-host setup is in
 hook; use the strongest rung the host supports:
 
 1. **Pre-write deny hook** — `hooks/engramory_index_guard.py` enforces the cap on
-   every edit (deterministic, always-on). Written for Claude Code; Cursor and Cline
-   (and, less maturely, Codex and Windsurf) expose equivalent pre-write deny hooks,
-   so the cap ports with a per-host I/O shim.
+   every matching edit (deterministic for those tools). Written for Claude Code;
+   Cursor, Cline, Codex, and Windsurf expose equivalent pre-write deny hooks
+   (coverage varies by host/version), so the cap ports with a per-host I/O shim.
 2. **Any host with a shell** (Hermes, Cursor, Cline, Codex, …) — after writing the
    index, run `python tools/engramory_check.py <MEMORY.md>` and compact if it
    prints `OVER`. Best-effort: the agent must remember to run it.
@@ -324,7 +324,7 @@ hook; use the strongest rung the host supports:
    to catch an over-cap index, broken index pointers, and orphan notes.
 
 Honest limit: a *deterministic* guarantee exists only where a real pre-write deny
-hook runs — today Claude Code, Cursor, Cline (Codex/Windsurf are newer/partial). If
-a host writes its memory internally (e.g. Letta) — not via a tool an agent step or
-hook can see — even the step-2 check can't intercept it; there the cap is pure
-discipline.
+hook runs (Claude Code, Cursor, Cline, Codex, Windsurf — coverage varies). If a host
+writes its memory internally (e.g. Letta, or Codex's managed local Memories) — not
+via a tool an agent step or hook can see — even the step-2 check can't intercept it;
+there the cap is pure discipline.
