@@ -212,6 +212,20 @@ def main(argv):
         else:
             issues.append(f"index points to a missing file: {tgt}")
 
+    # duplicate index pointers: the same note pointed to from more than one index line
+    # is redundant (INFO — a thematic index may cross-reference on purpose, so it does
+    # not fail). Count the raw (non-deduped) targets that resolved to a real note.
+    ptr_counts = {}
+    for tgt in re.findall(r"\]\(\s*<?([^)>\s#]+\.md)", itext):
+        if "://" in tgt:
+            continue
+        b = os.path.basename(tgt)
+        if b in indexed:
+            ptr_counts[b] = ptr_counts.get(b, 0) + 1
+    for b, n in sorted(ptr_counts.items()):
+        if n > 1:
+            info.append(f"index points to '{b}' {n} times (one pointer per note is the norm)")
+
     # one pass per note: wikilink graph + frontmatter/protocol validation.
     for base, p in sorted(notes.items()):
         if base == "MEMORY.md":
@@ -236,7 +250,7 @@ def main(argv):
         for prob in fm_problems:
             issues.append(f"{base}: {prob}")
         if fm is None and not fm_problems:
-            issues.append(f"{base}: no YAML frontmatter (needs name/description/type/created/updated)")
+            issues.append(f"{base}: no frontmatter block (needs name/description/type/created/updated)")
         elif fm is not None:
             for field in ("name", "description", "type"):
                 if not fm.get(field):

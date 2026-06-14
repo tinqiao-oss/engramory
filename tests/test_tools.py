@@ -402,6 +402,17 @@ def test_doctor_whyhow_in_frontmatter_does_not_count(tmp_path):
     assert rc == 1 and "Why:" in out and "How to apply:" in out
 
 
+# --- 0.1.11 duplicate index pointer ---
+
+def test_doctor_duplicate_index_pointer_is_info(tmp_path):
+    # two index lines pointing to the same note -> INFO (redundant), exit still 0.
+    _note(tmp_path / "a.md", "a")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — one\n- [A again](a.md) — two\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "2 times" in out and "clean" in out
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

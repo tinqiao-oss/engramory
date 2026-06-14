@@ -7,7 +7,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.1.10 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.1.11 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -15,7 +15,7 @@
 
 Engramory **不是一种新的记忆架构**。"markdown 文件 + 一个常驻上下文的小索引 + 模型自己维护"这套模式,如今已经是智能体记忆的主流形态,而且好几个地方都已经实现了。Engramory 站在这些前人肩上:
 
-- **Claude Code 原生 auto-memory** —— 同样的"markdown + `MEMORY.md` 索引 + 按需打开详情文件",连 `user | feedback | project | reference` 这套类型词都一样。Engramory 是它的**纪律加强版**。
+- **Claude Code 原生 auto-memory** —— 同样的"markdown + `MEMORY.md` 索引 + 按需打开详情文件";连 `user | feedback | project | reference` 这套类型词都一样(依据 [anthropics/claude-code#58840](https://github.com/anthropics/claude-code/issues/58840) 里的系统提示;**公开文档**只描述了索引 + 详情文件、并未公开这套类型本体)。Engramory 是它的**纪律加强版**。
 - **[basic-memory](https://github.com/basicmachines-co/basic-memory)** —— markdown 为真值源、YAML frontmatter 的 `type`、`[[wikilink]]` 图、本地优先。
 - **[obsidian-second-brain](https://github.com/eugeniughelbur/obsidian-second-brain)**、**[claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler)**(明确主张"个人规模下,加载一个结构化索引胜过向量检索"),以及一整个 markdown 记忆 skill 家族。
 

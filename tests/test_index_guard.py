@@ -299,6 +299,17 @@ def test_deny_names_dimension(tmp_path):
     assert rc == 0 and _decision(out) == "deny" and "lines >" in out["permissionDecisionReason"]
 
 
+# --- 0.1.11 compaction must not be blocked by the under-cap dimension ---
+
+def test_compact_lines_while_bytes_rise_is_allowed(tmp_path):
+    # 210 -> 205 lines (still over the LINE cap) while bytes RISE but stay under the
+    # byte cap: a real line-compaction. Only the over-cap dimension's growth blocks, so
+    # this must NOT deny (regression for the old 'either dimension grew => deny' bug).
+    idx = _write(tmp_path / "MEMORY.md", lines=210)            # 210 lines of 'L'
+    rc, out = _run(idx, _w(idx, "\n".join(["LL"] * 205)))      # 205 lines, more bytes, < 25 KB
+    assert rc == 0 and _decision(out) != "deny" and _nudges(out)
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

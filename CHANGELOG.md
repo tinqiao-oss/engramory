@@ -4,6 +4,37 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.11 — 2026-06-14
+
+A third-opinion audit (Codex) on 0.1.10. Findings verified on samples first; one
+suggestion (enforce fixed four-type index sections) was declined — a thematic index
+layout is a deliberately allowed shape, and enforcing sections would fail valid stores.
+
+Fixed
+- **The default install now produces compliant memories.** `rules-snippet.md` (the
+  always-loaded primary path) taught name/description/type but not `created`/`updated`
+  or Why/How, so an agent following only the default rules could write notes the doctor
+  then flags. The snippet now states the full write-contract (frontmatter dates + a
+  `Why:` / `How to apply:` line on feedback/project notes).
+- **The hook no longer blocks a real compaction.** It treated *either* dimension
+  growing as growth, so cutting line count while bytes ticked up (still under the byte
+  cap) was wrongly DENIED. It now denies only when the dimension that is over its OWN
+  cap grows — honouring the documented promise that shrinking/compaction edits pass.
+
+Added
+- **doctor flags duplicate index pointers** (the same note pointed to from more than
+  one line) as INFO — redundant but non-failing (a thematic index may cross-reference
+  on purpose).
+
+Changed (docs honesty)
+- **SKILL §1** stops calling the frontmatter "YAML": it's a restricted `key: value`
+  subset (no multi-line values / lists), parsed by a zero-dependency reader.
+- **README.zh-CN** the "Claude Code uses the same four types" claim now carries the
+  same qualifier as the English (per anthropics/claude-code#58840; the public docs
+  don't expose the type ontology).
+
++2 tests (73 total). Zero-dependency; no exit-code or judgment-logic change.
+
 ## 0.1.10 — 2026-06-14
 
 A second-opinion audit (Codex) on the 0.1.9 release. Every finding was reproduced on

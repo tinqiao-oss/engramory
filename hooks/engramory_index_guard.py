@@ -202,12 +202,18 @@ def main():
     # exactly at the cap is fine; only strictly over it loses recall.
     over_hard = p_lines > hard or p_bytes > hard_b
     over_warn = p_lines > warn or p_bytes > warn_b
-    grew = p_lines > cur_lines or p_bytes > cur_bytes
+    # Deny only when the edit pushes a dimension that is ALREADY over its own cap
+    # further past it. A genuine compaction that shrinks the over-cap dimension is
+    # allowed even if the other (under-cap) dimension ticks up — otherwise cutting line
+    # count while bytes rise a little would be wrongly blocked, breaking the documented
+    # promise that shrinking/compaction edits always pass.
+    worsens_cap = ((p_lines > hard and p_lines > cur_lines)
+                   or (p_bytes > hard_b and p_bytes > cur_bytes))
 
     size = f"{_plural(p_lines, 'line')} / {_kb(p_bytes)}"
     caps = f"{hard} lines / {_kb(hard_b)}"
 
-    if over_hard and grew:
+    if worsens_cap:
         which = _which(p_lines, p_bytes, hard, hard_b)
         _emit(
             "deny",

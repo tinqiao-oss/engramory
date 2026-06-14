@@ -58,7 +58,8 @@ Every memory is its own markdown file. One file holds exactly **one** durable
 fact or agreement. If you are tempted to put two unrelated things in a file,
 make two files.
 
-File frontmatter (YAML):
+File frontmatter (a restricted `key: value` subset — not full YAML; no multi-line
+values or lists, parsed by a zero-dependency reader):
 
 ```markdown
 ---
