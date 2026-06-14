@@ -42,6 +42,24 @@ def _kb(n):
     return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
 
 
+def _over(lines, nbytes, lcap, bcap):
+    # Name the dimension(s) that crossed a cap, so the reader knows whether to cut
+    # lines or bytes (the WARN/OVER text alone didn't say which tripped).
+    parts = []
+    if lines > lcap:
+        parts.append(f"{lines} lines > {lcap}")
+    if nbytes > bcap:
+        parts.append(f"{_kb(nbytes)} > {_kb(bcap)}")
+    return " and ".join(parts)
+
+
+def _first_step(bytes_over):
+    # Which compaction step pays off first given the breached dimension.
+    if bytes_over:
+        return "pointer-ify the longest index lines first (cuts bytes, and lines if you merge)"
+    return "merge/archive notes or collapse pointers to cut the line count"
+
+
 def main(argv):
     if len(argv) < 2:
         print("usage: engramory_check.py <path-to-index (MEMORY.md)>")
@@ -62,12 +80,13 @@ def main(argv):
     size = f"{lines} lines / {_kb(nbytes)}"
     caps = f"{hard} lines / {hard_b // 1024} KB"
     if lines > hard or nbytes > hard_b:
-        print(f"OVER: index is {size}, past the load window (cap {caps}). Compact now — "
-              f"pointer-ify over-long lines, merge duplicates, archive cold notes — before "
-              f"adding more, or the tail stops being recalled.")
+        print(f"OVER: index is {size} — over {_over(lines, nbytes, hard, hard_b)} "
+              f"(cap {caps}), past the load window. Compact now: {_first_step(nbytes > hard_b)} "
+              f"— before adding more, or the tail stops being recalled.")
         return 2
     if lines > warn or nbytes > warn_b:
-        print(f"WARN: index is {size} (cap {caps}). Getting long; plan a compaction pass soon.")
+        print(f"WARN: index is {size} — over {_over(lines, nbytes, warn, warn_b)} (cap {caps}). "
+              f"Getting long; plan a compaction pass soon ({_first_step(nbytes > warn_b)}).")
         return 1
     print(f"OK: index is {size} (cap {caps}).")
     return 0

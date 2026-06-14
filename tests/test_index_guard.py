@@ -279,6 +279,26 @@ def test_never_returns_allow_edit_and_multiedit(tmp_path):
         assert _decision(out) != "allow", f"emitted allow for {p}"
 
 
+# --- 0.1.9 nudges/deny name the breached dimension ---
+
+def test_warn_names_line_dimension(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=40)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 160)))  # 160 lines > 150 warn, bytes under
+    assert rc == 0 and _nudges(out) and "lines >" in out["additionalContext"]
+
+
+def test_warn_names_byte_dimension(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", nbytes=1000)
+    rc, out = _run(idx, _w(idx, "z" * 21000))  # ~21 KB > 20 KB warn, 1 line (under)
+    assert rc == 0 and _nudges(out) and "KB >" in out["additionalContext"]
+
+
+def test_deny_names_dimension(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=40)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 250)))  # grow over hard line cap
+    assert rc == 0 and _decision(out) == "deny" and "lines >" in out["permissionDecisionReason"]
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

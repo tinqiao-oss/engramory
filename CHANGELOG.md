@@ -4,6 +4,42 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.9 — 2026-06-14
+
+From a real first-adoption: migrating a 118-note Claude Code store to strict format
+surfaced false-positives and triage gaps — none of the strictness was wrong, the
+*reporting* was.
+
+Fixed
+- **doctor Why/How check accepts a full-width colon `：`** (CJK keyboards emit it)
+  and a line-start Markdown prefix (`#`/`>`/`*`), and is now line-anchored so an
+  incidental `Why:` in prose no longer counts. The full `How to apply:` label and an
+  explicit colon are still required — a bare `## How` or short `How:` stays an ISSUE
+  (the "to apply" cue is deliberate), but now prints a fix hint naming the variant.
+- **doctor tolerates a host type-prefix in the name↔filename check** (Claude Code's
+  `name: audit-methodology` vs file `feedback_audit_methodology.md`) — no more INFO
+  noise on host-native stores.
+
+Added
+- **doctor groups its issues** into a bucketed summary (`N missing-date,
+  N missing-why-how, N broken-pointer, …`) with a one-line manual fix per bucket, so
+  a big existing store reads as a triage list, not a flat wall.
+- **`Adopting an existing store` guide** (PORTING.md): `--no-schema` to triage
+  structure first, a copy-paste stdlib snippet to backfill missing `created:`/
+  `updated:` from mtime (dry-run, honestly captioned), then write Why/How by hand.
+
+Changed
+- **check / doctor / hook now name the breached dimension** (lines vs bytes) in the
+  WARN / over-cap / over-shrink messages — matching the DENY path, which already did
+  — plus a one-line "compact this dimension first" hint. (You could over-compress one
+  axis without realising the other tripped.)
+- **SKILL §2:** documents the canonical Why/How label form, and that a pure-status
+  snapshot is negative scope (fold in or demote to `reference`), not a `project` note
+  to force-fit with ceremonial Why/How.
+
+All changes are zero-dependency, with no exit-code or judgment-logic change. +11
+tests (67 total).
+
 ## 0.1.8 — 2026-06-14
 
 Added

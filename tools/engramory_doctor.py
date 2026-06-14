@@ -40,6 +40,20 @@ import sys
 
 VALID_TYPES = {"user", "feedback", "project", "reference"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Why / How-to-apply labels (feedback & project MUST carry them). Match a line whose
+# content — after an optional Markdown prefix (#, >, *, -, whitespace) and optional **
+# bolding — is the label followed by an ASCII ':' OR a full-width '：' (CJK keyboards
+# emit the latter; that was a false-positive). Anchored to the line start (re.M) so
+# incidental prose ("...the Why: is below") doesn't satisfy it, and the FULL
+# "How to apply" label is still required — a bare "How:" drops the deliberate
+# "what do I concretely do next" cue and stays an ISSUE. See SKILL.md §1/§2.
+_LABEL = r"^[ \t#>*\-]*\*{0,2}\s*"
+_WHY_RE = re.compile(_LABEL + r"Why\s*\*{0,2}\s*[:：]", re.I | re.M)
+_HOW_RE = re.compile(_LABEL + r"How\s+to\s+apply\s*\*{0,2}\s*[:：]", re.I | re.M)
+# Near-miss detectors: only to enrich the error message (guide the fix) when the
+# strict label above is absent — a 'Why'/'How' line that looks like a label attempt.
+_WHY_NEAR = re.compile(_LABEL + r"Why\b", re.I | re.M)
+_HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
 
 
 def _valid_date(s):
@@ -138,8 +152,13 @@ def main(argv):
     nbytes = len(iraw)
     nlines = _lines(itext)
     if nlines > hard or nbytes > hard_b:
-        issues.append(f"index over cap: {nlines} lines / {nbytes // 1024} KB "
-                      f"(cap {hard} / {hard_b // 1024} KB) — compact it")
+        over = []
+        if nlines > hard:
+            over.append(f"{nlines} lines > {hard}")
+        if nbytes > hard_b:
+            over.append(f"{nbytes // 1024} KB > {hard_b // 1024} KB")
+        issues.append(f"index over cap ({' and '.join(over)}): {nlines} lines / "
+                      f"{nbytes // 1024} KB (cap {hard} / {hard_b // 1024} KB) — compact it")
 
     # note files (by basename; a store uses unique slugs), excluding the top-level
     # templates/ & archive/ dirs only. Match on the FIRST path component, not a raw
@@ -215,10 +234,19 @@ def main(argv):
             if t and t not in VALID_TYPES:
                 issues.append(f"{base}: invalid type '{t}' (must be one of {'|'.join(sorted(VALID_TYPES))})")
             name = fm.get("name", "")
-            if name and name.replace("_", "-").lower() != slug.replace("_", "-").lower():
+            if name:
                 # tolerate the host convention of '-' in names vs '_' in filenames
-                # (e.g. Claude Code) and case; only flag a real mismatch (soft).
-                info.append(f"{base}: name '{name}' != filename slug '{slug}'")
+                # (e.g. Claude Code) and case; also tolerate a leading type-prefix the
+                # host adds to filenames (CC: name 'audit-methodology' vs file
+                # 'feedback_audit_methodology'). Only flag a real mismatch (soft).
+                nslug = slug.replace("_", "-").lower()
+                nname = name.replace("_", "-").lower()
+                for pre in ("feedback-", "project-", "reference-", "user-"):
+                    if nslug.startswith(pre) and not nname.startswith(pre):
+                        nslug = nslug[len(pre):]
+                        break
+                if nname != nslug:
+                    info.append(f"{base}: name '{name}' != filename slug '{slug}'")
             for dk in ("created", "updated"):
                 dv = fm.get(dk, "")
                 if not dv:
@@ -226,11 +254,16 @@ def main(argv):
                 elif not _valid_date(dv):
                     issues.append(f"{base}: '{dk}' is not a valid YYYY-MM-DD date ('{dv}')")
             if t in ("feedback", "project"):
-                stripped = text.replace("*", "")  # tolerate **Why:** / **Why**: bolding
-                if "Why:" not in stripped:
-                    issues.append(f"{base}: type {t} must carry a 'Why:' line")
-                if "How to apply:" not in stripped:
-                    issues.append(f"{base}: type {t} must carry a 'How to apply:' line")
+                if not _WHY_RE.search(text):
+                    msg = f"{base}: type {t} must carry a 'Why:' line"
+                    if _WHY_NEAR.search(text):
+                        msg += " (found a 'Why' label without the 'Why:' form — add a colon, e.g. **Why:**)"
+                    issues.append(msg)
+                if not _HOW_RE.search(text):
+                    msg = f"{base}: type {t} must carry a 'How to apply:' line"
+                    if _HOW_NEAR.search(text):
+                        msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
+                    issues.append(msg)
 
     # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
     for base in sorted(notes):
@@ -247,7 +280,44 @@ def main(argv):
     for i in sorted(set(info)):
         print(f"info:  {i}")
     if issues:
-        print(f"engramory-doctor: {len(issues)} issue(s).")
+        # Bucket the issues so an adopter triaging a big existing store sees the shape
+        # ("211 missing-date, 84 missing-why-how, 3 broken-pointer") instead of a flat
+        # wall, plus a one-line manual fix per non-empty bucket. Pure string tally —
+        # no new dependency, no change to what counts as an issue or the exit code.
+        buckets = {}
+        for s in issues:
+            if ("missing required 'created'" in s or "missing required 'updated'" in s
+                    or "not a valid YYYY-MM-DD" in s):
+                b = "missing-date"
+            elif "'Why:' line" in s or "'How to apply:' line" in s:
+                b = "missing-why-how"
+            elif "points to a missing file" in s or "escapes the store root" in s:
+                b = "broken-pointer"
+            elif "orphan note" in s:
+                b = "orphan"
+            elif "duplicate note slug" in s:
+                b = "duplicate-slug"
+            elif "index over cap" in s:
+                b = "over-cap"
+            else:
+                b = "other"
+            buckets[b] = buckets.get(b, 0) + 1
+        order = ["over-cap", "broken-pointer", "duplicate-slug", "orphan",
+                 "missing-date", "missing-why-how", "other"]
+        fixhints = {
+            "over-cap": "compact MEMORY.md — pointer-ify long lines, merge, archive cold notes",
+            "broken-pointer": "repair or remove the MEMORY.md pointer (needs a human)",
+            "duplicate-slug": "rename one of the clashing note files so each slug is unique",
+            "orphan": "link it from the index or another note, or move it under archive/",
+            "missing-date": "add 'created:'/'updated:' (YYYY-MM-DD) to each note's frontmatter",
+            "missing-why-how": "add a 'Why:' / 'How to apply:' line to the note (SKILL.md §2)",
+            "other": "see the ISSUE lines above",
+        }
+        summary = ", ".join(f"{buckets[b]} {b}" for b in order if b in buckets)
+        print(f"engramory-doctor: {len(issues)} issue(s) — {summary}")
+        for b in order:
+            if b in buckets:
+                print(f"  fix {b}: {fixhints[b]}")
         return 1
     tail = ("no broken pointers, orphans, or schema errors." if schema
             else "no broken pointers or orphans (schema checks skipped via --no-schema).")

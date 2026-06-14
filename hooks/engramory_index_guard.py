@@ -112,6 +112,17 @@ def _plural(n, word):
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
+def _which(p_lines, p_bytes, line_cap, byte_cap):
+    # Name the dimension(s) that crossed a cap, so a nudge says whether to cut lines
+    # or bytes. Caller only uses it when at least one is over, so it's never empty there.
+    parts = []
+    if p_lines > line_cap:
+        parts.append(f"{_plural(p_lines, 'line')} > {line_cap}")
+    if p_bytes > byte_cap:
+        parts.append(f"{_kb(p_bytes)} > {_kb(byte_cap)}")
+    return " and ".join(parts)
+
+
 def _apply_edits(current, edits):
     # Simulate the sub-edits sequentially, the way Claude Code applies them: each
     # on the result of the previous. Skip a sub-edit the real tool wouldn't apply
@@ -197,16 +208,12 @@ def main():
     caps = f"{hard} lines / {_kb(hard_b)}"
 
     if over_hard and grew:
-        which = []
-        if p_lines > hard:
-            which.append(f"{_plural(p_lines, 'line')} > {hard}")
-        if p_bytes > hard_b:
-            which.append(f"{_kb(p_bytes)} > {_kb(hard_b)}")
+        which = _which(p_lines, p_bytes, hard, hard_b)
         _emit(
             "deny",
             reason=(
                 f"Engramory: this edit would GROW the memory index to {size}, past the "
-                f"host's load window ({' and '.join(which)}; cap {caps}). Beyond it the "
+                f"host's load window ({which}; cap {caps}). Beyond it the "
                 f"tail of the index is silently truncated and those memories stop being "
                 f"recalled. Do NOT append. Run the compaction procedure (SKILL.md §6): "
                 f"(1) pointer-ify prose that leaked into index lines (biggest win when the "
@@ -221,16 +228,18 @@ def main():
     elif over_hard:
         _emit(
             context=(
-                f"Engramory: index will be {size}, still over the load window (cap {caps}), "
-                f"but this edit shrinks/keeps it so it's allowed. Keep compacting "
-                f"(pointer-ify / merge / archive) until it's at or under {caps}."
+                f"Engramory: index will be {size}, still over the load window "
+                f"({_which(p_lines, p_bytes, hard, hard_b)}; cap {caps}), but this edit "
+                f"shrinks/keeps it so it's allowed. Keep compacting (pointer-ify / merge / "
+                f"archive) until it's at or under {caps}."
             ),
         )
     elif over_warn:
         _emit(
             context=(
-                f"Engramory: index will be {size} (caps {caps}). Allowed, but tell the user "
-                f"the index is getting long and offer a compaction pass — pointer-ify "
+                f"Engramory: index will be {size} — over "
+                f"{_which(p_lines, p_bytes, warn, warn_b)} (caps {caps}). Allowed, but tell "
+                f"the user the index is getting long and offer a compaction pass — pointer-ify "
                 f"over-long index lines, merge duplicates, archive cold notes — before it "
                 f"hits the hard cap."
             ),

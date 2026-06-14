@@ -281,6 +281,81 @@ def test_doctor_no_schema_still_catches_structure(tmp_path):
     assert rc == 1 and "missing" in out
 
 
+# --- 0.1.9 Why/How label matching, name-prefix, triage ---
+
+def test_doctor_feedback_whyhow_fullwidth_colon_clean(tmp_path):
+    # CJK keyboards emit a full-width colon '：'; genuine Why/How content must pass
+    # (this was the real false-positive, not a spec deviation).
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="do it\n\n**Why**：原因\n**How to apply**：步骤")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_feedback_heading_with_colon_clean(tmp_path):
+    # a heading-style label WITH a colon is accepted (it has the explicit 'Why:'/'How to apply:').
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="## Why: reason\n\n## How to apply: step")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_feedback_heading_without_colon_is_issue_with_hint(tmp_path):
+    # '## Why' / '## How' with NO colon is a spec deviation -> ISSUE, plus a fix hint.
+    _note(tmp_path / "fb.md", "fb", ntype="feedback", body="## Why\nreason\n\n## How\nstep")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "Why:" in out and "add a colon" in out
+
+
+def test_doctor_feedback_short_how_label_is_issue(tmp_path):
+    # '**How:**' (= 'How:') is NOT the full 'How to apply:' label -> still ISSUE; the
+    # 'to apply' cue is deliberate. Why is fine here; only How fails.
+    _note(tmp_path / "fb.md", "fb", ntype="feedback", body="**Why:** reason\n**How:** step")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "How to apply:" in out
+
+
+def test_doctor_feedback_inline_prose_not_a_label_is_issue(tmp_path):
+    # The labels must be line-anchored; the same words mid-sentence in prose don't count
+    # (prevents an incidental 'Why:' / 'How to apply:' in running text from passing).
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="explaining the Why: it matters and How to apply: it, all in one prose line.")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "must carry a 'Why:' line" in out
+
+
+def test_doctor_name_type_prefix_tolerated(tmp_path):
+    # host writes a short name while the filename carries the type prefix
+    # (Claude Code: name 'audit-methodology' vs file 'feedback_audit_methodology.md') -> no info.
+    _note(tmp_path / "feedback_audit_methodology.md", "audit-methodology", ntype="feedback",
+          body="x\n\n**Why:** r\n**How to apply:** s")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](feedback_audit_methodology.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "filename slug" not in out and "clean" in out
+
+
+def test_doctor_oversize_names_dimension(tmp_path):
+    (tmp_path / "x.md").write_text("x", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("\n".join(["- [x](x.md) — h"] * 250), encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "over cap" in out and "lines >" in out  # names the breached dimension
+
+
+def test_doctor_issue_summary_buckets(tmp_path):
+    # a missing-date store -> bucketed summary + a one-line fix hint, not just a flat dump.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: x\ntype: reference\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "missing-date" in out and "fix missing-date:" in out
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

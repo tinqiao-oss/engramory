@@ -14,7 +14,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.8 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.9 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -176,7 +176,8 @@ Engramory is a **single-project, single-writer, personal-scale** protocol. It do
 *not* yet have:
 
 - **Versioning / migration** — no `schema_version`; no defined upgrade path if the
-  frontmatter format changes.
+  frontmatter format changes. (For onboarding a *pre-existing* store, PORTING.md's
+  "Adopting an existing store" has a triage recipe + a date-backfill snippet.)
 - **Provenance / trust** — no `source`, `confidence`, `last_verified`, expiry, or
   `superseded-by` fields. Recalled memory is advisory and attacker-influenceable
   (see [SKILL.md](SKILL.md) §4); there is no authentication of memory content.

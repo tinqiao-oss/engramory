@@ -80,6 +80,42 @@ and best-effort discipline everywhere else. This is why Engramory is 0.1 /
 experimental: set expectations accordingly and don't sell the cap as guaranteed on
 a host without a pre-write deny hook.
 
+## Adopting an existing store
+
+Pointing Engramory at a store that predates it (e.g. a host's auto-memory dir with
+dozens of notes) fails the strict `doctor` on day one — mostly mechanical gaps
+(`created:`/`updated:` absent, Why/How not yet in label form), not real rot. Don't
+hand-fix hundreds of issues blind — triage:
+
+1. **Structure first:** `engramory_doctor.py <root> --no-schema` and get the
+   structural problems (broken pointers, orphans, duplicate slugs) to zero by hand —
+   those genuinely need a human.
+2. **Backfill dates mechanically.** There is no migration *tool* (by design — `tools/`
+   are read-only validators), but a one-off stdlib snippet fills only the missing
+   `created:`/`updated:`. Run it on a copy / clean git, dry-run first, and note that
+   **mtime is the file's timestamp, not necessarily the fact's** real last-update:
+
+   ```python
+   import os, re, datetime, glob
+   for p in glob.glob("<root>/*.md"):
+       if os.path.basename(p) == "MEMORY.md":
+           continue
+       t = open(p, encoding="utf-8").read()
+       if not t.startswith("---"):
+           continue
+       end = t.find("\n---", 3)                 # end of the frontmatter block
+       fm = t[:end]
+       d = datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
+       add = "".join(f"\n{k}: {d}" for k in ("created", "updated")
+                     if not re.search(rf"(?m)^{k}:", fm))
+       if add:
+           print(p, "->", add.replace(chr(10), " "))   # dry-run: review first
+           # open(p, "w", encoding="utf-8").write(fm + add + t[end:])
+   ```
+3. **Re-run strict `doctor`** and work the bucketed summary it prints
+   (`N missing-why-how, …`). Write the Why/How lines **by hand** — that reflection is
+   the whole point of those types and isn't something a script should fabricate.
+
 ## Quick port checklist
 
 - [ ] `rules-snippet.md` pasted into the host's always-loaded instructions

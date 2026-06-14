@@ -115,11 +115,25 @@ facts go stale, and "last week" rots).
 
 > *Example:* "API gateway v2 migration shipped on 2026-01-15 (release 2.0)."
 
+A *pure-status snapshot* — only version numbers or a to-do list, with no decision
+or constraint behind it — usually isn't a `project` note at all: it is negative
+scope (§5: "don't store what git / the version tool already reports"). Fold it into
+the adjacent live `project` note, or demote it to a `reference` ("where to check
+current status", not the values). If a standalone `project` note is truly warranted,
+it has a real "why this state changes the next decision" to write — and that is its
+Why/How, not ceremony.
+
 ### `reference` — where something is
 A pointer to an external resource: a URL, dashboard, ticket, log path. It holds a
 location, not knowledge. One line on what it's for.
 
 > *Example:* "Runtime log lives at `~/.myapp/server.log`."
+
+**Label form.** Write `Why:` / `How to apply:` as a **line-start label** — `**Why:**`,
+a plain `Why:` line, or a `## Why:` heading all count, and a full-width colon `：`
+(CJK keyboards) is accepted. The validator looks for the *labelled line*, so the
+words buried in prose, a `## How` with no colon, or a short `How:` (missing "to
+apply") don't satisfy it — keep the full, colon-terminated label.
 
 **The confusable pair:** `feedback` is *how to work* (a method that applies across
 tasks); `project` is *what we're working on* (a fact about this specific effort).
