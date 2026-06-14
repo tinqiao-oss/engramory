@@ -14,7 +14,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.11 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.12 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -142,6 +142,12 @@ expose equivalent pre-write hooks — so the cap is portable, though each host n
 its own thin I/O shim and coverage varies by host and version. Where no such hook
 exists (or plain chat), the cap degrades to best-effort discipline (see
 [SKILL.md](SKILL.md) §9).
+
+First connecting a *pre-existing* store to the strict `doctor` surfaces a wall of
+mechanical issues (missing `created`/`updated`, Why/How not yet in canonical form) —
+don't blindly fix them. See PORTING.md's [Adopting an existing store](PORTING.md): run
+`--no-schema` for structure first, batch-backfill dates with the snippet, then
+hand-write Why/How.
 
 A plain chat UI with no file access / no rules mechanism cannot run Engramory — it
 needs a host that executes skills/rules and can read & write files.

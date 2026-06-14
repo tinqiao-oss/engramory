@@ -112,13 +112,15 @@ def _plural(n, word):
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def _which(p_lines, p_bytes, line_cap, byte_cap):
-    # Name the dimension(s) that crossed a cap, so a nudge says whether to cut lines
-    # or bytes. Caller only uses it when at least one is over, so it's never empty there.
+def _which(p_lines, p_bytes, line_cap, byte_cap, cur_lines=None, cur_bytes=None):
+    # Name the dimension(s) over their cap, so a nudge says whether to cut lines or
+    # bytes. When cur_* are given (the deny path), name only dimensions that ALSO grew —
+    # so a deny triggered by bytes doesn't tell the user to cut a line count that is
+    # actually shrinking. Caller uses it only when at least one applies, so never empty.
     parts = []
-    if p_lines > line_cap:
+    if p_lines > line_cap and (cur_lines is None or p_lines > cur_lines):
         parts.append(f"{_plural(p_lines, 'line')} > {line_cap}")
-    if p_bytes > byte_cap:
+    if p_bytes > byte_cap and (cur_bytes is None or p_bytes > cur_bytes):
         parts.append(f"{_kb(p_bytes)} > {_kb(byte_cap)}")
     return " and ".join(parts)
 
@@ -214,7 +216,7 @@ def main():
     caps = f"{hard} lines / {_kb(hard_b)}"
 
     if worsens_cap:
-        which = _which(p_lines, p_bytes, hard, hard_b)
+        which = _which(p_lines, p_bytes, hard, hard_b, cur_lines, cur_bytes)
         _emit(
             "deny",
             reason=(

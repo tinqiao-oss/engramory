@@ -40,9 +40,9 @@ set. Claude reads the `description` to decide when to load the skill.
 ## 3. The hard-cap hook (deterministic enforcement)
 
 The standing rules' 150/200 behavior is model-followed; the hook is the
-*deterministic backstop* the model cannot skip. It's written for Claude Code, but
-Cursor, Cline (and, less maturely, Codex / Windsurf) expose equivalent pre-write
-deny hooks you can adapt the I/O shim to.
+*deterministic backstop* the model cannot skip. It's written and tested for Claude
+Code only; Cursor, Cline, Codex, and Windsurf expose equivalent pre-write deny hooks
+you can adapt the I/O shim to (coverage varies by host and version — you verify it).
 
 1. Open your settings file (`%USERPROFILE%\.claude\settings.json` for all
    projects, or `.claude/settings.json` for one project).

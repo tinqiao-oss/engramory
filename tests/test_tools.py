@@ -413,6 +413,65 @@ def test_doctor_duplicate_index_pointer_is_info(tmp_path):
     assert rc == 0 and "2 times" in out and "clean" in out
 
 
+# --- 0.1.12 BOM / self-link / case-insensitive FS / .md.bak / _kb ---
+
+def test_doctor_bom_note_is_clean(tmp_path):
+    # a UTF-8-BOM'd but otherwise-valid note must not read as "no frontmatter".
+    (tmp_path / "a.md").write_bytes(
+        b"\xef\xbb\xbf---\nname: a\ndescription: x\ntype: reference\n"
+        b"created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_self_link_does_not_rescue_orphan(tmp_path):
+    # a note that only links to ITSELF and isn't in the index is still an orphan.
+    _note(tmp_path / "self.md", "self", body="see [[self]]")
+    (tmp_path / "MEMORY.md").write_text("# Index\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "orphan" in out
+
+
+def test_doctor_miscased_pointer_is_not_false_orphan(tmp_path):
+    # case-insensitive FS (Win/mac): a miscased pointer resolves to the real note -> clean;
+    # case-sensitive FS (Linux): missing file. NEVER a false "orphan" either way.
+    _note(tmp_path / "feedback_Git_Workflow.md", "feedback_Git_Workflow", ntype="feedback",
+          body="**Why:** r\n**How to apply:** s")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [G](feedback_git_workflow.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert "orphan note" not in out  # the clean summary says "...orphans", so match the ISSUE text
+
+
+def test_doctor_md_bak_pointer_not_truncated(tmp_path):
+    # `a.md.bak` is not a `.md` note pointer; it must not be truncated to `a.md` and
+    # wrongly credit a real a.md (which would then hide that a.md is unreferenced).
+    _note(tmp_path / "a.md", "a")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [bak](a.md.bak) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "orphan" in out  # a.md is genuinely unreferenced
+
+
+def test_doctor_uppercase_md_extension_is_validated(tmp_path):
+    # a `.MD` note must be discovered and schema-checked, not skipped (which would let it
+    # bypass type/date/Why-How validation).
+    (tmp_path / "bad.MD").write_text(
+        "---\nname: bad\ndescription: x\ntype: reference\ncreated: 9999-99-99\nupdated: 2026-01-01\n---\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [B](bad.MD) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "not a valid" in out
+
+
+def test_doctor_kb_render_not_zero_kb(tmp_path):
+    # a small index over the LINE cap must show real bytes ("N B"), not "0 KB".
+    (tmp_path / "x.md").write_text("x", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("\n".join(["x"] * 201), encoding="utf-8")  # 201 lines, <1 KB
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "lines / 0 KB" not in out and " B" in out  # index size shows "N B", not "0 KB"
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

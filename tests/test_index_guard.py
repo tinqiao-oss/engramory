@@ -310,6 +310,21 @@ def test_compact_lines_while_bytes_rise_is_allowed(tmp_path):
     assert rc == 0 and _decision(out) != "deny" and _nudges(out)
 
 
+# --- 0.1.12 deny reason names only the growing dimension ---
+
+def test_deny_reason_names_only_growing_dimension(tmp_path):
+    # both dims over cap, but lines SHRINK (210->205) while bytes GROW: deny is correct
+    # (bytes), and the reason must name only the byte dim — not tell the user to cut a
+    # line count that is actually shrinking.
+    idx = tmp_path / "MEMORY.md"
+    idx.write_bytes(("\n".join(["z" * 300] * 210)).encode("utf-8"))  # 210 lines, ~63 KB
+    new = "\n".join(["z" * 314] * 205)                               # 205 lines (shrank), ~64.5 KB (grew)
+    rc, out = _run(idx, _w(idx, new))
+    assert _decision(out) == "deny"
+    r = out["permissionDecisionReason"]
+    assert "KB >" in r and "lines > 200" not in r
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

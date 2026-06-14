@@ -54,6 +54,10 @@ _HOW_RE = re.compile(_LABEL + r"How\s+to\s+apply\s*\*{0,2}\s*[:：]", re.I | re.
 # strict label above is absent — a 'Why'/'How' line that looks like a label attempt.
 _WHY_NEAR = re.compile(_LABEL + r"Why\b", re.I | re.M)
 _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
+# Index pointer target `](path.md)`: lazy + a real terminator after `.md` so a backup
+# like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
+# a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
+_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)")
 
 
 def _valid_date(s):
@@ -84,6 +88,13 @@ def _lines(t):
     return 0 if not t else t.count("\n") + (0 if t.endswith("\n") else 1)
 
 
+def _kb(n):
+    # Human-readable bytes, matching engramory_check.py and the hook so all three tools
+    # render the same size string (doctor used to use integer `//1024`, showing a sub-1KB
+    # index as "0 KB" and an over-by-1-byte cap as a contradictory "25 KB > 25 KB").
+    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
+
+
 def _read_bytes(p):
     # Return raw bytes, or None if the file can't be read (permission / race /
     # deleted between walk and read) so callers degrade to a reported issue
@@ -97,7 +108,10 @@ def _read_bytes(p):
 
 def _read(p):
     raw = _read_bytes(p)
-    return None if raw is None else raw.decode("utf-8", "replace")
+    # utf-8-sig strips a leading BOM if present (a no-op otherwise) — a BOM'd but
+    # otherwise-valid note must not read as "no frontmatter". Windows editors / PowerShell
+    # write UTF-8-BOM by default, so adopter notes routinely carry one.
+    return None if raw is None else raw.decode("utf-8-sig", "replace")
 
 
 def _frontmatter(text):
@@ -150,7 +164,7 @@ def main(argv):
     if iraw is None:
         print(f"engramory-doctor: cannot read index at {idx_path}")
         return 1
-    itext = iraw.decode("utf-8", "replace")
+    itext = iraw.decode("utf-8-sig", "replace")  # strip a leading BOM if present
     hard = _envint("ENGRAMORY_HARD", 200)
     hard_b = _envint("ENGRAMORY_HARD_BYTES", 25600)
     issues, info = [], []
@@ -164,9 +178,9 @@ def main(argv):
         if nlines > hard:
             over.append(f"{nlines} lines > {hard}")
         if nbytes > hard_b:
-            over.append(f"{nbytes // 1024} KB > {hard_b // 1024} KB")
+            over.append(f"{_kb(nbytes)} > {_kb(hard_b)}")
         issues.append(f"index over cap ({' and '.join(over)}): {nlines} lines / "
-                      f"{nbytes // 1024} KB (cap {hard} / {hard_b // 1024} KB) — compact it")
+                      f"{_kb(nbytes)} (cap {hard} lines / {_kb(hard_b)}) — compact it")
 
     # note files (by basename; a store uses unique slugs), excluding the top-level
     # templates/ & archive/ dirs only. Match on the FIRST path component, not a raw
@@ -179,7 +193,7 @@ def main(argv):
         if parts and parts[0] in ("templates", "archive"):
             continue
         for f in fs:
-            if f.endswith(".md"):
+            if f.lower().endswith(".md"):  # tolerate .MD/.Md so they aren't skipped (and bypass schema) on case-insensitive FS
                 if f in notes:
                     # Same slug in two dirs: the basename-keyed model can only hold
                     # one, so the other would be invisible to these checks. Surface
@@ -198,15 +212,18 @@ def main(argv):
     # and titled `(note.md "Title")` links resolve), skip external URLs ending in
     # .md, and resolve the path itself — a bare basename match is too loose (it would
     # green-light `wrong/path/a.md` whenever some `a.md` exists elsewhere in the store).
-    for tgt in sorted(set(re.findall(r"\]\(\s*<?([^)>\s#]+\.md)", itext))):
+    for tgt in sorted(set(_PTR_RE.findall(itext))):
         if "://" in tgt:
             continue  # external URL, not a local note pointer
-        full = os.path.realpath(os.path.join(root, tgt))
+        full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
         if full != root_abs and not full.startswith(root_abs + os.sep):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
         if os.path.isfile(full):
-            base = os.path.basename(tgt)  # the slug this pointer resolves to
+            # the resolved real name — realpath canonicalises case on case-insensitive
+            # filesystems, so this matches the notes-dict key (from os.walk) instead of
+            # the pointer's possibly-miscased text, avoiding a false 'orphan'.
+            base = os.path.basename(full)
             referenced.add(base)
             indexed.add(base)
         else:
@@ -216,10 +233,10 @@ def main(argv):
     # is redundant (INFO — a thematic index may cross-reference on purpose, so it does
     # not fail). Count the raw (non-deduped) targets that resolved to a real note.
     ptr_counts = {}
-    for tgt in re.findall(r"\]\(\s*<?([^)>\s#]+\.md)", itext):
+    for tgt in _PTR_RE.findall(itext):
         if "://" in tgt:
             continue
-        b = os.path.basename(tgt)
+        b = os.path.basename(os.path.realpath(os.path.join(root, tgt.replace("\\", "/"))))
         if b in indexed:
             ptr_counts[b] = ptr_counts.get(b, 0) + 1
     for b, n in sorted(ptr_counts.items()):
@@ -236,6 +253,8 @@ def main(argv):
             continue
         for w in re.findall(r"\[\[([^\]]+)\]\]", text):
             cand = os.path.basename(w if w.endswith(".md") else w + ".md")
+            if cand == base:
+                continue  # a note linking to itself isn't "referenced by another note"
             if cand in notes:
                 referenced.add(cand)
             else:
@@ -348,7 +367,7 @@ def main(argv):
         return 1
     tail = ("no broken pointers, orphans, or schema errors." if schema
             else "no broken pointers or orphans (schema checks skipped via --no-schema).")
-    print(f"engramory-doctor: clean — index {nlines} lines / {nbytes // 1024} KB, "
+    print(f"engramory-doctor: clean — index {nlines} lines / {_kb(nbytes)}, "
           f"{len(notes) - 1} note(s), {tail}")
     return 0
 

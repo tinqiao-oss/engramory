@@ -4,6 +4,52 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.12 — 2026-06-14
+
+A self-directed multi-agent deep audit (then adversarially verified, each finding
+reproduced on a real sample). ~21 raw findings deduped to ~8 distinct, cross-platform
+robustness ones; two suggestions were declined as over-engineering (see end).
+
+Fixed (doctor)
+- **UTF-8 BOM** no longer makes a valid note read as "no frontmatter block" — notes
+  decode with `utf-8-sig` (Windows editors / PowerShell write a BOM by default).
+- **No more false "orphan" on case-insensitive filesystems (Windows/macOS).** A
+  pointer whose case differs from the file (`feedback_git_workflow.md` → file
+  `feedback_Git_Workflow.md`) resolved via `os.path.isfile` but was keyed by the
+  pointer's text, so the real note was reported as an orphan (exit 1). The graph now
+  keys on the realpath-resolved name (which canonicalises case), matching the file.
+- **A self-link no longer rescues a real orphan.** A note that only contains
+  `[[itself]]` and isn't in the index is once again flagged (the wikilink graph
+  excludes self-references).
+- **`.MD` / `.Md` extensions are discovered and schema-checked** (was case-sensitive
+  `.md`, so an uppercase-extension note silently bypassed type/date/Why-How validation
+  while its pointer still resolved on a case-insensitive FS).
+- **Pointer regex tightened:** `note.md.bak` / `note.md.tmp` are no longer truncated
+  to `note.md` (false credit + misleading "missing file" text); control characters
+  (incl. NUL) are excluded so a malformed pointer can't reach `realpath` and throw;
+  backslash pointers are normalised so they resolve the same on Windows and Linux.
+- **Byte sizes render via the shared `_kb()`** like check/hook — a sub-1 KB index
+  shows "N B" not "0 KB", and an over-by-1-byte cap no longer prints "25 KB > 25 KB".
+
+Fixed (hook)
+- **The deny reason names only the dimension that actually grew.** Compacting line
+  count while bytes rise (both over cap) no longer tells you to cut a line count that
+  is shrinking.
+
+Changed (docs)
+- **README.md** mirrors the zh-CN "adopting an existing store" pointer in the install
+  section (CONTRIBUTING asks both READMEs stay in sync).
+- **INSTALL.md / README.zh-CN** align the Codex/Windsurf hook-maturity wording to the
+  flat "coverage varies, only Claude Code is tested" phrasing already in the EN README.
+
+Declined (out of scope for a single-writer, personal-scale, zero-dependency tool)
+- O(n²) regex time on an *unbounded, malicious* note body (you'd have to put a 100 KB
+  unclosed-bracket file in your own store; atomic groups aren't available pre-3.11).
+- Why/How written *inside a code fence* counting as reflection (contrived; a Markdown
+  code-block stripper adds more risk than the non-scenario removes).
+
++7 tests (80 total). Zero-dependency; no exit-code or judgment-logic change.
+
 ## 0.1.11 — 2026-06-14
 
 A third-opinion audit (Codex) on 0.1.10. Findings verified on samples first; one
