@@ -4,6 +4,37 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.10 — 2026-06-14
+
+A second-opinion audit (Codex) on the 0.1.9 release. Every finding was reproduced on
+a real sample first; the fixes are correctness + doc-honesty, with no widening of what
+the validator accepts.
+
+Fixed
+- **doctor scans only the note BODY for `Why:` / `How to apply:`** — a label sitting
+  in the frontmatter no longer satisfies the reflection requirement.
+- **doctor requires an exact `---` fence line** — `----` / `---x` is no longer
+  mistaken for a frontmatter fence (a Markdown horizontal rule can't silently close
+  it); CRLF endings are tolerated.
+- **doctor escape check uses `realpath`** — a symlinked index pointer can no longer
+  resolve outside the store root while passing the check.
+- **check.py docstring** said WARN fires at `>= soft`; the code fires at `> soft`.
+  Corrected.
+
+Changed (docs honesty)
+- **Cross-host cap claims tightened** (PORTING / SKILL §9): the deterministic cap is
+  shipped and *tested only on Claude Code*; other hosts expose the hook API so it is
+  portable, but you write and verify that shim yourself — not "already works on
+  Cursor / Cline".
+- **README.zh-CN synced to the English:** the differentiator no longer implies
+  procedural memory is novel (it is prior art — the contribution is the bundle +
+  discipline); the comparison table's basic-memory / mem0 cells match the English;
+  and the missing **Known limitations** section was added.
+- **INSTALL.md** no longer says memories "hold secrets" — they hold machine-local
+  *locators*; a secret's *value* never belongs in memory (SKILL §5).
+
++4 tests (71 total). Zero-dependency; no exit-code or judgment-logic change.
+
 ## 0.1.9 — 2026-06-14
 
 From a real first-adoption: migrating a 118-note Claude Code store to strict format

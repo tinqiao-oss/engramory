@@ -8,7 +8,7 @@ the agent should run THIS after writing the index, and compact if it says OVER:
 
     python tools/engramory_check.py <path-to-MEMORY.md>
 
-Exit code: 0 = OK (within caps), 1 = WARN (>= soft), 2 = OVER (> hard). Error codes
+Exit code: 0 = OK (within caps), 1 = WARN (> soft), 2 = OVER (> hard). Error codes
 (distinct from the 0/1/2 result contract, so an automated caller can tell "could
 not check" from "index is fine"): 64 = usage error (no path given), 66 = the index
 path could not be read. Prints a one-line verdict + advice. Caps via the same env

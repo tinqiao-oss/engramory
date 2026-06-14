@@ -103,17 +103,25 @@ def _read(p):
 def _frontmatter(text):
     # Validate + parse Engramory's restricted `key: value` frontmatter between
     # leading `---` fences. Indentation is ignored (so a nested `metadata:` block's
-    # keys are still read). Returns (fields, problems): `fields` is a dict, or None
-    # if there is no opening fence. `problems` lists a missing closing fence,
-    # malformed (non-`key: value`) lines, and unclosed quotes — so the caller can
-    # fail on malformed frontmatter instead of silently accepting it.
-    if not text.startswith("---"):
-        return None, []
-    end = text.find("\n---", 3)
-    if end == -1:
-        return None, ["frontmatter opening '---' has no closing '---'"]
+    # keys are still read). Returns (fields, problems, body): `fields` is a dict, or
+    # None if there is no opening fence; `body` is the text AFTER the closing fence
+    # (or the whole text when there's no frontmatter) so body-only checks can't be
+    # satisfied by a frontmatter line. Each fence line must be EXACTLY `---` (trailing
+    # whitespace allowed) — `----` or `---x` is not a fence, so a Markdown horizontal
+    # rule isn't mistaken for one. `problems` lists a missing closing fence, malformed
+    # (non-`key: value`) lines, and unclosed quotes — so the caller can fail on
+    # malformed frontmatter instead of silently accepting it.
+    nl = text.find("\n")
+    head = text if nl == -1 else text[:nl]
+    if head.strip() != "---":
+        return None, [], text  # opening line isn't a bare '---'
+    if nl == -1:
+        return None, ["frontmatter opening '---' has no closing '---'"], text
+    m = re.compile(r"^---[ \t]*\r?$", re.M).search(text, nl + 1)  # tolerate CRLF
+    if m is None:
+        return None, ["frontmatter opening '---' has no closing '---'"], text
     fm, problems = {}, []
-    for raw in text[3:end].splitlines():
+    for raw in text[nl + 1:m.start()].splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -125,7 +133,7 @@ def _frontmatter(text):
         if v[:1] in ("'", '"') and not (len(v) >= 2 and v[-1] == v[0]):
             problems.append(f"unclosed quote in frontmatter value for '{k.strip()}'")
         fm[k.strip()] = v.strip('"').strip("'")
-    return fm, problems
+    return fm, problems, text[m.end():]
 
 
 def main(argv):
@@ -181,7 +189,10 @@ def main(argv):
                 notes[f] = os.path.join(dp, f)
 
     referenced, indexed = set(), set()
-    root_abs = os.path.abspath(root)
+    # realpath (not abspath) so a symlinked pointer can't resolve outside the store
+    # while still passing the escape check; the root is resolved the same way so a
+    # store reached via a symlink/junction stays consistent.
+    root_abs = os.path.realpath(root)
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
     # Match the link target up to whitespace / '#' / ')' (so anchored `(note.md#sec)`
     # and titled `(note.md "Title")` links resolve), skip external URLs ending in
@@ -190,7 +201,7 @@ def main(argv):
     for tgt in sorted(set(re.findall(r"\]\(\s*<?([^)>\s#]+\.md)", itext))):
         if "://" in tgt:
             continue  # external URL, not a local note pointer
-        full = os.path.abspath(os.path.join(root, tgt))
+        full = os.path.realpath(os.path.join(root, tgt))
         if full != root_abs and not full.startswith(root_abs + os.sep):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
@@ -221,7 +232,7 @@ def main(argv):
         # --- protocol schema: the spec's MUST fields are ISSUE (exit 1); soft
         # hygiene (name<->filename) is info. See SKILL.md §1/§2. ---
         slug = base[:-3]  # strip .md
-        fm, fm_problems = _frontmatter(text)
+        fm, fm_problems, body = _frontmatter(text)
         for prob in fm_problems:
             issues.append(f"{base}: {prob}")
         if fm is None and not fm_problems:
@@ -254,14 +265,16 @@ def main(argv):
                 elif not _valid_date(dv):
                     issues.append(f"{base}: '{dk}' is not a valid YYYY-MM-DD date ('{dv}')")
             if t in ("feedback", "project"):
-                if not _WHY_RE.search(text):
+                # scan the BODY only — a Why:/How to apply: line in the frontmatter
+                # doesn't count as the required reflection.
+                if not _WHY_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'Why:' line"
-                    if _WHY_NEAR.search(text):
+                    if _WHY_NEAR.search(body):
                         msg += " (found a 'Why' label without the 'Why:' form — add a colon, e.g. **Why:**)"
                     issues.append(msg)
-                if not _HOW_RE.search(text):
+                if not _HOW_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'How to apply:' line"
-                    if _HOW_NEAR.search(text):
+                    if _HOW_NEAR.search(body):
                         msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
                     issues.append(msg)
 

@@ -82,7 +82,8 @@ systems).
 
 Tell the agent where memory lives (or reuse the host's native memory directory).
 If it's inside a git repo, confirm it is `.gitignore`d — memories often hold
-machine-local detail and secrets.
+machine-local detail (server IPs, ssh paths, serial numbers). Never write a
+secret's *value* into memory at all (keys, tokens, passwords) — see SKILL.md §5.
 
 ## 5. Other agents (Cursor, Cline, Codex, Windsurf, …)
 

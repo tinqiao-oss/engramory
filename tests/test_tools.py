@@ -356,6 +356,52 @@ def test_doctor_issue_summary_buckets(tmp_path):
     assert rc == 1 and "missing-date" in out and "fix missing-date:" in out
 
 
+# --- 0.1.10 fence strictness + body-scoped Why/How ---
+
+def test_doctor_fourdash_fence_not_accepted(tmp_path):
+    # a closing '----' (or any non-bare '---') is NOT a fence -> frontmatter reads as
+    # unterminated and the note is flagged, not silently accepted as clean.
+    (tmp_path / "a.md").write_text(
+        "---\nname: a\ndescription: x\ntype: reference\ncreated: 2026-01-01\nupdated: 2026-01-01\n----\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "frontmatter" in out
+
+
+def test_doctor_fence_trailing_whitespace_ok(tmp_path):
+    # a fence line with trailing whitespace ('---  ' / '---\t') is still a valid fence.
+    (tmp_path / "fb.md").write_text(
+        "---  \nname: fb\ndescription: x\ntype: feedback\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\t\n"
+        "**Why:** r\n**How to apply:** s\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_crlf_frontmatter_ok(tmp_path):
+    # CRLF line endings (Windows) must not break fence detection — write explicit
+    # \r\n bytes so this holds on any platform, not just where the OS adds them.
+    (tmp_path / "fb.md").write_bytes(
+        b"---\r\nname: fb\r\ndescription: x\r\ntype: feedback\r\n"
+        b"created: 2026-01-01\r\nupdated: 2026-01-01\r\n---\r\n"
+        b"**Why:** r\r\n**How to apply:** s\r\n")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_whyhow_in_frontmatter_does_not_count(tmp_path):
+    # Why:/How to apply: lines in the FRONTMATTER must not satisfy the body reflection
+    # requirement (the body here has none) — the check scans the body only.
+    (tmp_path / "fb.md").write_text(
+        "---\nname: fb\ndescription: x\ntype: feedback\ncreated: 2026-01-01\nupdated: 2026-01-01\n"
+        "Why: in-fm\nHow to apply: in-fm\n---\nbody with no reflection\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "Why:" in out and "How to apply:" in out
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

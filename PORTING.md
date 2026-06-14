@@ -55,7 +55,9 @@ The cap stops the index growing past the host's load window. Strongest → softe
    can DENY one that would grow the index past the cap — deterministic. It's written
    for Claude Code's hook format, but Cursor, Cline, Codex, and Windsurf now expose
    equivalent pre-write deny hooks (coverage varies by host and version), so the cap
-   ports — rewrite the small JSON I/O shim per host. See `hooks/INSTALL.md`.
+   is *portable in principle* — but only the Claude Code hook here is written and
+   tested; for the others you write and verify the small JSON I/O shim yourself. See
+   `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
    Add that instruction to the rules. Hermes / Cursor / Cline / Codex all have
@@ -70,9 +72,12 @@ The cap stops the index growing past the host's load window. Strongest → softe
    checks and run structure-only (handy on a store that isn't in strict Engramory
    format yet, e.g. a host-native auto-memory store).
 
-**Honest limit.** A *deterministic* guarantee exists only where a real pre-write
-deny hook runs — today that is Claude Code, Cursor, and Cline (Codex and Windsurf
-are newer / partial), each needing its own I/O shim. If a host writes its memory
+**Honest limit.** A *deterministic* guarantee is shipped and tested only for the
+host whose adapter lives in this repo — today **Claude Code**
+(`hooks/engramory_index_guard.py`). The same pattern ports to other hosts that
+expose a pre-write deny hook (Cursor and Cline today; Codex and Windsurf newer /
+partial), but those shims are not written or verified here — portable in principle,
+build and verify your own. If a host writes its memory
 **internally** — not through a tool that an agent step or hook can see (e.g. Letta)
 — even the step-2 check can't intercept that write; there the cap is pure
 discipline. So the cap is deterministic on the handful of hosts with such a hook,
