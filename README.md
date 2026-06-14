@@ -12,7 +12,7 @@ read, edit, and diff in any editor (the live store itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.4 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.5 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > always-on; the discipline loads as standing rules the model follows, so it's
 > best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Don't
 > rely on it as a "mandatory, reliable" memory layer yet.

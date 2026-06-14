@@ -18,9 +18,10 @@ Softer protocol hygiene is INFO (exit 0): `name` should equal the filename slug,
 the index) is flagged because it won't load at session start. Broken `[[wikilinks]]`
 are INFO (forward-reference stubs are allowed by design).
 
-Note: this validates Engramory's documented FLAT frontmatter (name/description/
-type/created/updated). A store using a different host-native frontmatter shape
-will surface schema info/issues accordingly.
+Note: this validates Engramory's frontmatter fields (name/description/type/
+created/updated). The parser is lenient about indentation, so fields nested under
+a host's `metadata:` block (e.g. Claude Code's) are still read; the name<->filename
+check ignores `-`/`_`/case so CC's `a-b` name vs `a_b.md` file isn't flagged.
 
 Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Caps via
 ENGRAMORY_HARD / ENGRAMORY_HARD_BYTES.
@@ -181,7 +182,9 @@ def main(argv):
             name = fm.get("name", "")
             if not name:
                 info.append(f"{base}: frontmatter missing 'name'")
-            elif name != slug:
+            elif name.replace("_", "-").lower() != slug.replace("_", "-").lower():
+                # tolerate the common host convention of '-' in names vs '_' in
+                # filenames (e.g. Claude Code) and case; only flag a real mismatch.
                 info.append(f"{base}: name '{name}' != filename slug '{slug}'")
             for dk in ("created", "updated"):
                 dv = fm.get(dk, "")

@@ -3,6 +3,14 @@
 All notable changes to Engramory. Versions are git tags. This is an experimental
 0.x project — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.5 — 2026-06-14
+
+Fixed
+- **doctor:** the note `name`-vs-filename check now ignores `-`/`_`/case, so a store
+  written by the host (e.g. Claude Code uses `a-b` names with `a_b.md` filenames) is
+  no longer flagged with spurious name-mismatch info; nested frontmatter (a
+  `metadata:` block) is still read. +1 test (50 total).
+
 ## 0.1.4 — 2026-06-14
 
 Positioning & protocol-rigor pass (third external Codex round). Repo history was

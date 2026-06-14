@@ -213,6 +213,14 @@ def test_doctor_feedback_missing_whyhow_is_info(tmp_path):
     assert rc == 0 and "Why:" in out and "clean" in out
 
 
+def test_doctor_name_hyphen_underscore_tolerated(tmp_path):
+    # host convention: '-' in name, '_' in filename (e.g. Claude Code) -> not flagged
+    _note(tmp_path / "a_b_c.md", "a-b-c")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [X](a_b_c.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "filename slug" not in out and "clean" in out
+
+
 def test_doctor_linked_but_not_in_index_is_info(tmp_path):
     # a.md is indexed and wikilinks b.md; b.md is NOT in the index -> info (won't load at start)
     _note(tmp_path / "a.md", "a", body="see [[b]]")
