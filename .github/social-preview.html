@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- Source for the GitHub social-preview card. Render at 1280x640:
+     chrome --headless=new --hide-scrollbars --force-device-scale-factor=1 \
+       --window-size=1280,640 --screenshot=social-preview.png social-preview.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", -apple-system, system-ui, Roboto, Helvetica, Arial, sans-serif;
+    color: #e6edf6;
+    background:
+      radial-gradient(900px 520px at 82% 16%, rgba(88,128,255,0.22), transparent 60%),
+      radial-gradient(700px 480px at 12% 96%, rgba(60,210,180,0.14), transparent 60%),
+      linear-gradient(135deg, #0a0e1a 0%, #0e1426 55%, #121a30 100%);
+    position: relative;
+  }
+  /* faint engram / [[wikilink]] node-graph, bottom-right */
+  .graph { position: absolute; right: 0; top: 0; width: 100%; height: 100%; opacity: 0.5; }
+  .frame { position: absolute; inset: 0; padding: 74px 88px; display: flex; flex-direction: column; }
+  .kicker {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 21px; letter-spacing: 2px; text-transform: uppercase;
+    color: #8aa0c6;
+  }
+  .kicker b { color: #7fb0ff; font-weight: 600; }
+  .title {
+    margin-top: 26px; font-size: 132px; font-weight: 800; letter-spacing: -3px; line-height: 1;
+    background: linear-gradient(92deg, #ffffff 0%, #bcd2ff 52%, #7fe0c8 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .tagline { margin-top: 26px; font-size: 39px; font-weight: 600; color: #d6e2f4; max-width: 880px; line-height: 1.25; }
+  .mono { margin-top: 20px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+          font-size: 24px; color: #93e8cf; }
+  .mono span { color: #5f7596; }
+  .chips { margin-top: auto; display: flex; gap: 16px; }
+  .chip {
+    font-size: 23px; font-weight: 600; color: #cfe0f6;
+    padding: 13px 24px; border: 1px solid rgba(140,170,230,0.34);
+    border-radius: 999px; background: rgba(120,150,220,0.10);
+  }
+  .footer { margin-top: 30px; display: flex; align-items: center; justify-content: space-between;
+            font-family: ui-monospace, Consolas, monospace; font-size: 23px; color: #8aa0c6; }
+  .footer .lic { color: #c9d6ea; border: 1px solid rgba(140,170,230,0.34); border-radius: 8px; padding: 4px 14px; }
+</style>
+</head>
+<body>
+  <svg class="graph" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g stroke="#5f8bff" stroke-width="1.4" opacity="0.55">
+      <line x1="1050" y1="120" x2="1170" y2="210"/>
+      <line x1="1170" y1="210" x2="1090" y2="330"/>
+      <line x1="1050" y1="120" x2="940"  y2="250"/>
+      <line x1="940"  y1="250" x2="1090" y2="330"/>
+      <line x1="1090" y1="330" x2="1180" y2="440"/>
+      <line x1="940"  y1="250" x2="1010" y2="470"/>
+    </g>
+    <g fill="#9cc0ff">
+      <circle cx="1050" cy="120" r="9"/>
+      <circle cx="1170" cy="210" r="7"/>
+      <circle cx="940"  cy="250" r="7"/>
+      <circle cx="1090" cy="330" r="11" fill="#7fe0c8"/>
+      <circle cx="1180" cy="440" r="6"/>
+      <circle cx="1010" cy="470" r="6"/>
+    </g>
+  </svg>
+  <div class="frame">
+    <div class="kicker">memory protocol &nbsp;·&nbsp; <b>zero-dependency</b> &nbsp;·&nbsp; markdown</div>
+    <div class="title">Engramory</div>
+    <div class="tagline">A portable memory protocol for AI agents — load it as standing rules.</div>
+    <div class="mono">one file = one fact &nbsp;<span>·&nbsp; user | feedback | project | reference</span></div>
+    <div class="chips">
+      <div class="chip">curation discipline</div>
+      <div class="chip">reference spec</div>
+      <div class="chip">doctor validator</div>
+      <div class="chip">cap hook</div>
+    </div>
+    <div class="footer">
+      <div>github.com/tinqiao-oss/engramory</div>
+      <div class="lic">MIT</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/tinqiao-oss/engramory/security/advisories/new
+    about: Report privately via a GitHub Security Advisory — do not open a public issue.
+  - name: Question or idea
+    url: https://github.com/tinqiao-oss/engramory/blob/master/CONTRIBUTING.md
+    about: How to propose changes — keep them focused and tested.

@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in the hook, the tools, or the doctor isn't behaving as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For **security-sensitive** issues do NOT file here —
+        see [SECURITY.md](https://github.com/tinqiao-oss/engramory/blob/master/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected vs. what you got. Paste the exact command and its output.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - hook (engramory_index_guard.py)
+        - tool — engramory_doctor.py
+        - tool — engramory_check.py
+        - docs / templates
+        - other
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host / agent
+      description: e.g. Claude Code, Cursor, Cline, Codex, Windsurf, or a plain script.
+      placeholder: Claude Code 2.x
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: Windows 11 / macOS 14 / Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "3.12.3"
+    validations:
+      required: true
+  - type: textarea
+    id: hook_payload
+    attributes:
+      label: For a HOOK bug — the tool_input payload + index state
+      description: >
+        The `tool_input` JSON the hook received, plus the index it was gating
+        (line count / bytes of MEMORY.md). This is what makes a hook gating bug reproducible.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal repro
+      description: The smallest steps / files that trigger it.
+    validations:
+      required: false

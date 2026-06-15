@@ -75,7 +75,7 @@ file that isn't the index, and only acts when the target's filename is the index
 > grows the unrelated `MEMORY.md` past the cap is denied (the deny message also
 > reminds you of this opt-out).
 
-Requires **Python 3.8+** (the hook and tools use f-strings; `python3` on most
+Requires **Python 3.9+** (the hook and tools use f-strings; `python3` on most
 systems).
 
 ## 4. Point `<MEMORY_ROOT>` at your memory directory

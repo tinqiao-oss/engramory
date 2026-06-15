@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml/badge.svg)](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 
 **An opinionated, zero-infrastructure memory *protocol* for small-scale, local,
 file-based agent memory** — a strict curation discipline plus a validator
@@ -122,7 +122,7 @@ ships structured memory, Engramory is a thin discipline layer on top — and say
 
 ## Install
 
-> Requires **Python 3.8+** for the hook and the `tools/` scripts (`python3` on
+> Requires **Python 3.9+** for the hook and the `tools/` scripts (`python3` on
 > most systems).
 
 ### Claude Code

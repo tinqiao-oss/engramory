@@ -14,7 +14,7 @@ focused and well-tested.
 
 ## Running the tests
 
-Requires **Python 3.8+**. From the repo root:
+Requires **Python 3.9+**. From the repo root:
 
 ```sh
 python tests/test_index_guard.py   # the hook

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml/badge.svg)](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 
 **一套有主见、零基础设施的、面向小规模 / 本地 / 文件式智能体记忆的*协议*** —— 一套**强约束的策展纪律 + 一个校验器**(`tools/engramory_doctor.py`),以**常驻规则形式加载**(`CLAUDE.md` / `AGENTS.md` / 宿主的规则文件)。它不是数据库、不是框架、也不是按相关性加载的 skill。记忆就是一个文件夹:一堆小小的、人能直接读的 markdown 文件,加一个每次会话都加载的索引。没有数据库、没有向量、没有服务器——就是你能打开、能读、能改、能 diff 的纯文本文件(真实记忆库本身保持 git-ignore)。
 
@@ -58,7 +58,7 @@ Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据
 
 ## 安装
 
-> 需要 **Python 3.8+**(hook 与 `tools/` 脚本用了 f-string;多数系统上是 `python3`)。
+> 需要 **Python 3.9+**(hook 与 `tools/` 脚本用了 f-string;多数系统上是 `python3`)。
 
 ### Claude Code
 1. **把纪律作为常驻规则加载(主路径)**:把 [`rules-snippet.md`](rules-snippet.md) 贴进常驻规则——`~/.claude/CLAUDE.md`(所有项目)或项目 `CLAUDE.md`——让协议每个任务都生效,而不只是 skill 按相关性加载时才生效。
