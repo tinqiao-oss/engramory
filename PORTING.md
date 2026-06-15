@@ -94,7 +94,7 @@ build and verify your own. Hosts with no pre-write deny at all (e.g. Trae) get r
 **internally** — not through a tool that an agent step or hook can see (e.g. Letta)
 — even the step-2 check can't intercept that write; there the cap is pure
 discipline. So the cap is deterministic on the handful of hosts with such a hook,
-and best-effort discipline everywhere else. This is why Engramory is 0.1 /
+and best-effort discipline everywhere else. This is why Engramory is 0.x /
 experimental: set expectations accordingly and don't sell the cap as guaranteed on
 a host without a pre-write deny hook.
 

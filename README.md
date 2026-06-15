@@ -71,7 +71,9 @@ index, atomic notes, or curation hygiene — all are prior art.
    Claude Code reads the first 200 lines / 25 KB (documented behavior), so an unbounded index silently
    drops memories off the end. Engramory warns at 150 lines / 20 KB, compacts-or-asks
    before 200 / 25 KB, and ships a hard `PreToolUse` hook backstop (it blocks only
-   *growth* past the cap — shrinking/compaction edits always pass).
+   *growth* past the cap — shrinking/compaction edits always pass). Both the line and
+   byte caps apply — whichever is hit first triggers (an index can be under the line
+   count yet over on bytes when the lines run long).
 
 ## How it compares
 
@@ -168,7 +170,7 @@ OpenClaw is rules + `engramory_check.py`, **not** a deterministic deny hook (tha
 need a `before_tool_call` plugin) — see
 [adapters/openclaw/README.md](adapters/openclaw/README.md).
 
-### Any other agent (Hermes, Cursor, Cline, Codex, Windsurf, …)
+### Any other agent (Hermes, Cursor, Cline, Windsurf, …)
 Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's own
 memory store. Full wiring is in **[PORTING.md](PORTING.md)**; in short: paste
 [`rules-snippet.md`](rules-snippet.md) into the host's always-loaded rules (so the
@@ -177,12 +179,12 @@ if the host supports skills, point `<MEMORY_ROOT>` at the host's memory dir, and
 wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
-pre-write *deny* hook: Claude Code, Cursor, Cline, Codex, and Windsurf all now
-expose equivalent pre-write hooks — so the cap is portable, but only the Claude Code
-adapter is actually written and tested; for every other host you write and verify the
-thin I/O shim yourself, and coverage varies by host and version. Where no such hook
-exists (or plain chat), the cap degrades to best-effort discipline (see
-[SKILL.md](SKILL.md) §9).
+pre-write *deny* hook. Only Claude Code's is written and tested here; some other hosts
+expose one too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
+a per-host I/O shim you write and verify yourself — while OpenClaw can only block via a
+`before_tool_call` plugin and some hosts have none. See [PORTING.md](PORTING.md) for the
+per-host picture. Where no such hook exists (or plain chat), the cap degrades to
+best-effort discipline (see [SKILL.md](SKILL.md) §9).
 
 First connecting a *pre-existing* store to the strict `doctor` surfaces a wall of
 mechanical issues (missing `created`/`updated`, Why/How not yet in canonical form) —

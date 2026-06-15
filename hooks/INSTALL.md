@@ -41,8 +41,9 @@ set. Claude reads the `description` to decide when to load the skill.
 
 The standing rules' 150/200 behavior is model-followed; the hook is the
 *deterministic backstop* the model cannot skip. It's written and tested for Claude
-Code only; Cursor, Cline, Codex, and Windsurf expose equivalent pre-write deny hooks
-you can adapt the I/O shim to (coverage varies by host and version — you verify it).
+Code only. Some other hosts expose a pre-write deny you can adapt the shim to (Hermes;
+Cursor, though its is newer/flaky); OpenClaw blocks only via a `before_tool_call` plugin,
+and some hosts have none — see PORTING.md (coverage varies by host and version — you verify it).
 
 1. Open your settings file (`%USERPROFILE%\.claude\settings.json` for all
    projects, or `.claude/settings.json` for one project).
@@ -75,7 +76,7 @@ file that isn't the index, and only acts when the target's filename is the index
 > grows the unrelated `MEMORY.md` past the cap is denied (the deny message also
 > reminds you of this opt-out).
 
-Requires **Python 3.9+** (the hook and tools use f-strings; `python3` on most
+Requires **Python 3.9+** (for the hook and the `tools/` scripts; `python3` on most
 systems).
 
 ## 4. Point `<MEMORY_ROOT>` at your memory directory
@@ -85,7 +86,7 @@ If it's inside a git repo, confirm it is `.gitignore`d — memories often hold
 machine-local detail (server IPs, ssh paths, serial numbers). Never write a
 secret's *value* into memory at all (keys, tokens, passwords) — see SKILL.md §5.
 
-## 5. Other agents (Cursor, Cline, Codex, Windsurf, …)
+## 5. Other agents (Cursor, Cline, Codex, OpenClaw, Windsurf, …)
 
 Step 1 already covers them: paste [`rules-snippet.md`](../rules-snippet.md) (or the
 body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The

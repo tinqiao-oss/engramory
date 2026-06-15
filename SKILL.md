@@ -309,7 +309,7 @@ For behaviour you want truly always-on (e.g. "always check memory at the start o
 a task"), put a one-line pointer in your host's always-loaded rules — Claude Code:
 `CLAUDE.md` or `~/.claude/CLAUDE.md`. A ready snippet is in `rules-snippet.md`.
 
-This is why Engramory is **0.1 / experimental**: the hard cap is deterministic only
+This is why Engramory is **0.x / experimental**: the hard cap is deterministic only
 for the matched direct-edit tools (not a global write guard), and the discipline is
 only as reliable as your host loading the rules plus the model following them.
 
@@ -329,10 +329,12 @@ hook; use the strongest rung the host supports:
 
 1. **Pre-write deny hook** — `hooks/engramory_index_guard.py` enforces the cap on
    every matching edit (deterministic for those tools). Written and tested for Claude
-   Code only; Cursor, Cline, Codex, and Windsurf expose equivalent pre-write deny
-   hooks (coverage varies), so the cap is portable with a per-host I/O shim you write
-   and verify yourself.
-2. **Any host with a shell** (Hermes, Cursor, Cline, Codex, …) — after writing the
+   Code only. Some other hosts expose a pre-write deny too (Hermes; Cursor, though its
+   hook is newer and less proven), so the cap is portable with a per-host I/O shim you
+   write and verify yourself — but OpenClaw can only block via a `before_tool_call`
+   plugin (not this Python hook), and Trae has none. See **PORTING.md** for the
+   per-host picture.
+2. **Any host with a shell** (Hermes, Cursor, Cline, Codex, OpenClaw, …) — after writing the
    index, run `python tools/engramory_check.py <MEMORY.md>` and compact if it
    prints `OVER`. Best-effort: the agent must remember to run it.
 3. **Model discipline** — §6: count lines/bytes before writing the index.
