@@ -4,6 +4,38 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.1.13 — 2026-06-15
+
+Pre-public-release hardening (the repo goes public at this version). A multi-agent
+pre-publish audit — adversarially verified, every finding reproduced — turned up one
+red-CI blocker and two real robustness gaps. All fixed; no change to the protocol or
+to what the doctor/hook consider valid.
+
+Fixed (CI / tests)
+- **Green CI on Linux.** `test_doctor_miscased_pointer_is_not_false_orphan` baked in a
+  case-insensitive-filesystem assumption and failed on case-sensitive Linux — yet the
+  tool was *correct*: a miscased pointer to a path that doesn't exist there is a
+  genuine "missing file" + a genuine (not false) orphan. The test is now
+  filesystem-aware (probes case-folding, asserts "clean" on Win/mac and "missing file"
+  on Linux), so CI is green on every OS in the matrix.
+
+Fixed (tools)
+- **CLI tools no longer crash on a strict ascii / OEM console.** `engramory_doctor`
+  and `engramory_check` print an em-dash / `§` in their normal verdict text, which a
+  Windows cp437/cp850 console or a POSIX `C`/ascii locale cannot encode — it raised
+  `UnicodeEncodeError` instead of printing the report. Both now reconfigure stdout to
+  `backslashreplace`, so the report always prints. (The hook was never affected — it
+  emits ascii-safe JSON.)
+- **`-h` / `--help`** on both tools now prints usage and exits 0 (previously `--help`
+  ran a scan of `.` on the doctor, or read as an unreadable path on check).
+
+Changed (docs)
+- **README.md** install step now matches README.zh-CN word-for-word in intent: only
+  the Claude Code cap adapter is written and tested; on every other host you write and
+  verify the thin I/O shim yourself.
+
+Tests: +4 (84 total).
+
 ## 0.1.12 — 2026-06-14
 
 A self-directed multi-agent deep audit (then adversarially verified, each finding

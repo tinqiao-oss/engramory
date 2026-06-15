@@ -433,15 +433,34 @@ def test_doctor_self_link_does_not_rescue_orphan(tmp_path):
     assert rc == 1 and "orphan" in out
 
 
+def _fs_case_insensitive(dir_path):
+    # Probe the actual filesystem under dir_path: write one case, stat the other.
+    probe = dir_path / "_EngramoryCaseProbe.md"
+    probe.write_text("x", encoding="utf-8")
+    try:
+        return (dir_path / "_engramorycaseprobe.md").is_file()
+    finally:
+        probe.unlink()
+
+
 def test_doctor_miscased_pointer_is_not_false_orphan(tmp_path):
-    # case-insensitive FS (Win/mac): a miscased pointer resolves to the real note -> clean;
-    # case-sensitive FS (Linux): missing file. NEVER a false "orphan" either way.
+    # A miscased index pointer must never yield a *false* orphan. The correct outcome is
+    # filesystem-dependent (so the test must be too, or it fails the half of CI it doesn't
+    # match):
+    #   case-insensitive FS (Win/mac): the pointer resolves to the real note -> clean.
+    #   case-sensitive FS (Linux): the pointer is genuinely missing AND the real note is
+    #   genuinely unreferenced -> "missing file" + a *correct* orphan (not a false one).
     _note(tmp_path / "feedback_Git_Workflow.md", "feedback_Git_Workflow", ntype="feedback",
           body="**Why:** r\n**How to apply:** s")
     (tmp_path / "MEMORY.md").write_text(
         "# Index\n- [G](feedback_git_workflow.md) — h\n", encoding="utf-8")
-    rc, out = _run(DOCTOR, str(tmp_path))
-    assert "orphan note" not in out  # the clean summary says "...orphans", so match the ISSUE text
+    rc, out = _run(DOCTOR, str(tmp_path))  # run BEFORE the probe so it doesn't see the probe file
+    if _fs_case_insensitive(tmp_path):
+        assert rc == 0 and "orphan note" not in out and "missing file" not in out
+    else:
+        # the orphan is correct here, not a false positive: the index points at a
+        # different (lowercase) path that does not exist on a case-sensitive FS.
+        assert rc == 1 and "missing file" in out
 
 
 def test_doctor_md_bak_pointer_not_truncated(tmp_path):
@@ -470,6 +489,35 @@ def test_doctor_kb_render_not_zero_kb(tmp_path):
     (tmp_path / "MEMORY.md").write_text("\n".join(["x"] * 201), encoding="utf-8")  # 201 lines, <1 KB
     rc, out = _run(DOCTOR, str(tmp_path))
     assert rc == 1 and "lines / 0 KB" not in out and " B" in out  # index size shows "N B", not "0 KB"
+
+
+# --- 0.1.13 ascii/OEM-console crash-safety + --help ---
+
+def test_check_over_ascii_console_does_not_crash(tmp_path):
+    # A strict ascii / OEM stdout (Windows cp437, POSIX C locale) must NOT turn the
+    # em-dash in the OVER verdict into a UnicodeEncodeError crash; the verdict must print.
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text("\n".join(["L"] * 250), encoding="utf-8")
+    rc, out = _run(CHECK, str(idx), env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 2 and out.startswith("OVER")
+
+
+def test_doctor_clean_ascii_console_does_not_crash(tmp_path):
+    # Same crash-safety for the doctor's "clean - index ..." summary (also em-dashed).
+    _note(tmp_path / "a-note.md", "a-note")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path), env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 0 and "clean" in out
+
+
+def test_check_help_exits_zero(tmp_path):
+    rc, out = _run(CHECK, "--help")
+    assert rc == 0 and "engramory_check" in out
+
+
+def test_doctor_help_exits_zero(tmp_path):
+    rc, out = _run(DOCTOR, "--help")
+    assert rc == 0 and "engramory_doctor" in out
 
 
 # --- direct runner (no pytest) ---

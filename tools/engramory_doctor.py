@@ -151,7 +151,18 @@ def _frontmatter(text):
 
 
 def main(argv):
+    # Keep stdout from crashing on a strict OEM/ascii console (Windows cp437/cp850 or a
+    # POSIX C/ascii locale): the verdict text uses an em-dash / `§`, which those codepages
+    # can't encode and would otherwise raise UnicodeEncodeError instead of printing the
+    # report. backslashreplace keeps the encoding, only softening the rare unencodable char.
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):
+        pass
     args = argv[1:]
+    if "-h" in args or "--help" in args:
+        print((__doc__ or "").strip())
+        return 0
     schema = "--no-schema" not in args  # default: validate frontmatter too
     positional = [a for a in args if not a.startswith("-")]
     root = positional[0] if positional else "."

@@ -61,6 +61,16 @@ def _first_step(bytes_over):
 
 
 def main(argv):
+    # Keep stdout from crashing on a strict OEM/ascii console (Windows cp437/cp850 or a
+    # POSIX C/ascii locale): the verdict text uses an em-dash that those codepages can't
+    # encode and would otherwise raise UnicodeEncodeError instead of printing the verdict.
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):
+        pass
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print((__doc__ or "").strip())
+        return 0
     if len(argv) < 2:
         print("usage: engramory_check.py <path-to-index (MEMORY.md)>")
         return 64  # EX_USAGE — a misuse must not read as OK (exit 0) to a caller

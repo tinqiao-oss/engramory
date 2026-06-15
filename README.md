@@ -14,7 +14,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.12 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.1.13 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -144,8 +144,9 @@ wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
 pre-write *deny* hook: Claude Code, Cursor, Cline, Codex, and Windsurf all now
-expose equivalent pre-write hooks — so the cap is portable, though each host needs
-its own thin I/O shim and coverage varies by host and version. Where no such hook
+expose equivalent pre-write hooks — so the cap is portable, but only the Claude Code
+adapter is actually written and tested; for every other host you write and verify the
+thin I/O shim yourself, and coverage varies by host and version. Where no such hook
 exists (or plain chat), the cap degrades to best-effort discipline (see
 [SKILL.md](SKILL.md) §9).
 
