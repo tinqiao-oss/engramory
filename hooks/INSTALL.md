@@ -93,13 +93,15 @@ body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The
 the hook to the host's pre-write deny hook or run `tools/engramory_check.py` after
 each index write. Full per-host wiring is in [PORTING.md](../PORTING.md).
 
-For Codex specifically, prefer the init helper instead of manually pasting:
+For **Codex** and **OpenClaw**, prefer the init helper instead of manually pasting:
 
 ```sh
-python tools/engramory_init.py codex --project-root <repo> --install-skill
+python tools/engramory_init.py codex    --project-root <repo> --install-skill
+python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
 ```
 
-It creates the memory template, adds a marked block to `AGENTS.md`, optionally
+Each creates the memory template, adds a marked block to `AGENTS.md`, optionally
 copies the skill into `.agents/skills/engramory`, and keeps the Engramory store
-separate from Codex native Memories. See
-[adapters/codex/README.md](../adapters/codex/README.md).
+separate from the host's own memory. See
+[adapters/codex/README.md](../adapters/codex/README.md) and
+[adapters/openclaw/README.md](../adapters/openclaw/README.md).

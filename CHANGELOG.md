@@ -4,6 +4,34 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.3.0 — 2026-06-15
+
+Second host adapter (OpenClaw) + accurate cross-host porting facts. Minor bump,
+backward-compatible.
+
+Added
+- **OpenClaw init adapter.** `tools/engramory_init.py openclaw` bootstraps an OpenClaw
+  workspace (default `~/.openclaw/workspace`): a marked block in `AGENTS.md` (loaded
+  every session), the protocol under `.agents/skills/engramory` (OpenClaw auto-discovers
+  it), and a separate `.engramory-memory/` store. The `init` tool now takes a host
+  argument (`codex` | `openclaw`) over a shared, idempotent core; the two adapters use
+  distinct markers and coexist in one `AGENTS.md`.
+- **OpenClaw adapter docs** — `adapters/openclaw/README.md`. Honest reliability model:
+  the index cap is rules + `engramory_check.py`. OpenClaw's deterministic deny path is a
+  `before_tool_call` *plugin* (TypeScript), **not** Engramory's Python shell hook, so the
+  guard does not drop in — a hard cap there means writing that plugin (not shipped here).
+
+Changed (docs)
+- **PORTING.md** host table corrected and extended (Cursor → `alwaysApply` + auto
+  `.agents/skills`; added OpenClaw and Trae). The cap degradation ladder now lists the
+  real, non-interchangeable per-host deny mechanisms — Hermes `pre_tool_call`, Cursor
+  `preToolUse` (new/flaky), OpenClaw `before_tool_call` plugin, Trae none — each
+  cross-checked against the host's 2026 docs. Only the Claude Code hook is tested here.
+
+Tests
+- +2 (91 total): OpenClaw bootstrap, and Codex + OpenClaw coexisting with distinct
+  markers (re-running either leaves the other intact).
+
 ## 0.2.0 — 2026-06-15
 
 First host adapter beyond Claude Code. Minor bump: new functionality, fully

@@ -17,9 +17,11 @@ the host's **always-loaded** instructions:
 | Host | Always-loaded file | Also supports a SKILL.md? |
 |---|---|---|
 | Claude Code | `CLAUDE.md` / `~/.claude/CLAUDE.md` | yes (Agent Skills) |
-| Hermes (Nous) | `SOUL.md` / project context files | yes (agentskills.io standard) |
-| Cursor | `.cursor/rules` (`.cursorrules`) | partial |
 | Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
+| OpenClaw | `AGENTS.md` (in `~/.openclaw/workspace`) | yes (auto-discovers `.agents/skills`) |
+| Hermes (Nous) | `SOUL.md` / project context files | yes (agentskills.io standard) |
+| Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
+| Trae | `.trae/rules/project_rules.md` or `AGENTS.md` | yes (`.agents/skills`, enable in settings) |
 | Cline / Windsurf | their rules / system-prompt file | varies |
 
 Paste [`rules-snippet.md`](rules-snippet.md) into that always-loaded file. If the
@@ -56,11 +58,19 @@ The cap stops the index growing past the host's load window. Strongest → softe
 
 1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every edit and
    can DENY one that would grow the index past the cap — deterministic. It's written
-   for Claude Code's hook format, but Cursor, Cline, Codex, and Windsurf now expose
-   equivalent pre-write deny hooks (coverage varies by host and version), so the cap
-   is *portable in principle* — but only the Claude Code hook here is written and
-   tested; for the others you write and verify the small JSON I/O shim yourself. See
-   `hooks/INSTALL.md`.
+   for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
+   are **not interchangeable**, so each needs its own shim:
+   - **Hermes** — a `pre_tool_call` shell hook (matcher `write_file|patch`) can block.
+   - **Cursor** — a generic `preToolUse` hook can deny `Edit|Write` (newer, and
+     reported flaky on Windows in 2026 — verify before relying on it).
+   - **OpenClaw** — blocks via a `before_tool_call` *plugin* (TypeScript, `block: true`),
+     **not** a shell hook, so the Python guard does not drop in.
+   - **Trae** — has **no** pre-write deny (only post-write review/undo), so the cap
+     can't be deterministic there; use rung 2.
+
+   So the cap is portable *in principle* on hosts with a real pre-write deny — but
+   **only the Claude Code hook here is written and tested**; for the others you write
+   and verify the shim yourself. See `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
    Add that instruction to the rules. Hermes / Cursor / Cline / Codex all have
@@ -77,10 +87,10 @@ The cap stops the index growing past the host's load window. Strongest → softe
 
 **Honest limit.** A *deterministic* guarantee is shipped and tested only for the
 host whose adapter lives in this repo — today **Claude Code**
-(`hooks/engramory_index_guard.py`). The same pattern ports to other hosts that
-expose a pre-write deny hook (Cursor and Cline today; Codex and Windsurf newer /
-partial), but those shims are not written or verified here — portable in principle,
-build and verify your own. If a host writes its memory
+(`hooks/engramory_index_guard.py`). The same pattern ports to hosts with a real
+pre-write deny (Hermes and Cursor; OpenClaw only via a TypeScript `before_tool_call`
+plugin), but those shims are not written or verified here — portable in principle,
+build and verify your own. Hosts with no pre-write deny at all (e.g. Trae) get rung 2. If a host writes its memory
 **internally** — not through a tool that an agent step or hook can see (e.g. Letta)
 — even the step-2 check can't intercept that write; there the cap is pure
 discipline. So the cap is deterministic on the handful of hosts with such a hook,
@@ -133,11 +143,14 @@ hand-fix hundreds of issues blind — triage:
 - [ ] size cap wired at the strongest rung the host supports (hook → check → discipline)
 - [ ] `engramory_doctor.py` runnable as an occasional backstop
 
-Codex shortcut:
+Init helpers (Codex, OpenClaw) — wire `AGENTS.md` + the skill + a separate store in one go:
 
 ```sh
-python tools/engramory_init.py codex --project-root <repo> --install-skill
+python tools/engramory_init.py codex    --project-root <repo> --install-skill
+python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
 ```
 
-See [adapters/codex/README.md](adapters/codex/README.md) for the exact behavior
-and limitations.
+See [adapters/codex/README.md](adapters/codex/README.md) and
+[adapters/openclaw/README.md](adapters/openclaw/README.md) for the exact behavior and
+limitations (both enforce the cap by rules + `engramory_check.py`, not a deterministic
+hook).

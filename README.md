@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.2.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.3.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -152,6 +152,21 @@ By default this creates `<project>/.engramory-memory/`. Pass `--memory-root` to
 use an existing folder. Keep this store separate from Codex native Memories:
 Codex Memories are generated state, while Engramory is a user-auditable plain
 folder. Full Codex notes are in [adapters/codex/README.md](adapters/codex/README.md).
+
+### OpenClaw
+
+Use the OpenClaw init helper (defaults to the workspace `~/.openclaw/workspace`):
+
+```sh
+python tools/engramory_init.py openclaw --install-skill
+```
+
+It writes a marked Engramory block into the workspace `AGENTS.md` (auto-loaded every
+session), installs the protocol under `.agents/skills/engramory` (OpenClaw
+auto-discovers it), and keeps a separate `.engramory-memory/` store. The index cap on
+OpenClaw is rules + `engramory_check.py`, **not** a deterministic deny hook (that would
+need a `before_tool_call` plugin) — see
+[adapters/openclaw/README.md](adapters/openclaw/README.md).
 
 ### Any other agent (Hermes, Cursor, Cline, Codex, Windsurf, …)
 Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's own

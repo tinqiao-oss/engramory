@@ -141,6 +141,32 @@ def test_init_codex_force_replaces_skill_else_keeps(tmp_path):
     assert rc3 == 0 and "installed" in out3 and (skill / "SKILL.md").is_file()
 
 
+def test_init_openclaw_creates_store_agents_block_and_skill(tmp_path):
+    project = tmp_path / "workspace"
+    rc, out = _run(INIT, "openclaw", "--project-root", str(project), "--install-skill")
+    assert rc == 0 and "Engramory OpenClaw init complete" in out
+    assert (project / ".engramory-memory" / "MEMORY.md").is_file()
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents.count("BEGIN ENGRAMORY OPENCLAW") == 1
+    assert "OpenClaw-specific wiring" in agents
+    assert "before_tool_call" in agents  # honest: deterministic cap needs a plugin, not the py hook
+    assert (project / ".agents" / "skills" / "engramory" / "SKILL.md").is_file()
+    assert "/.engramory-memory/" in (project / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_init_codex_and_openclaw_coexist_with_distinct_blocks(tmp_path):
+    # The two host adapters use different markers, so a project/workspace wired for BOTH
+    # keeps exactly one block each, and re-running either leaves the other untouched.
+    project = tmp_path / "ws"
+    _run(INIT, "codex", "--project-root", str(project))
+    _run(INIT, "openclaw", "--project-root", str(project))
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents.count("BEGIN ENGRAMORY CODEX") == 1 and agents.count("BEGIN ENGRAMORY OPENCLAW") == 1
+    _run(INIT, "codex", "--project-root", str(project))  # idempotent, openclaw block survives
+    agents2 = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents2.count("BEGIN ENGRAMORY CODEX") == 1 and agents2.count("BEGIN ENGRAMORY OPENCLAW") == 1
+
+
 # --- engramory_doctor (layer-4 backstop) ---
 
 def _note(p, name, ntype="reference", desc="a note", body="body"):

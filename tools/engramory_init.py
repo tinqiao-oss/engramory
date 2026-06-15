@@ -2,23 +2,23 @@
 """
 engramory_init - bootstrap Engramory for an agent host.
 
-Codex usage:
+Usage:
 
-    python tools/engramory_init.py codex --project-root <repo> --install-skill
+    python tools/engramory_init.py codex    --project-root <repo> --install-skill
+    python tools/engramory_init.py openclaw                       --install-skill
 
-The command creates a local memory store, adds an Engramory block to AGENTS.md,
-optionally installs the Engramory skill under .agents/skills/engramory, and adds
-the memory store to .gitignore when the store lives inside the project.
+For each host the command creates a local memory store, adds a marked Engramory block
+to the host's always-loaded AGENTS.md, optionally installs the Engramory skill under
+.agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
+store to .gitignore when the store lives inside the project/workspace.
+
+Defaults: codex uses --project-root '.', openclaw uses ~/.openclaw/workspace.
 """
 import argparse
 import os
 import shutil
 import sys
 from pathlib import Path
-
-
-MARKER_BEGIN = "<!-- BEGIN ENGRAMORY CODEX -->"
-MARKER_END = "<!-- END ENGRAMORY CODEX -->"
 
 
 def _repo_root():
@@ -57,18 +57,18 @@ def _display_path(path, base):
         return path.as_posix()
 
 
-def _replace_block(existing, block):
+def _replace_block(existing, block, begin, end):
     # Replace only a well-formed, IN-ORDER BEGIN..END pair. Anything else — no markers, a
     # lone/duplicated marker, or END before BEGIN from a botched hand-edit — is treated as
     # "no managed block": drop any stray marker LINES and append a fresh block. This never
     # crashes on a malformed file and never silently deletes the surrounding user content.
-    i = existing.find(MARKER_BEGIN)
-    j = existing.find(MARKER_END)
+    i = existing.find(begin)
+    j = existing.find(end)
     if 0 <= i < j:
-        before, after = existing[:i], existing[j + len(MARKER_END):]
+        before, after = existing[:i], existing[j + len(end):]
         return before.rstrip() + "\n\n" + block + "\n\n" + after.lstrip()
     cleaned = "\n".join(ln for ln in existing.splitlines()
-                        if MARKER_BEGIN not in ln and MARKER_END not in ln)
+                        if begin not in ln and end not in ln)
     if cleaned.strip():
         return cleaned.rstrip() + "\n\n" + block + "\n"
     return "# AGENTS.md\n\n" + block + "\n"
@@ -126,7 +126,53 @@ def _copy_skill(source_root, project_root, force):
     return "installed .agents/skills/engramory"
 
 
-def _render_codex_block(source_root, project_root, memory_root, install_skill):
+def _codex_note(index_display, check_display, protocol_display):
+    return f"""Codex-specific wiring:
+
+- Keep this Engramory store separate from Codex native Memories; Codex native
+  Memories are generated state, while Engramory is a user-auditable plain folder.
+- If you edit `{index_display}` and no pre-write hook is installed, run
+  `python {check_display} {index_display}` after the write; compact immediately
+  if it reports `OVER`.
+- Full protocol reference: `{protocol_display}`."""
+
+
+def _openclaw_note(index_display, check_display, protocol_display):
+    return f"""OpenClaw-specific wiring:
+
+- Keep this Engramory store separate from OpenClaw's own memory; OpenClaw auto-writes
+  daily logs under `memory/YYYY-MM-DD.md` (plus an optional curated `MEMORY.md`), while
+  Engramory is a user-curated plain folder you control.
+- After editing `{index_display}`, run `python {check_display} {index_display}` and
+  compact immediately if it reports `OVER`. OpenClaw's deterministic deny path is a
+  `before_tool_call` *plugin* hook (TypeScript), NOT Engramory's Python shell hook — so
+  the cap here is rules + this check unless you write that plugin (see
+  adapters/openclaw/README.md).
+- Full protocol reference: `{protocol_display}`."""
+
+
+# Per-host wiring. Both Codex and OpenClaw use an always-loaded AGENTS.md and auto-discover
+# Agent Skills from .agents/skills, so the only differences are the block markers, the
+# default root, and the host-specific note appended under the shared rules snippet.
+HOST_CONFIG = {
+    "codex": {
+        "label": "Codex",
+        "begin": "<!-- BEGIN ENGRAMORY CODEX -->",
+        "end": "<!-- END ENGRAMORY CODEX -->",
+        "default_root": ".",
+        "note": _codex_note,
+    },
+    "openclaw": {
+        "label": "OpenClaw",
+        "begin": "<!-- BEGIN ENGRAMORY OPENCLAW -->",
+        "end": "<!-- END ENGRAMORY OPENCLAW -->",
+        "default_root": "~/.openclaw/workspace",
+        "note": _openclaw_note,
+    },
+}
+
+
+def _render_block(cfg, source_root, project_root, memory_root, install_skill):
     snippet = _read_text(source_root / "rules-snippet.md").strip()
     memory_display = _display_path(memory_root, project_root)
     index_display = (Path(memory_display) / "MEMORY.md").as_posix()
@@ -139,16 +185,8 @@ def _render_codex_block(source_root, project_root, memory_root, install_skill):
         protocol_display = _display_path(source_root / "SKILL.md", project_root)
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
 
-    codex_note = f"""Codex-specific wiring:
-
-- Keep this Engramory store separate from Codex native Memories; Codex native
-  Memories are generated state, while Engramory is a user-auditable plain folder.
-- If you edit `{index_display}` and no pre-write hook is installed, run
-  `python {check_display} {index_display}` after the write; compact immediately
-  if it reports `OVER`.
-- Full protocol reference: `{protocol_display}`."""
-
-    return MARKER_BEGIN + "\n" + snippet + "\n\n" + codex_note + "\n" + MARKER_END
+    note = cfg["note"](index_display, check_display, protocol_display)
+    return cfg["begin"] + "\n" + snippet + "\n\n" + note + "\n" + cfg["end"]
 
 
 def _require_sources(source_root, install_skill):
@@ -164,10 +202,12 @@ def _require_sources(source_root, install_skill):
                          + ", ".join(missing))
 
 
-def init_codex(args):
+def init_host(args, host):
+    cfg = HOST_CONFIG[host]
     source_root = _repo_root()
     _require_sources(source_root, args.install_skill)
-    project_root = Path(args.project_root).expanduser().resolve()
+    root_arg = args.project_root if args.project_root is not None else cfg["default_root"]
+    project_root = Path(root_arg).expanduser().resolve()
     memory_root = Path(args.memory_root).expanduser()
     if not memory_root.is_absolute():
         memory_root = project_root / memory_root
@@ -187,13 +227,13 @@ def init_codex(args):
         skill_result = _copy_skill(source_root, project_root, args.force)
     results.append(("skill", skill_result))
 
-    block = _render_codex_block(source_root, project_root, memory_root, args.install_skill)
+    block = _render_block(cfg, source_root, project_root, memory_root, args.install_skill)
     agents = project_root / "AGENTS.md"
     old = _read_text(agents) if agents.exists() else ""
-    _write_text(agents, _replace_block(old, block))
-    results.append(("AGENTS.md", "created/updated Engramory Codex block"))
+    _write_text(agents, _replace_block(old, block, cfg["begin"], cfg["end"]))
+    results.append(("AGENTS.md", f"created/updated Engramory {cfg['label']} block"))
 
-    print("Engramory Codex init complete")
+    print(f"Engramory {cfg['label']} init complete")
     print(f"project root: {_display_path(project_root, Path.cwd())}")
     print(f"memory root: {_display_path(memory_root, project_root)}")
     for label, message in results:
@@ -203,8 +243,10 @@ def init_codex(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Bootstrap Engramory for an agent host.")
-    parser.add_argument("host", nargs="?", default="codex", choices=("codex",), help="agent host to initialize")
-    parser.add_argument("--project-root", default=".", help="project/repository root to configure")
+    parser.add_argument("host", nargs="?", default="codex", choices=tuple(HOST_CONFIG),
+                        help="agent host to initialize (codex, openclaw)")
+    parser.add_argument("--project-root", default=None,
+                        help="project/workspace root (default: '.' for codex, ~/.openclaw/workspace for openclaw)")
     parser.add_argument(
         "--memory-root",
         default=".engramory-memory",
@@ -218,8 +260,7 @@ def build_parser():
 
 def main(argv):
     args = build_parser().parse_args(argv[1:])
-    # host is choices-restricted to "codex"; argparse rejects anything else.
-    return init_codex(args)
+    return init_host(args, args.host)
 
 
 if __name__ == "__main__":

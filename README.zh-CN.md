@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.2.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.3.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -75,6 +75,16 @@ python tools/engramory_init.py codex --project-root /path/to/project --install-s
 ```
 
 默认创建 `<project>/.engramory-memory/`。如果你已有记忆目录,传 `--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹。Codex 细节见 [adapters/codex/README.md](adapters/codex/README.md)。
+
+### OpenClaw
+
+用 OpenClaw 初始化助手(默认指向 workspace `~/.openclaw/workspace`):
+
+```sh
+python tools/engramory_init.py openclaw --install-skill
+```
+
+它把带标记的 Engramory 块写进 workspace 的 `AGENTS.md`(每次会话自动加载),把协议装到 `.agents/skills/engramory`(OpenClaw 会自动发现),并单独建一个 `.engramory-memory/` 记忆库。OpenClaw 上的索引上限靠规则 + `engramory_check.py`,**不是**确定性 deny hook(那需要写一个 `before_tool_call` 插件)—— 详见 [adapters/openclaw/README.md](adapters/openclaw/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Codex、Windsurf……)
 Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:Claude Code 有,Cursor、Cline、Codex、Windsurf 如今也都暴露了等效的 pre-write hook(各宿主/版本覆盖度不一)——所以 cap 是可移植的,只是只有 Claude Code 这份适配器经过实测,其余每个宿主要各自改一层薄 I/O shim 并自行验证。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
