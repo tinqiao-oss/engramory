@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.1.13 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.2.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -65,6 +65,16 @@ Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据
 2. **(可选)把完整规范注册成 skill**:把本文件夹复制或软链接到 Claude Code 技能目录、命名 `engramory/`,让 [`SKILL.md`](SKILL.md) 作为详细参考按需加载(路径见 `hooks/INSTALL.md`)。
 3. **装硬卡口 hook**:把 `hooks/` 里的 hook 注册进 `settings.json`(片段在 `hooks/settings.snippet.json`)。
 4. 把 `<MEMORY_ROOT>` 指向你的记忆目录;若在 git 仓库内,务必 `.gitignore` 掉。
+
+### Codex
+
+用 Codex 初始化助手来接线:它会把纪律写进 `AGENTS.md`,创建记忆模板,可选地把完整协议安装成 Codex skill,并在记忆目录位于项目内时追加 `.gitignore`:
+
+```sh
+python tools/engramory_init.py codex --project-root /path/to/project --install-skill
+```
+
+默认创建 `<project>/.engramory-memory/`。如果你已有记忆目录,传 `--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹。Codex 细节见 [adapters/codex/README.md](adapters/codex/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Codex、Windsurf……)
 Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:Claude Code 有,Cursor、Cline、Codex、Windsurf 如今也都暴露了等效的 pre-write hook(各宿主/版本覆盖度不一)——所以 cap 是可移植的,只是只有 Claude Code 这份适配器经过实测,其余每个宿主要各自改一层薄 I/O shim 并自行验证。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。

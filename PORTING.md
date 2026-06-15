@@ -19,7 +19,8 @@ the host's **always-loaded** instructions:
 | Claude Code | `CLAUDE.md` / `~/.claude/CLAUDE.md` | yes (Agent Skills) |
 | Hermes (Nous) | `SOUL.md` / project context files | yes (agentskills.io standard) |
 | Cursor | `.cursor/rules` (`.cursorrules`) | partial |
-| Cline / Codex / Windsurf | their rules / system-prompt file | varies |
+| Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
+| Cline / Windsurf | their rules / system-prompt file | varies |
 
 Paste [`rules-snippet.md`](rules-snippet.md) into that always-loaded file. If the
 host also supports skills, additionally import [`SKILL.md`](SKILL.md) for the full
@@ -45,6 +46,8 @@ make Engramory the authority over a store like that — there is no agent-visibl
 file to curate, and editing it fights the host's manager. There, apply the
 discipline via the host's **rules** (`AGENTS.md`, etc.) and keep the Engramory
 store **separate** (a plain folder you control); don't try to take over the managed
+store. For Codex, `tools/engramory_init.py codex --project-root <repo>
+--install-skill` performs that wiring and points `AGENTS.md` at the separate
 store.
 
 ## 3. Enforce the size cap — the degradation ladder (no PreToolUse hook)
@@ -129,3 +132,12 @@ hand-fix hundreds of issues blind — triage:
 - [ ] store git-ignored if inside a repo (it holds machine-local detail)
 - [ ] size cap wired at the strongest rung the host supports (hook → check → discipline)
 - [ ] `engramory_doctor.py` runnable as an occasional backstop
+
+Codex shortcut:
+
+```sh
+python tools/engramory_init.py codex --project-root <repo> --install-skill
+```
+
+See [adapters/codex/README.md](adapters/codex/README.md) for the exact behavior
+and limitations.

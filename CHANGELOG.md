@@ -4,6 +4,35 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.2.0 — 2026-06-15
+
+First host adapter beyond Claude Code. Minor bump: new functionality, fully
+backward-compatible (existing Claude Code setups are untouched).
+
+Added
+- **Codex init adapter.** `tools/engramory_init.py codex` bootstraps a Codex project:
+  creates a conservative memory store, adds a marked Engramory block to `AGENTS.md`,
+  optionally installs the full protocol under `.agents/skills/engramory` (Codex
+  auto-discovers Agent Skills there), and adds a `.gitignore` entry when the store
+  lives inside the project. Re-running is idempotent.
+- **Codex adapter docs.** `adapters/codex/README.md` documents the recommended
+  `AGENTS.md + .agents/skills + separate plain memory folder` wiring, and is explicit
+  that the index cap on Codex is rules + `engramory_check.py`, **not** a deterministic
+  deny hook (the `PreToolUse` hook is Claude-Code-only).
+
+Hardened (init)
+- `AGENTS.md` block editing tolerates malformed markers from a hand-edit: a reversed
+  (`END` before `BEGIN`) or dangling single marker no longer crashes, and never
+  deletes the surrounding user content (stray marker lines are dropped, a fresh block
+  appended).
+- Fails fast with a clear message if the source tree is incomplete (instead of a raw
+  `FileNotFoundError` mid-copy); `--force` help now states it recreates the whole
+  `.agents/skills/engramory` directory.
+
+Tests
+- Init coverage for Codex bootstrap, idempotence, external/kept memory roots, the
+  malformed-marker no-data-loss guarantee, and `--force` replace-vs-keep (+5; 89 total).
+
 ## 0.1.13 — 2026-06-15
 
 Pre-public-release hardening (the repo goes public at this version). A multi-agent

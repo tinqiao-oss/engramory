@@ -92,3 +92,14 @@ body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The
 150/200 guard then applies via the instructions; for the deterministic cap, adapt
 the hook to the host's pre-write deny hook or run `tools/engramory_check.py` after
 each index write. Full per-host wiring is in [PORTING.md](../PORTING.md).
+
+For Codex specifically, prefer the init helper instead of manually pasting:
+
+```sh
+python tools/engramory_init.py codex --project-root <repo> --install-skill
+```
+
+It creates the memory template, adds a marked block to `AGENTS.md`, optionally
+copies the skill into `.agents/skills/engramory`, and keeps the Engramory store
+separate from Codex native Memories. See
+[adapters/codex/README.md](../adapters/codex/README.md).

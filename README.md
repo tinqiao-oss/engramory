@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.1.13 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.2.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -137,6 +137,21 @@ ships structured memory, Engramory is a thin discipline layer on top — and say
    (snippet in `hooks/settings.snippet.json`).
 4. Point `<MEMORY_ROOT>` at your memory directory; ensure it's `.gitignore`d if
    inside a repo.
+
+### Codex
+
+Use the Codex init helper to wire the discipline into `AGENTS.md`, create the
+memory template, optionally install the full protocol as a Codex skill, and add a
+`.gitignore` entry when the store lives inside the project:
+
+```sh
+python tools/engramory_init.py codex --project-root /path/to/project --install-skill
+```
+
+By default this creates `<project>/.engramory-memory/`. Pass `--memory-root` to
+use an existing folder. Keep this store separate from Codex native Memories:
+Codex Memories are generated state, while Engramory is a user-auditable plain
+folder. Full Codex notes are in [adapters/codex/README.md](adapters/codex/README.md).
 
 ### Any other agent (Hermes, Cursor, Cline, Codex, Windsurf, …)
 Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's own

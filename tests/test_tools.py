@@ -11,6 +11,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.normpath(os.path.join(HERE, "..", "tools", "engramory_check.py"))
 DOCTOR = os.path.normpath(os.path.join(HERE, "..", "tools", "engramory_doctor.py"))
+INIT = os.path.normpath(os.path.join(HERE, "..", "tools", "engramory_init.py"))
 
 
 def _run(script, *args, env=None):
@@ -56,6 +57,88 @@ def test_check_env_override(tmp_path):
     idx.write_text("\n".join(["L"] * 130), encoding="utf-8")
     rc, out = _run(CHECK, str(idx), env={"ENGRAMORY_HARD": "120"})
     assert rc == 2 and out.startswith("OVER")
+
+
+# --- engramory_init (Codex adapter bootstrap) ---
+
+def test_init_codex_creates_memory_agents_gitignore_and_skill(tmp_path):
+    project = tmp_path / "project"
+    rc, out = _run(INIT, "codex", "--project-root", str(project), "--install-skill")
+    assert rc == 0 and "Engramory Codex init complete" in out
+
+    assert (project / ".engramory-memory" / "MEMORY.md").is_file()
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents.count("BEGIN ENGRAMORY CODEX") == 1
+    assert ".engramory-memory" in agents
+    assert "Codex native Memories" in agents
+
+    gitignore = (project / ".gitignore").read_text(encoding="utf-8")
+    assert "/.engramory-memory/" in gitignore
+
+    skill = project / ".agents" / "skills" / "engramory"
+    assert (skill / "SKILL.md").is_file()
+    assert (skill / "tools" / "engramory_check.py").is_file()
+
+    # Idempotent: rerunning updates the marked block, not duplicate it.
+    rc2, _ = _run(INIT, "codex", "--project-root", str(project), "--install-skill")
+    assert rc2 == 0
+    agents2 = (project / "AGENTS.md").read_text(encoding="utf-8")
+    gitignore2 = (project / ".gitignore").read_text(encoding="utf-8")
+    assert agents2.count("BEGIN ENGRAMORY CODEX") == 1
+    assert gitignore2.splitlines().count("/.engramory-memory/") == 1
+
+
+def test_init_codex_external_memory_root_does_not_gitignore(tmp_path):
+    project = tmp_path / "project"
+    memory = tmp_path / "memory-outside"
+    rc, out = _run(INIT, "codex", "--project-root", str(project), "--memory-root", str(memory))
+    assert rc == 0 and "memory root is outside project" in out
+    assert (memory / "MEMORY.md").is_file()
+    assert not (project / ".gitignore").exists()
+
+
+def test_init_codex_keeps_existing_memory_index(tmp_path):
+    project = tmp_path / "project"
+    memory = project / ".engramory-memory"
+    memory.mkdir(parents=True)
+    index = memory / "MEMORY.md"
+    index.write_text("# Custom Index\n", encoding="utf-8")
+
+    rc, out = _run(INIT, "codex", "--project-root", str(project))
+    assert rc == 0 and "kept existing MEMORY.md" in out
+    assert index.read_text(encoding="utf-8") == "# Custom Index\n"
+
+
+def test_init_codex_malformed_markers_no_crash_no_data_loss(tmp_path):
+    # A pre-existing AGENTS.md with reversed + dangling Engramory markers (botched
+    # hand-edit) must NOT crash and must NOT delete the user's surrounding content.
+    project = tmp_path / "project"
+    project.mkdir()
+    agents = project / "AGENTS.md"
+    agents.write_text(
+        "# Mine\nkeep-A\n<!-- END ENGRAMORY CODEX -->\nkeep-B\n"
+        "<!-- BEGIN ENGRAMORY CODEX -->\nkeep-C\n", encoding="utf-8")
+    rc, _ = _run(INIT, "codex", "--project-root", str(project))
+    text = agents.read_text(encoding="utf-8")
+    assert rc == 0
+    assert "keep-A" in text and "keep-B" in text and "keep-C" in text  # no data loss
+    assert text.count("BEGIN ENGRAMORY CODEX") == 1 and text.count("END ENGRAMORY CODEX") == 1
+    # the now-well-formed file is stable on a second run
+    rc2, _ = _run(INIT, "codex", "--project-root", str(project))
+    text2 = agents.read_text(encoding="utf-8")
+    assert rc2 == 0 and text2.count("BEGIN ENGRAMORY CODEX") == 1
+    assert "keep-A" in text2 and "keep-B" in text2 and "keep-C" in text2
+
+
+def test_init_codex_force_replaces_skill_else_keeps(tmp_path):
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "engramory"
+    rc, _ = _run(INIT, "codex", "--project-root", str(project), "--install-skill")
+    assert rc == 0 and (skill / "SKILL.md").is_file()
+    rc2, out2 = _run(INIT, "codex", "--project-root", str(project), "--install-skill")
+    assert rc2 == 0 and "kept existing" in out2  # no --force: existing copy kept
+    rc3, out3 = _run(INIT, "codex", "--project-root", str(project), "--install-skill", "--force")
+    assert rc3 == 0 and "installed" in out3 and (skill / "SKILL.md").is_file()
 
 
 # --- engramory_doctor (layer-4 backstop) ---
