@@ -31,7 +31,10 @@ def _read_text(path):
 
 def _write_text(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    # open(newline="\n") rather than Path.write_text(newline=...) — the latter's newline
+    # kwarg only exists on Python 3.10+, and the project floor is 3.9.
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
 def _same_or_inside(child, parent):
