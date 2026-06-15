@@ -2,6 +2,10 @@
 
 # Engramory
 
+[![CI](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml/badge.svg)](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+
 **An opinionated, zero-infrastructure memory *protocol* for small-scale, local,
 file-based agent memory** — a strict curation discipline plus a validator
 (`tools/engramory_doctor.py`), loaded as **standing rules** (`CLAUDE.md` /
