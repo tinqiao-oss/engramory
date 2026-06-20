@@ -41,7 +41,8 @@ set. Claude reads the `description` to decide when to load the skill.
 
 The standing rules' 150/200 behavior is model-followed; the hook is the
 *deterministic backstop* the model cannot skip. It's written and tested for Claude
-Code only. Some other hosts expose a pre-write deny you can adapt the shim to (Hermes;
+Code only. Some other hosts expose a pre-write deny you can adapt the shim to (Hermes —
+whose `pre_tool_call` has a reported non-firing bug in some worker contexts, #25204;
 Cursor, though its is newer/flaky); OpenClaw blocks only via a `before_tool_call` plugin,
 and some hosts have none — see PORTING.md (coverage varies by host and version — you verify it).
 

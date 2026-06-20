@@ -329,9 +329,10 @@ hook; use the strongest rung the host supports:
 
 1. **Pre-write deny hook** — `hooks/engramory_index_guard.py` enforces the cap on
    every matching edit (deterministic for those tools). Written and tested for Claude
-   Code only. Some other hosts expose a pre-write deny too (Hermes; Cursor, though its
-   hook is newer and less proven), so the cap is portable with a per-host I/O shim you
-   write and verify yourself — but OpenClaw can only block via a `before_tool_call`
+   Code only. Some other hosts expose a pre-write deny too (Hermes's `pre_tool_call` —
+   though it has a reported non-firing bug in some worker contexts, issue #25204; Cursor,
+   though its hook is newer and less proven), so the cap is portable with a per-host I/O
+   shim you write and verify yourself — but OpenClaw can only block via a `before_tool_call`
    plugin (not this Python hook), and Trae has none. See **PORTING.md** for the
    per-host picture.
 2. **Any host with a shell** (Hermes, Cursor, Cline, Codex, OpenClaw, …) — after writing the

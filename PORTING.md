@@ -19,7 +19,7 @@ the host's **always-loaded** instructions:
 | Claude Code | `CLAUDE.md` / `~/.claude/CLAUDE.md` | yes (Agent Skills) |
 | Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
 | OpenClaw | `AGENTS.md` (in `~/.openclaw/workspace`) | yes (auto-discovers `.agents/skills`) |
-| Hermes (Nous) | `SOUL.md` / project context files | yes (agentskills.io standard) |
+| Hermes (Nous) | `AGENTS.md` / `.hermes.md` (rules) — **not** `SOUL.md` (persona slot) | yes (skills system) |
 | Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
 | Trae | `.trae/rules/project_rules.md` or `AGENTS.md` | yes (`.agents/skills`, enable in settings) |
 | Cline / Windsurf | their rules / system-prompt file | varies |
@@ -33,14 +33,25 @@ carries the detail.
 
 Don't create a second store. Reuse the memory directory the host already loads:
 - Claude Code → its auto-memory dir (the `MEMORY.md` it injects each session).
-- Hermes → its `MEMORY.md` / memory location.
 
 ⚠️ Hosts that **auto-write** their memory (Claude, Hermes) have their own house
 style, which fights Engramory's structure (one-file-one-fact, pointer-only index,
 four types). Resolve it by making Engramory's rules the **authority** for that
 store — put the SKILL / snippet where it shapes how the host writes memory
-(`SOUL.md` / context / `CLAUDE.md`), so one store follows one set of rules instead
+(Claude Code: `CLAUDE.md`; Hermes: `AGENTS.md` / `.hermes.md`, **not** `SOUL.md`,
+which is the persona/identity slot), so one store follows one set of rules instead
 of two writers fighting in the same file.
+
+⚠️ **Hermes is a special case — don't try to take over its native memory.** Its
+built-in `memory` tool writes a *frozen-snapshot* `MEMORY.md` + `USER.md`
+(`~/.hermes/memories/`) that are **already hard-capped in code** (2,200 / 1,375 chars
+≈ 1,300 tokens total) with error back-pressure + exact-duplicate rejection — so
+Engramory's index cap is redundant there, and its atomic-files-plus-index *recall*
+model doesn't fit a single always-injected file. What that native store *lacks* — the
+typed ontology, required **Why:** / **How to apply:**, and the negative-scope rule — is
+exactly Engramory's value-add. So on Hermes, run Engramory as a **separate plain-file
+store** (like the Codex adapter) with the discipline injected via `AGENTS.md`; keep it
+distinct from the managed `memory`-tool store.
 
 ⚠️ But some hosts treat their memory as **generated / managed state not meant for
 hand-editing** (Letta's memory blocks; OpenAI Codex's local Memories). You cannot
@@ -60,7 +71,11 @@ The cap stops the index growing past the host's load window. Strongest → softe
    can DENY one that would grow the index past the cap — deterministic. It's written
    for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
    are **not interchangeable**, so each needs its own shim:
-   - **Hermes** — a `pre_tool_call` shell hook (matcher `write_file|patch`) can block.
+   - **Hermes** — a `pre_tool_call` shell hook can block a tool call; matcher
+     `write_file|patch` catches the agent's *file* writes (an Engramory separate-store
+     index), but **not** Hermes's native `memory` tool — which is already code-capped, so
+     it needs no hook. Caveat: `pre_tool_call` shell hooks have a reported non-firing bug
+     in some worker/dispatch contexts (issue #25204) — verify it fires before relying on it.
    - **Cursor** — a generic `preToolUse` hook can deny `Edit|Write` (newer, and
      reported flaky on Windows in 2026 — verify before relying on it).
    - **OpenClaw** — blocks via a `before_tool_call` *plugin* (TypeScript, `block: true`),

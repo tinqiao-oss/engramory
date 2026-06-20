@@ -4,6 +4,29 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.3.1 — 2026-06-20
+
+Docs patch — corrected and sharpened the Hermes (Nous) porting facts after verifying
+against Hermes's own docs/source. Docs-only, backward-compatible.
+
+Changed
+- **Hermes always-loaded rules channel is `AGENTS.md` / `.hermes.md`, not `SOUL.md`.**
+  `SOUL.md` is real and always-loaded, but it is Hermes's *identity/persona* slot
+  (#1 in the system prompt), reserved for tone — standing operational rules belong in
+  the project context files (`AGENTS.md` is Hermes's own recommended place, which also
+  matches the Codex/OpenClaw adapters).
+- **Don't take over Hermes's native memory.** Its `memory` tool writes a frozen-snapshot
+  `MEMORY.md` + `USER.md` that are **already hard-capped in code** (2,200 / 1,375 chars
+  ≈ 1,300 tokens) with error back-pressure + exact-duplicate rejection — so Engramory's
+  index cap is redundant there and its atomic-files-plus-index recall model doesn't fit a
+  single always-injected file. Run Engramory as a **separate plain-file store** (like the
+  Codex adapter) instead; its value-add on Hermes is the ontology + Why/How + negative-scope,
+  which the native store lacks.
+- **Hook scope + caveat.** The `pre_tool_call` matcher `write_file|patch` guards an
+  Engramory *separate-store* index (the agent's file writes); it does not — and need not —
+  intercept the code-capped native `memory` tool. Noted the reported `pre_tool_call`
+  non-firing bug in some worker/dispatch contexts (issue #25204): verify before relying.
+
 ## 0.3.0 — 2026-06-15
 
 Second host adapter (OpenClaw) + accurate cross-host porting facts. Minor bump,
