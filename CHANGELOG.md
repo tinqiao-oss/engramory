@@ -4,6 +4,31 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.3.2 — 2026-06-24
+
+Third host adapter (Kiro) — docs-only, backward-compatible. Motivated by a real report
+of Engramory overflowing the context window on Kiro: the cause is Kiro's default
+`inclusion: always` on steering files, so notes dropped into `.kiro/steering/` load into
+every request.
+
+Added
+- **Kiro adapter (`adapters/kiro/`).** A `README.md` plus a ready-to-copy
+  `steering-engramory.md` template (`inclusion: always`) that carries the discipline and
+  injects the live index via `#[[file:.engramory-memory/MEMORY.md]]` — the Kiro-native
+  equivalent of Claude Code auto-loading `MEMORY.md`. Notes live in a **non-steering**
+  `.engramory-memory/` folder, opened on demand.
+- **Context-overflow footgun documented.** README (EN + zh), PORTING.md, and the adapter
+  README all warn: do **not** put detail notes in `.kiro/steering/` (default
+  `inclusion: always` → every note in every request → overflow); only the index belongs
+  in always-loaded steering. `.gitignore` the store, commit the steering pointer, and do
+  not add the store to `.kiroignore`.
+- **PORTING.md** gains a Kiro row in the host table and a Kiro rung-1 entry: a CLI
+  `PreToolUse` hook with `matcher: fs_write` + `exit 2` is the same shape as the Claude
+  Code guard, so a deterministic cap is possible — but the IDE may pass empty `toolArgs`
+  (issue #7375, CLI-only deny) and the CLI hook is reported broken on Windows 11 (issue
+  #8264). No shim is shipped/tested yet, so the Kiro cap is rules + `engramory_check.py`
+  (best-effort), per Engramory's honesty rule.
+
 ## 0.3.1 — 2026-06-20
 
 Docs patch — corrected and sharpened the Hermes (Nous) porting facts after verifying

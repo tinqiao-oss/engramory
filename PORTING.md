@@ -19,6 +19,7 @@ the host's **always-loaded** instructions:
 | Claude Code | `CLAUDE.md` / `~/.claude/CLAUDE.md` | yes (Agent Skills) |
 | Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
 | OpenClaw | `AGENTS.md` (in `~/.openclaw/workspace`) | yes (auto-discovers `.agents/skills`) |
+| Kiro | `.kiro/steering/*.md` with `inclusion: always` (or `AGENTS.md`) | yes (`SKILL.md` as an `inclusion: manual`/`auto` steering file, or a Kiro skill) |
 | Hermes (Nous) | `AGENTS.md` / `.hermes.md` (rules) — **not** `SOUL.md` (persona slot) | yes (skills system) |
 | Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
 | Trae | `.trae/rules/project_rules.md` or `AGENTS.md` | yes (`.agents/skills`, enable in settings) |
@@ -63,6 +64,18 @@ store. For Codex, `tools/engramory_init.py codex --project-root <repo>
 --install-skill` performs that wiring and points `AGENTS.md` at the separate
 store.
 
+⚠️ **Kiro — keep the notes OUT of `.kiro/steering/` or you will blow up the context.**
+Kiro's always-loaded channel is steering, and a steering file with no `inclusion`
+front-matter **defaults to `inclusion: always`** — so dumping the whole store into
+`.kiro/steering/` (or adding `file://.kiro/steering/**/*.md` to a custom agent's
+`resources`) loads **every note into every request** and overflows the window. Put only
+**one** always-on steering file (`.kiro/steering/engramory.md`, `inclusion: always`)
+that pulls in the index via a live `#[[file:.engramory-memory/MEMORY.md]]` reference, and
+keep the notes in a **non-steering** `.engramory-memory/` folder the agent opens on
+demand. `.gitignore` the store but commit the steering pointer; do NOT add the store to
+`.kiroignore` (that would stop the agent reading its own memory). Full wiring +
+ready-to-copy template: [adapters/kiro/README.md](adapters/kiro/README.md).
+
 ## 3. Enforce the size cap — the degradation ladder (no PreToolUse hook)
 
 The cap stops the index growing past the host's load window. Strongest → softest:
@@ -78,6 +91,12 @@ The cap stops the index growing past the host's load window. Strongest → softe
      in some worker/dispatch contexts (issue #25204) — verify it fires before relying on it.
    - **Cursor** — a generic `preToolUse` hook can deny `Edit|Write` (newer, and
      reported flaky on Windows in 2026 — verify before relying on it).
+   - **Kiro** — a CLI `PreToolUse` hook with `matcher: fs_write` can `exit 2` to deny a
+     write (stderr returned to the agent), the same shape as the Claude Code guard. But
+     the IDE may pass empty `toolArgs` (issue #7375, so a content/path deny is CLI-only)
+     and the CLI hook is reported broken on Windows 11 (issue #8264) — verify it fires
+     first. Until that shim is written and tested, use rung 2. See
+     [adapters/kiro/README.md](adapters/kiro/README.md).
    - **OpenClaw** — blocks via a `before_tool_call` *plugin* (TypeScript, `block: true`),
      **not** a shell hook, so the Python guard does not drop in.
    - **Trae** — has **no** pre-write deny (only post-write review/undo), so the cap
@@ -169,3 +188,8 @@ See [adapters/codex/README.md](adapters/codex/README.md) and
 [adapters/openclaw/README.md](adapters/openclaw/README.md) for the exact behavior and
 limitations (both enforce the cap by rules + `engramory_check.py`, not a deterministic
 hook).
+
+Kiro has no init helper yet — wire it manually (one always-on steering file + a
+non-steering `.engramory-memory/` store) per
+[adapters/kiro/README.md](adapters/kiro/README.md), which also ships a ready-to-copy
+[steering template](adapters/kiro/steering-engramory.md).

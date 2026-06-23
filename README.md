@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.3.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.3.2 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -169,6 +169,24 @@ auto-discovers it), and keeps a separate `.engramory-memory/` store. The index c
 OpenClaw is rules + `engramory_check.py`, **not** a deterministic deny hook (that would
 need a `before_tool_call` plugin) — see
 [adapters/openclaw/README.md](adapters/openclaw/README.md).
+
+### Kiro
+
+Kiro (AWS's agentic IDE/CLI) is a strong host — always-loaded steering files, an agent
+that reads/writes workspace markdown, and a real pre-write deny hook. Wiring is manual
+(no init helper yet): copy
+[`adapters/kiro/steering-engramory.md`](adapters/kiro/steering-engramory.md) to
+`.kiro/steering/engramory.md` (it is `inclusion: always` and pulls in the live index via
+`#[[file:.engramory-memory/MEMORY.md]]`), and keep your notes in a **non-steering**
+`.engramory-memory/` folder.
+
+> ⚠️ **Do not drop notes into `.kiro/steering/`.** A steering file with no `inclusion`
+> front-matter defaults to `inclusion: always`, so every note would load into every
+> request and **blow up your context** — the #1 Kiro install mistake. Only the index
+> belongs in always-loaded steering; notes stay in `.engramory-memory/` and open on
+> demand. Cap is rules + `engramory_check.py` for now (a deterministic Kiro `PreToolUse`
+> hook is possible but not yet shipped/tested). Full notes:
+> [adapters/kiro/README.md](adapters/kiro/README.md).
 
 ### Any other agent (Hermes, Cursor, Cline, Windsurf, …)
 Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's own

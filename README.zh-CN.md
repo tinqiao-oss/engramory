@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.3.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.3.2 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -85,6 +85,21 @@ python tools/engramory_init.py openclaw --install-skill
 ```
 
 它把带标记的 Engramory 块写进 workspace 的 `AGENTS.md`(每次会话自动加载),把协议装到 `.agents/skills/engramory`(OpenClaw 会自动发现),并单独建一个 `.engramory-memory/` 记忆库。OpenClaw 上的索引上限靠规则 + `engramory_check.py`,**不是**确定性 deny hook(那需要写一个 `before_tool_call` 插件)—— 详见 [adapters/openclaw/README.md](adapters/openclaw/README.md)。
+
+### Kiro
+
+Kiro(AWS 的智能体 IDE / CLI)是个上等宿主——有常驻加载的 steering 文件、能自主读写工作区
+markdown 的智能体,还有真正的写前 deny hook。目前手动接线(还没有 init 助手):把
+[`adapters/kiro/steering-engramory.md`](adapters/kiro/steering-engramory.md) 复制到
+`.kiro/steering/engramory.md`(它已是 `inclusion: always`,并用
+`#[[file:.engramory-memory/MEMORY.md]]` 把实时索引注入),笔记则放进一个**非 steering** 的
+`.engramory-memory/` 目录。
+
+> ⚠️ **别把笔记丢进 `.kiro/steering/`。** 没写 `inclusion` frontmatter 的 steering 文件
+> **默认就是 `inclusion: always`**,于是每条笔记都被塞进每次请求、**把上下文干爆**——这是
+> Kiro 安装的头号错误。只有索引该进常驻 steering;笔记留在 `.engramory-memory/` 里按需打开。
+> 上限暂时靠规则 + `engramory_check.py`(确定性的 Kiro `PreToolUse` hook 可行,但这里还没
+> 落地/实测)。完整说明:[adapters/kiro/README.md](adapters/kiro/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Windsurf……)
 Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里只有 Claude Code 的写好并实测过;部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
