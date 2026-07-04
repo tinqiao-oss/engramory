@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.4.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.5.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (Bash / MCP file tools / external editors / sync clients
 > bypass it); the discipline loads as standing rules the model follows, so it's
@@ -155,21 +155,24 @@ use an existing folder. Keep this store separate from Codex native Memories:
 Codex Memories are generated state, while Engramory is a user-auditable plain
 folder. Full Codex notes are in [adapters/codex/README.md](adapters/codex/README.md).
 
-### Codex — read-only reader (recall Claude Code's memory)
+### Read-only readers (recall another agent's memory)
 
-Point Codex at a store **another agent owns and writes** (e.g. Claude Code's native
-auto-memory) so a delegated Codex run is grounded in the same project memory — read-only,
-so Claude Code stays the sole writer (Engramory assumes a single writer):
+Point **any** host at a store **another agent owns and writes** (e.g. Claude Code's native
+auto-memory) so a delegated run is grounded in the same project memory — read-only, so the
+owner stays the sole writer (Engramory assumes a single writer; many readers are fine):
 
 ```sh
-python tools/engramory_init.py codex-reader \
-  --project-root ~/.codex \
+python tools/engramory_init.py codex-reader   --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
+# same shape for any host — it lands in that host's own rules file:
+python tools/engramory_init.py cursor-reader  --project-root /path/to/repo --memory-root <store>
 ```
 
-It creates no store and never writes; `--memory-root` must be an existing store. The block
-uses a distinct marker, so it coexists with a write `codex` block. See
-[adapters/codex-reader/README.md](adapters/codex-reader/README.md) (incl. the data-egress note).
+Reader hosts: `codex-reader` (dogfooded) plus `claude-reader`, `cursor-reader`, `kiro-reader`,
+`cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired from each host's
+documented rules-file format, printed with an "unverified" note). It creates no store and never
+writes; `--memory-root` must be an existing store. See
+[adapters/reader/README.md](adapters/reader/README.md) (incl. the tested-host table + data-egress note).
 
 ### OpenClaw
 

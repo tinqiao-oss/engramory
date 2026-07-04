@@ -257,6 +257,104 @@ def test_init_codex_reader_rejects_project_root_inside_store(tmp_path):
     assert sorted(pp.name for pp in store.iterdir()) == before  # store dir untouched
 
 
+# --- generic reader family: any host, into its own rules file ---
+
+def test_init_reader_claude_targets_claude_md(tmp_path):
+    # claude-reader lands the read-only recall block in CLAUDE.md, not AGENTS.md
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "ccproj"
+    rc, out = _run(INIT, "claude-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0
+    assert (cfg / "CLAUDE.md").is_file() and not (cfg / "AGENTS.md").exists()
+    body = (cfg / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "BEGIN ENGRAMORY CLAUDE-READER" in body
+    assert "read-only" in body.lower() and "sole writer" in body.lower()
+    # a freshly created rules file must NOT be mislabelled with the AGENTS.md heading
+    assert "# AGENTS.md" not in body and body.lstrip().startswith("# CLAUDE.md")
+
+
+def test_init_reader_cursor_writes_mdc_with_alwaysapply(tmp_path):
+    # cursor-reader writes a dedicated .mdc rule file with the required alwaysApply frontmatter
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    rc, _ = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    mdc = cfg / ".cursor" / "rules" / "engramory-recall.mdc"
+    assert rc == 0 and mdc.is_file() and not (cfg / "AGENTS.md").exists()
+    text = mdc.read_text(encoding="utf-8")
+    assert text.startswith("---") and "alwaysApply: true" in text
+    assert "read-only" in text.lower() and "never" in text.lower()
+    # idempotent: the dedicated file is rewritten byte-identically, not appended/duplicated
+    _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert mdc.read_text(encoding="utf-8") == text
+
+
+def test_init_reader_kiro_writes_steering_with_inclusion_always(tmp_path):
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    rc, _ = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    steer = cfg / ".kiro" / "steering" / "engramory-recall.md"
+    assert rc == 0 and steer.is_file()
+    text = steer.read_text(encoding="utf-8")
+    assert text.startswith("---") and "inclusion: always" in text and "read-only" in text.lower()
+
+
+def test_init_reader_cline_targets_clinerules(tmp_path):
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    rc, _ = _run(INIT, "cline-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and (cfg / ".clinerules").is_file()
+    assert "BEGIN ENGRAMORY CLINE-READER" in (cfg / ".clinerules").read_text(encoding="utf-8")
+
+
+def test_init_reader_untested_host_prints_unverified_note(tmp_path):
+    # a non-dogfooded reader host must print the honesty note; codex-reader (tested) must not
+    store = _existing_store(tmp_path / "cc-memory")
+    rc, out = _run(INIT, "claude-reader", "--project-root", str(tmp_path / "a"), "--memory-root", str(store))
+    assert rc == 0 and "not been verified" in out.lower()
+    rc2, out2 = _run(INIT, "codex-reader", "--project-root", str(tmp_path / "b"), "--memory-root", str(store))
+    assert rc2 == 0 and "not been verified" not in out2.lower()
+
+
+def test_init_reader_readonly_guards_apply_to_any_reader(tmp_path):
+    # the read-only guards are not codex-specific: a cursor-reader with --project-root inside
+    # the store is refused too, and nothing is written into the store.
+    store = _existing_store(tmp_path / "cc-memory")
+    before = sorted(pp.name for pp in store.iterdir())
+    inside = store / "repo"
+    p = subprocess.run([sys.executable, INIT, "cursor-reader", "--project-root", str(inside),
+                        "--memory-root", str(store)], capture_output=True, text=True)
+    assert p.returncode != 0 and "inside" in (p.stdout + p.stderr).lower()
+    assert not inside.exists()
+    assert sorted(pp.name for pp in store.iterdir()) == before
+
+
+def test_init_reader_refuses_nested_target_inside_store(tmp_path):
+    # even when --project-root is NOT inside the store, a nested rules file (Cursor
+    # .cursor/rules/*.mdc) can land inside a store like <root>/.cursor — the guard checks the
+    # actual target file, not just project-root, so this is refused with nothing written.
+    repo = tmp_path / "repo"
+    store = _existing_store(repo / ".cursor")  # store is a subdir of project-root
+    p = subprocess.run([sys.executable, INIT, "cursor-reader", "--project-root", str(repo),
+                        "--memory-root", str(store)], capture_output=True, text=True)
+    assert p.returncode != 0 and "inside the memory store" in (p.stdout + p.stderr).lower()
+    assert not (repo / ".cursor" / "rules").exists()  # nothing written into the store
+
+
+def test_init_help_ascii_console_does_not_crash(tmp_path):
+    # --help must not crash on a strict ascii/OEM console (the host help must stay ASCII-safe;
+    # a Unicode ellipsis once made it raise UnicodeEncodeError). Same guard as check/doctor.
+    rc, out = _run(INIT, "--help", env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 0 and "host" in out
+
+
+def test_init_reader_ascii_console_does_not_crash(tmp_path):
+    # the reader's result lines carry an em-dash; a strict ascii console must not crash the run.
+    store = _existing_store(tmp_path / "cc-memory")
+    rc, out = _run(INIT, "codex-reader", "--project-root", str(tmp_path / "cfg"),
+                   "--memory-root", str(store), env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 0 and "init complete" in out
+
+
 # --- engramory_doctor (layer-4 backstop) ---
 
 def _note(p, name, ntype="reference", desc="a note", body="body"):
