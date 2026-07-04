@@ -28,14 +28,19 @@ of the current text (honouring uniqueness / replace_all, skipping sub-edits whos
 old_string is absent or non-unique), because Claude Code applies MultiEdit
 sub-edits in order, each on the previous result.
 
-Fail-SAFE, not fail-open, for the things that matter: an unreadable / non-UTF-8
-index is treated as empty (so any non-empty write counts as growth and is still
-gated), and a malformed numeric env var falls back to its default. Only a genuine
-unexpected exception falls open (a guard must never brick the user's editing).
+Fail-SAFE, not fail-open, for the things that matter: an UNREADABLE index (OSError)
+is treated as empty, and a NON-UTF-8 index is decoded lossily for the line/edit math
+while its size is taken from the raw on-disk bytes — either way a growing write still
+counts as growth and stays gated (never silently allowed). A malformed numeric env var
+falls back to its default. Only a genuine unexpected exception falls open (a guard must
+never brick the user's editing).
 
-Wire it up in settings.json (PreToolUse, matcher "Edit|Write|MultiEdit"):
-  "command": "python /ABSOLUTE/PATH/TO/engramory/hooks/engramory_index_guard.py"
-  (Windows: use forward slashes, e.g. python E:/path/to/engramory/hooks/...py)
+Wire it up in settings.json (PreToolUse, matcher "Edit|Write|MultiEdit"). Use the EXEC
+form so the path is passed literally — no shell, so no quoting / backslash pitfalls:
+  {"type": "command", "command": "python3",
+   "args": ["/ABSOLUTE/PATH/TO/engramory/hooks/engramory_index_guard.py"]}
+  (macOS/Linux usually have only `python3`, not `python`; on Windows use "python" or the
+   absolute interpreter path. See hooks/settings.snippet.json and hooks/INSTALL.md.)
 
 Config via environment variables (all optional):
   ENGRAMORY_HARD          hard line ceiling,  default 200

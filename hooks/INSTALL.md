@@ -49,12 +49,18 @@ and some hosts have none — see PORTING.md (coverage varies by host and version
 1. Open your settings file (`%USERPROFILE%\.claude\settings.json` for all
    projects, or `.claude/settings.json` for one project).
 2. Merge in the `hooks` block from [`settings.snippet.json`](settings.snippet.json).
-3. Fix the absolute path to `engramory_index_guard.py`. On Windows, escape
-   backslashes (`E:\\engramory\\hooks\\engramory_index_guard.py`) or use forward
-   slashes. If the path contains spaces (e.g. under `Program Files`), keep the
-   double-quotes around it as shown in the snippet.
-4. Make sure `python` is on PATH (or use a full interpreter path, e.g.
-   `C:\\Python312\\python.exe E:\\engramory\\hooks\\engramory_index_guard.py`).
+   It uses the **exec form** (`"command"` = the interpreter, `"args"` = its argument
+   list): Claude Code spawns it directly with **no shell**, so the script path in `args`
+   is passed literally — no backslash-escaping and no quoting, even under `Program Files`
+   or on Windows.
+3. Put the absolute path to `engramory_index_guard.py` in `args`.
+4. Set `"command"` to the Python that should run it:
+   - **macOS / Linux:** `python3` (a bare `python` frequently does not exist here — the
+     old shell-form snippet failed silently on such systems).
+   - **Windows:** `python`.
+   - **Most robust on any OS:** the absolute interpreter path from
+     `python -c "import sys; print(sys.executable)"` (e.g. `C:\Python312\python.exe`),
+     which sidesteps the `python`-vs-`python3` question entirely.
 
 The hook fires on every `Edit` / `Write` / `MultiEdit`, returns instantly for any
 file that isn't the index, and only acts when the target's filename is the index

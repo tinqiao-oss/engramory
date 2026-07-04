@@ -4,6 +4,55 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.3.3 — 2026-07-04
+
+Correctness, portability, and a security-boundary fix surfaced by a cross-model
+(GPT-5.5 codex) review. Backward-compatible; the doctor now reports two additional
+defect classes (escaping symlink notes, case-only slug collisions).
+
+Security
+- **doctor no longer follows a symlink out of the store root.** A *note* file that
+  resolves (via symlink) outside `MEMORY_ROOT` is flagged and skipped, not read (new
+  `escaped-note` triage bucket); a `MEMORY.md` *index* that is itself an escaping symlink
+  is refused before it is read. Both close a path where a planted symlink could make
+  doctor open an arbitrary file and echo a fragment of it (a malformed-frontmatter line,
+  or a `.md`-looking link target) into its report. This mirrors the escape check already
+  enforced on index pointers; the store is attacker-influenceable input (SECURITY.md).
+  The containment test was also hardened (correct at a drive / filesystem root) and shared
+  across notes, index, and pointers. Regression tests run on Linux/macOS CI (symlink-
+  privilege gated on Windows).
+
+Fixed
+- **Hook install snippet uses the exec form.** `hooks/settings.snippet.json` now sets
+  `"command": "python3"` + `"args": [<abs path>]` (no shell), so the script path is passed
+  literally (no backslash/quoting pitfalls) and `python3` — the interpreter that actually
+  exists on most macOS/Linux — is the default. The old shell-form `python "..."` snippet
+  could fail *silently* where a bare `python` is absent (common on macOS). `hooks/INSTALL.md`
+  and the hook's own wire-up docstring updated to match.
+- **doctor duplicate-slug check is case-insensitive.** `foo.md` and `FOO.md` (which coexist
+  on a case-sensitive FS but collide on macOS/Windows) are now reported as a portability
+  defect, not silently accepted.
+- **doctor resolves wikilink aliases and anchors.** `[[slug|Alias]]` and `[[slug#Heading]]`
+  now resolve on the slug (no more false "no target file" info); a path-carrying
+  `[[dir/slug]]` is reported as unresolvable rather than basename-collapsed (which could
+  wrongly rescue an unrelated same-named note from orphan status).
+- **Hook docstring matches behavior.** Clarified that a non-UTF-8 index is decoded lossily
+  (sized by raw bytes) while only an *unreadable* index is treated as empty — both still
+  gate a growing write.
+- **doctor no longer reports a false orphan for a miscased index pointer on macOS.**
+  `os.path.realpath` canonicalises filename case only on *Windows*, not macOS, so a
+  miscased-but-existing pointer kept its miscased basename, missed the real note, and was
+  reported as an orphan. doctor now case-folds a resolved, existing pointer back to the
+  real note key (verified on a real Mac; caught by the new macOS CI job — exactly the
+  class of bug it was added to find).
+
+Changed
+- **CI matrix adds macOS.** `macos-latest` joins the os matrix (the project has
+  `python`-name, path, and symlink platform-sensitive points, and many users are on macOS).
+- **rules-snippet notes the 150-line / 20 KB soft warning** (not just the 200 / 25 KB hard
+  cap) and that a native auto-memory host (Claude Code) already loads `MEMORY.md`, so
+  re-reading it at task start is redundant there.
+
 ## 0.3.2 — 2026-06-24
 
 Third host adapter (Kiro) — docs-only, backward-compatible. Motivated by a real report
