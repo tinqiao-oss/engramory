@@ -36,10 +36,13 @@ Hardened (from a codex + multi-agent review)
   hardcoded `# AGENTS.md`.
 - Cline/Windsurf use the single-file form (`.clinerules` / `.windsurfrules`, still read by
   current versions); the adapter README notes the newer rules-directory alternative.
+- `engramory_init` is now ascii/OEM-console crash-safe (reconfigures stdout like the doctor/check
+  tools) and its `--help` is ASCII-only — a Unicode ellipsis had made `--help` raise
+  `UnicodeEncodeError` on a strict ascii console (caught by a final codex re-review of the fixes).
 
 Verified
 - All four injection shapes smoke-tested (AGENTS.md / CLAUDE.md marker; Cursor `.mdc` + Kiro
-  steering frontmatter). +7 tests (82 tool + 29 hook). Green on Windows + a real Mac (py3.9).
+  steering frontmatter). +9 tests (84 tool + 29 hook). Green on Windows + a real Mac (py3.9).
 
 ## 0.4.0 — 2026-07-04
 

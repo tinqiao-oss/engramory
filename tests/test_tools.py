@@ -340,6 +340,21 @@ def test_init_reader_refuses_nested_target_inside_store(tmp_path):
     assert not (repo / ".cursor" / "rules").exists()  # nothing written into the store
 
 
+def test_init_help_ascii_console_does_not_crash(tmp_path):
+    # --help must not crash on a strict ascii/OEM console (the host help must stay ASCII-safe;
+    # a Unicode ellipsis once made it raise UnicodeEncodeError). Same guard as check/doctor.
+    rc, out = _run(INIT, "--help", env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 0 and "host" in out
+
+
+def test_init_reader_ascii_console_does_not_crash(tmp_path):
+    # the reader's result lines carry an em-dash; a strict ascii console must not crash the run.
+    store = _existing_store(tmp_path / "cc-memory")
+    rc, out = _run(INIT, "codex-reader", "--project-root", str(tmp_path / "cfg"),
+                   "--memory-root", str(store), env={"PYTHONIOENCODING": "ascii"})
+    assert rc == 0 and "init complete" in out
+
+
 # --- engramory_doctor (layer-4 backstop) ---
 
 def _note(p, name, ntype="reference", desc="a note", body="body"):

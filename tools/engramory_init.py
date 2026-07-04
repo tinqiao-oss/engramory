@@ -374,7 +374,7 @@ def build_parser():
     parser.add_argument("host", nargs="?", default="codex", choices=tuple(HOST_CONFIG),
                         help="host to initialize: write hosts (codex, openclaw) or a read-only "
                              "reader host '<host>-reader' (codex-reader, claude-reader, "
-                             "cursor-reader, kiro-reader, cline-reader, …)")
+                             "cursor-reader, kiro-reader, cline-reader, etc.)")
     parser.add_argument("--project-root", default=None,
                         help="project/workspace root (default: '.'; openclaw defaults to ~/.openclaw/workspace)")
     parser.add_argument(
@@ -391,6 +391,14 @@ def build_parser():
 
 
 def main(argv):
+    # Keep stdout from crashing on a strict OEM/ascii console (Windows cp437/cp850 or a POSIX
+    # C/ascii locale): --help and the result lines use an em-dash / other non-ASCII, which those
+    # codepages can't encode and would otherwise raise UnicodeEncodeError. Matches engramory_doctor
+    # / engramory_check. Run before parse_args so --help output is guarded too.
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):
+        pass
     args = build_parser().parse_args(argv[1:])
     return init_host(args, args.host)
 
