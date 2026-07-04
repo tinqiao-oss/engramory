@@ -113,3 +113,14 @@ copies the skill into `.agents/skills/engramory`, and keeps the Engramory store
 separate from the host's own memory. See
 [adapters/codex/README.md](../adapters/codex/README.md) and
 [adapters/openclaw/README.md](../adapters/openclaw/README.md).
+
+To let Codex **recall** (read-only) from a store another agent owns and writes — e.g.
+Claude Code's native memory — use the `codex-reader` host instead (it creates no store and
+never writes; `--memory-root` must be an existing store):
+
+```sh
+python tools/engramory_init.py codex-reader --project-root ~/.codex \
+  --memory-root ~/.claude/projects/<project>/memory
+```
+
+See [adapters/codex-reader/README.md](../adapters/codex-reader/README.md).
