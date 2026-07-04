@@ -629,6 +629,105 @@ def test_doctor_help_exits_zero(tmp_path):
     assert rc == 0 and "engramory_doctor" in out
 
 
+# --- 0.3.3 symlink-escape / case-only dup / wikilink alias+anchor+path ---
+
+def test_doctor_symlink_note_escaping_root_is_flagged(tmp_path):
+    # A note that is a symlink pointing OUTSIDE the store must be flagged and NOT read
+    # (reading it could echo a fragment of an arbitrary file into the report). Symlink
+    # creation needs privilege on Windows — no-op there if it isn't available (the check
+    # runs on Linux/macOS CI, which is where escaping symlinks matter).
+    outside = tmp_path / "outside_secret.md"
+    outside.write_text("---\nSECRETMARKER: do-not-leak\n", encoding="utf-8")  # malformed frontmatter
+    store = tmp_path / "store"
+    store.mkdir()
+    _note(store / "real.md", "real")
+    (store / "MEMORY.md").write_text("# Index\n- [R](real.md) — h\n", encoding="utf-8")
+    try:
+        os.symlink(str(outside), str(store / "evil.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return  # no symlink privilege (e.g. Windows without Developer Mode) -> skip
+    rc, out = _run(DOCTOR, str(store))
+    assert rc == 1 and "resolves outside the store root" in out  # flagged as an escape
+    assert "SECRETMARKER" not in out  # external content was NOT read into the report
+    assert "escaped-note" in out      # bucketed under its own class
+
+
+def test_doctor_symlinked_index_escaping_root_is_refused(tmp_path):
+    # MEMORY.md itself being a symlink OUT of the store must be REFUSED, not read: the
+    # index is read first/unconditionally and its pointer targets are echoed, so reading
+    # an external file as the index would leak fragments of it.
+    outside = tmp_path / "outside_index.md"
+    outside.write_text("# Not yours\n- [x](PRIVATE-roadmap.md) — leak\n", encoding="utf-8")
+    store = tmp_path / "store"
+    store.mkdir()
+    try:
+        os.symlink(str(outside), str(store / "MEMORY.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return  # no symlink privilege -> skip
+    rc, out = _run(DOCTOR, str(store))
+    assert rc == 1 and "resolves outside the store root" in out
+    assert "PRIVATE-roadmap" not in out  # external content was NOT parsed/echoed
+
+
+def test_doctor_symlink_note_inside_root_is_ok(tmp_path):
+    # A symlink whose target is INSIDE the store is not an escape — it must not be flagged.
+    _note(tmp_path / "real.md", "real")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [R](real.md) — h\n- [A](alias.md) — h\n", encoding="utf-8")
+    try:
+        os.symlink(str(tmp_path / "real.md"), str(tmp_path / "alias.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert "resolves outside the store root" not in out
+
+
+def test_doctor_case_only_duplicate_slug_flagged(tmp_path):
+    # `foo.md` and `FOO.md` collide on a case-insensitive FS (macOS/Windows). On a
+    # case-insensitive FS they can't both exist, so the collision is impossible -> skip;
+    # on a case-sensitive FS (Linux) doctor must warn the store isn't portable.
+    if _fs_case_insensitive(tmp_path):
+        return
+    _note(tmp_path / "foo.md", "foo")
+    _note(tmp_path / "FOO.md", "FOO")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [a](foo.md) — h\n- [b](FOO.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "up to case" in out and "duplicate-slug" in out
+
+
+def test_doctor_wikilink_alias_resolves(tmp_path):
+    # [[slug|Alias]] (Obsidian display text) must resolve to `slug`, not read as a broken
+    # link (false "no target file yet" info).
+    _note(tmp_path / "a.md", "a", body="see [[b|the B note]]")
+    _note(tmp_path / "b.md", "b")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — h\n- [B](b.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "has no target file" not in out and "clean" in out
+
+
+def test_doctor_wikilink_anchor_resolves(tmp_path):
+    # [[slug#Heading]] must resolve to `slug`, not report a missing 'slug#Heading'.
+    _note(tmp_path / "a.md", "a", body="see [[b#a-section]]")
+    _note(tmp_path / "b.md", "b")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — h\n- [B](b.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "has no target file" not in out and "clean" in out
+
+
+def test_doctor_wikilink_with_path_does_not_rescue_orphan(tmp_path):
+    # [[dir/slug]] isn't a bare slug; it must NOT basename-collapse to 'slug' and wrongly
+    # credit an unrelated same-named note as referenced (hiding that it's an orphan).
+    _note(tmp_path / "a.md", "a", body="see [[sub/b]]")
+    _note(tmp_path / "b.md", "b")  # only reachable via the malformed [[sub/b]] link
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "orphan" in out and "b.md" in out  # b.md is a genuine orphan
+    assert "isn't a bare slug" in out  # the bad link is reported (info)
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

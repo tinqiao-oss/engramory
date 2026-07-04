@@ -13,8 +13,9 @@ host-native auto-memory store.
 Catches drift the per-write checks miss, on two levels:
 
 STRUCTURE (ISSUE -> exit 1): an over-cap index, index pointers to files that no
-longer exist, pointers that escape the store root, orphan notes that nothing
-references, and duplicate note slugs (two files sharing a basename).
+longer exist, pointers OR note files (symlinks) that escape the store root, orphan
+notes that nothing references, and duplicate note slugs — two files sharing a
+basename, or two that differ only by case (they collide on a case-insensitive FS).
 
 PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — each
 note must have well-formed frontmatter (no malformed lines, unclosed quotes, or a
@@ -114,6 +115,23 @@ def _read(p):
     return None if raw is None else raw.decode("utf-8-sig", "replace")
 
 
+def _contained(real, root_abs):
+    # True if an ALREADY-realpath'd `real` is the store root or lies inside it. The
+    # trailing-separator boundary stops a sibling like `<root>-old` from counting as
+    # inside; rstripping the root's own trailing separator keeps a drive / filesystem
+    # root (`/`, `E:\`) — where root_abs already ends in a separator — from becoming
+    # `//` / `E:\\` and wrongly rejecting its own children.
+    return real == root_abs or real.startswith(root_abs.rstrip(os.sep) + os.sep)
+
+
+def _within(path, root_abs):
+    # True if `path`, with all symlinks resolved, is the store root or lies inside it.
+    # Keeps a symlinked note / index / pointer from resolving outside the store — the
+    # store is attacker-influenceable input (SECURITY.md), so a planted symlink must not
+    # become a read primitive. root_abs must already be an os.path.realpath.
+    return _contained(os.path.realpath(path), root_abs)
+
+
 def _frontmatter(text):
     # Validate + parse Engramory's restricted `key: value` frontmatter between
     # leading `---` fences. Indentation is ignored (so a nested `metadata:` block's
@@ -166,9 +184,21 @@ def main(argv):
     schema = "--no-schema" not in args  # default: validate frontmatter too
     positional = [a for a in args if not a.startswith("-")]
     root = positional[0] if positional else "."
+    # realpath (not abspath) so a symlinked pointer/note/index can't resolve outside the
+    # store while still passing the escape check; the root is resolved the same way so a
+    # store reached via a symlink/junction stays consistent.
+    root_abs = os.path.realpath(root)
     idx_path = os.path.join(root, "MEMORY.md")
     if not os.path.isfile(idx_path):
         print(f"engramory-doctor: no index at {idx_path}")
+        return 1
+    # The index is read first and unconditionally, and its pointer targets are echoed in
+    # the report — so a MEMORY.md that is itself a symlink escaping the store root must be
+    # refused, not read (else an arbitrary file is parsed as the index and fragments of it
+    # leak out). Same boundary as the note/pointer escape checks (SECURITY.md).
+    if not _within(idx_path, root_abs):
+        print(f"engramory-doctor: index at {idx_path} resolves outside the store root "
+              f"(symlink escape) — refusing to read")
         return 1
 
     iraw = _read_bytes(idx_path)
@@ -198,26 +228,44 @@ def main(argv):
     # string prefix, so a sibling like "templates-old/" is still checked and a
     # nested "sub/templates/" is not wrongly skipped.
     notes = {}
+    seen_ci = {}  # lower-cased slug -> first on-disk name, to catch case-only collisions
     for dp, _, fs in os.walk(root):
         rel = os.path.relpath(dp, root).replace("\\", "/")
         parts = rel.split("/")
         if parts and parts[0] in ("templates", "archive"):
             continue
         for f in fs:
-            if f.lower().endswith(".md"):  # tolerate .MD/.Md so they aren't skipped (and bypass schema) on case-insensitive FS
-                if f in notes:
-                    # Same slug in two dirs: the basename-keyed model can only hold
-                    # one, so the other would be invisible to these checks. Surface
-                    # it instead of silently overwriting.
-                    issues.append(f"duplicate note slug '{f}' in multiple dirs: "
-                                  f"{notes[f]} and {os.path.join(dp, f)} — slugs must be unique")
-                notes[f] = os.path.join(dp, f)
+            if not f.lower().endswith(".md"):  # tolerate .MD/.Md so they aren't skipped (and bypass schema) on case-insensitive FS
+                continue
+            full = os.path.join(dp, f)
+            # A note that is a symlink resolving OUTSIDE the store root must not be
+            # followed and read: doctor would otherwise open an arbitrary file and could
+            # echo a fragment of it (a malformed-frontmatter line) into the report. Same
+            # boundary the index-pointer escape check enforces — the store is attacker-
+            # influenceable input (SECURITY.md), so a planted symlink can't be a read
+            # primitive. Flag it and skip (don't add to `notes`, don't read).
+            if not _within(full, root_abs):
+                issues.append(f"note file '{f}' resolves outside the store root "
+                              f"(symlink escape) — not read")
+                continue
+            # Case-only slug collision: `foo.md` and `FOO.md` can coexist on a case-
+            # sensitive FS (Linux) but collide when the store moves to a case-insensitive
+            # FS (macOS/Windows). Report it as a portability defect (duplicate-slug bucket).
+            lkey = f.lower()
+            if lkey in seen_ci and seen_ci[lkey] != f:
+                issues.append(f"duplicate note slug up to case: '{seen_ci[lkey]}' vs '{f}' "
+                              f"collide on a case-insensitive filesystem (macOS/Windows) — rename one")
+            else:
+                seen_ci.setdefault(lkey, f)
+            if f in notes:
+                # Same slug in two dirs: the basename-keyed model can only hold
+                # one, so the other would be invisible to these checks. Surface
+                # it instead of silently overwriting.
+                issues.append(f"duplicate note slug '{f}' in multiple dirs: "
+                              f"{notes[f]} and {full} — slugs must be unique")
+            notes[f] = full
 
     referenced, indexed = set(), set()
-    # realpath (not abspath) so a symlinked pointer can't resolve outside the store
-    # while still passing the escape check; the root is resolved the same way so a
-    # store reached via a symlink/junction stays consistent.
-    root_abs = os.path.realpath(root)
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
     # Match the link target up to whitespace / '#' / ')' (so anchored `(note.md#sec)`
     # and titled `(note.md "Title")` links resolve), skip external URLs ending in
@@ -227,7 +275,7 @@ def main(argv):
         if "://" in tgt:
             continue  # external URL, not a local note pointer
         full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
-        if full != root_abs and not full.startswith(root_abs + os.sep):
+        if not _contained(full, root_abs):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
         if os.path.isfile(full):
@@ -263,7 +311,20 @@ def main(argv):
             issues.append(f"cannot read note file: {p}")
             continue
         for w in re.findall(r"\[\[([^\]]+)\]\]", text):
-            cand = os.path.basename(w if w.endswith(".md") else w + ".md")
+            # Engramory wikilinks are bare slugs. Tolerate an Obsidian-style display alias
+            # (`[[slug|Alias]]`) and a section anchor (`[[slug#Heading]]`) by resolving on
+            # the slug part only, so those aren't misread as broken links. A target that
+            # still carries a path separator ('dir/slug') is NOT a bare slug: don't
+            # basename-collapse it (that could wrongly "rescue" an unrelated note sharing
+            # the basename from orphan status) — report it as unresolvable instead.
+            target = w.split("|", 1)[0].split("#", 1)[0].strip()
+            if not target:
+                continue
+            if "/" in target or "\\" in target:
+                info.append(f"[[{w}]] in {base} isn't a bare slug (engramory links are flat "
+                            f"slugs, no path) — can't resolve it")
+                continue
+            cand = target if target.endswith(".md") else target + ".md"
             if cand == base:
                 continue  # a note linking to itself isn't "referenced by another note"
             if cand in notes:
@@ -348,6 +409,8 @@ def main(argv):
                 b = "missing-date"
             elif "'Why:' line" in s or "'How to apply:' line" in s:
                 b = "missing-why-how"
+            elif "resolves outside the store root" in s:
+                b = "escaped-note"
             elif "points to a missing file" in s or "escapes the store root" in s:
                 b = "broken-pointer"
             elif "orphan note" in s:
@@ -359,10 +422,11 @@ def main(argv):
             else:
                 b = "other"
             buckets[b] = buckets.get(b, 0) + 1
-        order = ["over-cap", "broken-pointer", "duplicate-slug", "orphan",
+        order = ["over-cap", "escaped-note", "broken-pointer", "duplicate-slug", "orphan",
                  "missing-date", "missing-why-how", "other"]
         fixhints = {
             "over-cap": "compact MEMORY.md — pointer-ify long lines, merge, archive cold notes",
+            "escaped-note": "remove the symlink note (or point it at a file inside the store) — it was not read",
             "broken-pointer": "repair or remove the MEMORY.md pointer (needs a human)",
             "duplicate-slug": "rename one of the clashing note files so each slug is unique",
             "orphan": "link it from the index or another note, or move it under archive/",
