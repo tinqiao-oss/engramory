@@ -39,6 +39,12 @@ Fixed
 - **Hook docstring matches behavior.** Clarified that a non-UTF-8 index is decoded lossily
   (sized by raw bytes) while only an *unreadable* index is treated as empty — both still
   gate a growing write.
+- **doctor no longer reports a false orphan for a miscased index pointer on macOS.**
+  `os.path.realpath` canonicalises filename case only on *Windows*, not macOS, so a
+  miscased-but-existing pointer kept its miscased basename, missed the real note, and was
+  reported as an orphan. doctor now case-folds a resolved, existing pointer back to the
+  real note key (verified on a real Mac; caught by the new macOS CI job — exactly the
+  class of bug it was added to find).
 
 Changed
 - **CI matrix adds macOS.** `macos-latest` joins the os matrix (the project has

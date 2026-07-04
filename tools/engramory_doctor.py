@@ -132,6 +132,24 @@ def _within(path, root_abs):
     return _contained(os.path.realpath(path), root_abs)
 
 
+def _real_basename(full, notes):
+    # Map a resolved, EXISTING pointer target to its real note-dict key. os.path.realpath
+    # canonicalises filename CASE only on Windows — on macOS (also case-insensitive) it
+    # returns the caller's original case, so a miscased pointer keeps a miscased basename
+    # and would miss the notes key -> a false 'orphan'. Callers reach here only after
+    # os.path.isfile(full) confirmed the file exists on THIS filesystem, so a case-fold
+    # match is sound: on a case-sensitive FS (Linux) a miscased target simply wouldn't
+    # exist, and we'd never get here.
+    base = os.path.basename(full)
+    if base in notes:
+        return base
+    low = base.lower()
+    for nk in notes:
+        if nk.lower() == low:
+            return nk
+    return base
+
+
 def _frontmatter(text):
     # Validate + parse Engramory's restricted `key: value` frontmatter between
     # leading `---` fences. Indentation is ignored (so a nested `metadata:` block's
@@ -279,10 +297,11 @@ def main(argv):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
         if os.path.isfile(full):
-            # the resolved real name — realpath canonicalises case on case-insensitive
-            # filesystems, so this matches the notes-dict key (from os.walk) instead of
-            # the pointer's possibly-miscased text, avoiding a false 'orphan'.
-            base = os.path.basename(full)
+            # Match the real note-dict key (from os.walk), not the pointer's possibly-
+            # miscased text, so a miscased-but-existing pointer on a case-insensitive FS
+            # (macOS/Windows) doesn't yield a false 'orphan'. See _real_basename — realpath
+            # canonicalises case on Windows but NOT on macOS, so we fold explicitly.
+            base = _real_basename(full, notes)
             referenced.add(base)
             indexed.add(base)
         else:
@@ -295,7 +314,8 @@ def main(argv):
     for tgt in _PTR_RE.findall(itext):
         if "://" in tgt:
             continue
-        b = os.path.basename(os.path.realpath(os.path.join(root, tgt.replace("\\", "/"))))
+        full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
+        b = _real_basename(full, notes) if os.path.isfile(full) else os.path.basename(full)
         if b in indexed:
             ptr_counts[b] = ptr_counts.get(b, 0) + 1
     for b, n in sorted(ptr_counts.items()):
