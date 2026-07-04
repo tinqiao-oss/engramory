@@ -4,6 +4,38 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.4.0 — 2026-07-04
+
+New **read-only Codex reader** adapter — additive and backward-compatible; the existing
+adapters (codex, openclaw, kiro) and the Claude Code hook/skill deployment are untouched.
+
+Added
+- **`codex-reader` host in `engramory_init.py`.** Wires Codex to *recall* from a store that
+  another agent (typically Claude Code's native auto-memory) **owns and writes** — for the
+  pattern where Claude Code is the curator and you delegate a task/sub-agent run to Codex and
+  want it grounded in the same memory. It is **read-only**: creates no store, touches no
+  `.gitignore`, installs no write tools, and uses a recall-only snippet (no write protocol).
+  `--memory-root` MUST point at an existing store (it refuses otherwise — it never creates
+  one). Its `AGENTS.md` marker is distinct, so it coexists with a write `codex` block. The
+  read-only guarantee is enforced up front: it refuses `--install-skill` (which would copy the
+  write tools) and refuses a `--project-root` inside the store (which would write into it).
+- **`adapters/codex-reader/`** — `README.md` (why read-only = the single-writer invariant,
+  data-egress caveat, setup) + `recall-snippet.md` (the read-only recall rules: read the index,
+  open only relevant notes, verify before acting, **never write** — surface durable facts to
+  the user instead).
+
+Verified
+- End-to-end: a Codex run wired only with the reader block read `MEMORY.md`, opened the one
+  relevant note, and returned the fact — under `codex exec -s read-only` (physically no write).
+- +6 tests (read-only points at an existing store / refuses a missing one with no partial write
+  / coexists with the write `codex` block / no write tooling in the block / refuses
+  `--install-skill` / refuses `--project-root` inside the store). 75 tool + 29 hook tests pass.
+
+Unchanged
+- The write `codex`/`openclaw`/`kiro` adapters, `rules-snippet.md`, the doctor/check tools,
+  and the Claude Code `PreToolUse` hook are all byte-for-byte unchanged; new behavior is gated
+  behind per-host config that defaults to the existing path.
+
 ## 0.3.3 — 2026-07-04
 
 Correctness, portability, and a security-boundary fix surfaced by a cross-model

@@ -4,15 +4,22 @@ engramory_init - bootstrap Engramory for an agent host.
 
 Usage:
 
-    python tools/engramory_init.py codex    --project-root <repo> --install-skill
-    python tools/engramory_init.py openclaw                       --install-skill
+    python tools/engramory_init.py codex        --project-root <repo> --install-skill
+    python tools/engramory_init.py openclaw                           --install-skill
+    python tools/engramory_init.py codex-reader --project-root <repo> --memory-root <existing store>
 
-For each host the command creates a local memory store, adds a marked Engramory block
-to the host's always-loaded AGENTS.md, optionally installs the Engramory skill under
-.agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
+For a WRITE host (codex, openclaw) the command creates a local memory store, adds a marked
+Engramory block to the host's always-loaded AGENTS.md, optionally installs the Engramory skill
+under .agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
 store to .gitignore when the store lives inside the project/workspace.
 
-Defaults: codex uses --project-root '.', openclaw uses ~/.openclaw/workspace.
+The READ-ONLY host `codex-reader` instead wires Codex to *recall* from a store another agent
+(typically Claude Code) owns and writes: it creates no store, touches no .gitignore, and uses a
+recall-only snippet (no write protocol). `--memory-root` MUST point at an existing store (e.g.
+Claude Code's memory dir). Its marker is distinct, so it coexists with a write `codex` block in
+the same AGENTS.md. See adapters/codex-reader/README.md.
+
+Defaults: codex/codex-reader use --project-root '.', openclaw uses ~/.openclaw/workspace.
 """
 import argparse
 import os
@@ -151,6 +158,18 @@ def _openclaw_note(index_display, check_display, protocol_display):
 - Full protocol reference: `{protocol_display}`."""
 
 
+def _codex_reader_note(index_display, check_display, protocol_display):
+    # Read-only reader: it never writes, so there is no engramory_check step and
+    # check_display is intentionally unused (signature kept uniform for _render_block).
+    return f"""Codex read-only wiring:
+
+- Recall from `{index_display}` — this is another agent's memory index (typically Claude
+  Code's native auto-memory). You have READ access only; Claude Code is the sole writer.
+- NEVER create, edit, move, or delete anything in this store (no new notes, no edits to
+  `MEMORY.md`). If you learn something durable, surface it to the user instead of writing it.
+- Full protocol reference (recall + the write side you do NOT use): `{protocol_display}`."""
+
+
 # Per-host wiring. Both Codex and OpenClaw use an always-loaded AGENTS.md and auto-discover
 # Agent Skills from .agents/skills, so the only differences are the block markers, the
 # default root, and the host-specific note appended under the shared rules snippet.
@@ -169,11 +188,25 @@ HOST_CONFIG = {
         "default_root": "~/.openclaw/workspace",
         "note": _openclaw_note,
     },
+    # Read-only reader: wire Codex to RECALL from a store another agent (Claude Code) owns
+    # and writes. It creates no store, touches no .gitignore, and uses a recall-only snippet
+    # (no write protocol). Distinct markers so it coexists with the write `codex` block in the
+    # same AGENTS.md. `--memory-root` MUST point at an existing store (e.g. Claude Code's
+    # memory dir). See adapters/codex-reader/README.md.
+    "codex-reader": {
+        "label": "Codex (read-only)",
+        "begin": "<!-- BEGIN ENGRAMORY CODEX-READER -->",
+        "end": "<!-- END ENGRAMORY CODEX-READER -->",
+        "default_root": ".",
+        "creates_store": False,
+        "snippet": "adapters/codex-reader/recall-snippet.md",
+        "note": _codex_reader_note,
+    },
 }
 
 
 def _render_block(cfg, source_root, project_root, memory_root, install_skill):
-    snippet = _read_text(source_root / "rules-snippet.md").strip()
+    snippet = _read_text(source_root / cfg.get("snippet", "rules-snippet.md")).strip()
     memory_display = _display_path(memory_root, project_root)
     index_display = (Path(memory_display) / "MEMORY.md").as_posix()
     snippet = snippet.replace("<MEMORY_ROOT>", memory_display)
@@ -189,13 +222,15 @@ def _render_block(cfg, source_root, project_root, memory_root, install_skill):
     return cfg["begin"] + "\n" + snippet + "\n\n" + note + "\n" + cfg["end"]
 
 
-def _require_sources(source_root, install_skill):
+def _require_sources(source_root, install_skill, snippet_rel="rules-snippet.md"):
     # Fail fast with a clear message (before any side effects) if the repo this tool
-    # ships in is incomplete, instead of a raw FileNotFoundError mid-copy.
+    # ships in is incomplete, instead of a raw FileNotFoundError mid-copy. `snippet_rel`
+    # is the host's rules snippet (default rules-snippet.md; a read-only host uses its own).
     required = ["templates/MEMORY.md", "rules-snippet.md", "SKILL.md",
-                "tools/engramory_check.py", "tools/engramory_doctor.py"]
+                "tools/engramory_check.py", "tools/engramory_doctor.py", snippet_rel]
     if install_skill:
         required += ["PORTING.md", "LICENSE"]
+    required = list(dict.fromkeys(required))  # dedup (snippet_rel may be rules-snippet.md)
     missing = [r for r in required if not (source_root / r).exists()]
     if missing:
         raise SystemExit("Engramory source files missing (reinstall the repo): "
@@ -205,7 +240,7 @@ def _require_sources(source_root, install_skill):
 def init_host(args, host):
     cfg = HOST_CONFIG[host]
     source_root = _repo_root()
-    _require_sources(source_root, args.install_skill)
+    _require_sources(source_root, args.install_skill, cfg.get("snippet", "rules-snippet.md"))
     root_arg = args.project_root if args.project_root is not None else cfg["default_root"]
     project_root = Path(root_arg).expanduser().resolve()
     memory_root = Path(args.memory_root).expanduser()
@@ -216,11 +251,41 @@ def init_host(args, host):
     if memory_root == project_root:
         raise SystemExit("memory root must be a directory inside or outside the project, not the project root itself")
 
+    # A read-only host (creates_store=False) never creates or touches the store — it only
+    # wires the host to RECALL from a store another agent owns and writes. Enforce that up
+    # front (before any side effect / directory creation) with clear messages:
+    creates_store = cfg.get("creates_store", True)
+    if not creates_store:
+        # It installs no skill and no write tools — only a recall block. Passing
+        # --install-skill would copy engramory_check/doctor etc., contradicting that.
+        if args.install_skill:
+            raise SystemExit(
+                f"read-only host '{host}': --install-skill is not supported — a reader installs "
+                f"no skill and no write tools, it only adds a recall block to AGENTS.md. "
+                f"Re-run without --install-skill.")
+        # AGENTS.md is written under --project-root; if that is inside the store, the write
+        # would modify the very store the reader must not touch. Refuse it.
+        if _same_or_inside(project_root, memory_root):
+            raise SystemExit(
+                f"read-only host '{host}': --project-root ({project_root}) is inside the memory "
+                f"store ({memory_root}) — writing AGENTS.md there would modify the read-only "
+                f"store. Point --project-root outside the store (e.g. ~/.codex).")
+        # The store must already exist; this host never creates one.
+        if not (memory_root / "MEMORY.md").is_file():
+            raise SystemExit(
+                f"read-only host '{host}': no MEMORY.md at {memory_root} — pass --memory-root "
+                f"pointing at an EXISTING memory store (e.g. Claude Code's memory directory, "
+                f"~/.claude/projects/<project>/memory). This host never creates a store.")
+
     project_root.mkdir(parents=True, exist_ok=True)
 
     results = []
-    results.append(("memory", _ensure_memory_store(source_root, memory_root)))
-    results.append(("gitignore", _ensure_gitignore(project_root, memory_root)))
+    if creates_store:
+        results.append(("memory", _ensure_memory_store(source_root, memory_root)))
+        results.append(("gitignore", _ensure_gitignore(project_root, memory_root)))
+    else:
+        results.append(("memory", f"read-only — using existing store at {memory_root} (not created/modified)"))
+        results.append(("gitignore", "skipped (read-only host does not manage the store)"))
 
     skill_result = "not requested"
     if args.install_skill:
@@ -244,13 +309,15 @@ def init_host(args, host):
 def build_parser():
     parser = argparse.ArgumentParser(description="Bootstrap Engramory for an agent host.")
     parser.add_argument("host", nargs="?", default="codex", choices=tuple(HOST_CONFIG),
-                        help="agent host to initialize (codex, openclaw)")
+                        help="agent host to initialize (codex, openclaw, codex-reader)")
     parser.add_argument("--project-root", default=None,
-                        help="project/workspace root (default: '.' for codex, ~/.openclaw/workspace for openclaw)")
+                        help="project/workspace root (default: '.' for codex/codex-reader, ~/.openclaw/workspace for openclaw)")
     parser.add_argument(
         "--memory-root",
         default=".engramory-memory",
-        help="memory store path; relative paths are resolved under --project-root",
+        help="memory store path; relative paths are resolved under --project-root. For the "
+             "read-only 'codex-reader' host this MUST be an existing store (it is not created), "
+             "e.g. Claude Code's memory dir ~/.claude/projects/<project>/memory",
     )
     parser.add_argument("--install-skill", action="store_true", help="copy Engramory into .agents/skills/engramory")
     parser.add_argument("--force", action="store_true",

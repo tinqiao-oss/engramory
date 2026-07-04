@@ -167,6 +167,96 @@ def test_init_codex_and_openclaw_coexist_with_distinct_blocks(tmp_path):
     assert agents2.count("BEGIN ENGRAMORY CODEX") == 1 and agents2.count("BEGIN ENGRAMORY OPENCLAW") == 1
 
 
+# --- engramory_init (codex-reader: read-only recall from another agent's store) ---
+
+def _existing_store(root):
+    # a minimal EXISTING Engramory store, like Claude Code's memory dir the reader points at
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    _note(root / "a-note.md", "a-note")
+    return root
+
+
+def test_init_codex_reader_read_only_points_at_existing_store(tmp_path):
+    store = _existing_store(tmp_path / "cc-memory")
+    before = sorted(p.name for p in store.iterdir())
+    cfg = tmp_path / "codexcfg"
+    rc, out = _run(INIT, "codex-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and "Codex (read-only) init complete" in out
+    agents = (cfg / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents.count("BEGIN ENGRAMORY CODEX-READER") == 1
+    low = agents.lower()
+    assert "read-only" in low and "never" in low and "sole writer" in low  # read-only intent explicit
+    assert "cc-memory" in agents  # points at the existing store
+    assert not (cfg / ".engramory-memory").exists()  # created NO new store
+    assert not (cfg / ".gitignore").exists()          # and NO gitignore
+    assert sorted(p.name for p in store.iterdir()) == before  # source store untouched
+    # idempotent
+    rc2, _ = _run(INIT, "codex-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    agents2 = (cfg / "AGENTS.md").read_text(encoding="utf-8")
+    assert rc2 == 0 and agents2.count("BEGIN ENGRAMORY CODEX-READER") == 1
+
+
+def test_init_codex_reader_refuses_missing_store(tmp_path):
+    # the read-only host must NOT create a store; pointing at a non-existent one fails cleanly
+    cfg = tmp_path / "codexcfg"
+    p = subprocess.run([sys.executable, INIT, "codex-reader", "--project-root", str(cfg),
+                        "--memory-root", str(tmp_path / "nope")], capture_output=True, text=True)
+    assert p.returncode != 0
+    assert "no MEMORY.md" in (p.stdout + p.stderr)
+    assert not (cfg / "AGENTS.md").exists()   # no partial write
+    assert not (tmp_path / "nope").exists()   # did not create the missing store
+
+
+def test_init_codex_reader_coexists_with_write_codex(tmp_path):
+    # a read-only reader block and a write codex block live in one AGENTS.md (distinct markers),
+    # and re-running the write host leaves the reader block intact.
+    store = _existing_store(tmp_path / "cc-memory")
+    proj = tmp_path / "proj"
+    _run(INIT, "codex", "--project-root", str(proj))  # write adapter (creates its own store)
+    rc, _ = _run(INIT, "codex-reader", "--project-root", str(proj), "--memory-root", str(store))
+    agents = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert rc == 0
+    assert "<!-- BEGIN ENGRAMORY CODEX -->" in agents         # write block intact
+    assert "<!-- BEGIN ENGRAMORY CODEX-READER -->" in agents  # reader block present
+    _run(INIT, "codex", "--project-root", str(proj))          # re-run the write host
+    agents2 = (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents2.count("BEGIN ENGRAMORY CODEX-READER") == 1
+    assert agents2.count("<!-- BEGIN ENGRAMORY CODEX -->") == 1  # reader intact, write not duplicated
+
+
+def test_init_codex_reader_block_has_no_write_tooling(tmp_path):
+    # the recall-only block must not tell codex to run engramory_check (a reader never writes)
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "codexcfg"
+    _run(INIT, "codex-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    agents = (cfg / "AGENTS.md").read_text(encoding="utf-8")
+    assert "engramory_check" not in agents
+
+
+def test_init_codex_reader_rejects_install_skill(tmp_path):
+    # --install-skill would copy the skill + write tools; a reader must refuse it (no write tooling)
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "codexcfg"
+    p = subprocess.run([sys.executable, INIT, "codex-reader", "--project-root", str(cfg),
+                        "--memory-root", str(store), "--install-skill"], capture_output=True, text=True)
+    assert p.returncode != 0 and "install-skill" in (p.stdout + p.stderr)
+    assert not (cfg / ".agents").exists()  # nothing installed (refused before side effects)
+
+
+def test_init_codex_reader_rejects_project_root_inside_store(tmp_path):
+    # if --project-root is inside the store, writing AGENTS.md there would modify the read-only
+    # store; the reader must refuse before creating anything.
+    store = _existing_store(tmp_path / "cc-memory")
+    before = sorted(pp.name for pp in store.iterdir())
+    inside = store / ".codex"  # project root INSIDE the store
+    p = subprocess.run([sys.executable, INIT, "codex-reader", "--project-root", str(inside),
+                        "--memory-root", str(store)], capture_output=True, text=True)
+    assert p.returncode != 0 and "inside" in (p.stdout + p.stderr).lower()
+    assert not inside.exists()  # the in-store project dir was never created
+    assert sorted(pp.name for pp in store.iterdir()) == before  # store dir untouched
+
+
 # --- engramory_doctor (layer-4 backstop) ---
 
 def _note(p, name, ntype="reference", desc="a note", body="body"):
