@@ -114,13 +114,16 @@ separate from the host's own memory. See
 [adapters/codex/README.md](../adapters/codex/README.md) and
 [adapters/openclaw/README.md](../adapters/openclaw/README.md).
 
-To let Codex **recall** (read-only) from a store another agent owns and writes — e.g.
-Claude Code's native memory — use the `codex-reader` host instead (it creates no store and
-never writes; `--memory-root` must be an existing store):
+To let a host **recall** (read-only) from a store another agent owns and writes — e.g.
+Claude Code's native memory — use a `<host>-reader` host (it creates no store and never
+writes; `--memory-root` must be an existing store; it lands in that host's own rules file):
 
 ```sh
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
 ```
 
-See [adapters/codex-reader/README.md](../adapters/codex-reader/README.md).
+Reader hosts: `codex-reader` (dogfooded) plus `claude-reader`, `cursor-reader`, `kiro-reader`,
+`cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired from documented
+formats, printed with an "unverified" note). See
+[adapters/reader/README.md](../adapters/reader/README.md).

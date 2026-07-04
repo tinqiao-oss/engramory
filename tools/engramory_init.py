@@ -4,22 +4,26 @@ engramory_init - bootstrap Engramory for an agent host.
 
 Usage:
 
-    python tools/engramory_init.py codex        --project-root <repo> --install-skill
-    python tools/engramory_init.py openclaw                           --install-skill
-    python tools/engramory_init.py codex-reader --project-root <repo> --memory-root <existing store>
+    python tools/engramory_init.py codex          --project-root <repo> --install-skill
+    python tools/engramory_init.py openclaw                              --install-skill
+    python tools/engramory_init.py <host>-reader   --project-root <cfg>  --memory-root <existing store>
 
 For a WRITE host (codex, openclaw) the command creates a local memory store, adds a marked
 Engramory block to the host's always-loaded AGENTS.md, optionally installs the Engramory skill
 under .agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
 store to .gitignore when the store lives inside the project/workspace.
 
-The READ-ONLY host `codex-reader` instead wires Codex to *recall* from a store another agent
-(typically Claude Code) owns and writes: it creates no store, touches no .gitignore, and uses a
-recall-only snippet (no write protocol). `--memory-root` MUST point at an existing store (e.g.
-Claude Code's memory dir). Its marker is distinct, so it coexists with a write `codex` block in
-the same AGENTS.md. See adapters/codex-reader/README.md.
+A READ-ONLY reader host `<host>-reader` (codex-reader, claude-reader, cursor-reader, kiro-reader,
+cline-reader, windsurf-reader, openclaw-reader, hermes-reader) instead wires that host to *recall*
+from a store ANOTHER agent (typically Claude Code) owns and writes — one writer, N readers. It
+creates no store, touches no .gitignore, installs no write tools, and uses a recall-only snippet
+(no write protocol). `--memory-root` MUST point at an existing store (e.g. Claude Code's memory
+dir). It injects into the host's own always-loaded rules file (AGENTS.md / CLAUDE.md / .clinerules
+/ Cursor .mdc / Kiro steering …); a marked block coexists with other Engramory blocks. Only the
+codex-reader wiring is dogfooded here — the others are built from each host's documented
+rules-file format but printed with an "unverified" note. See adapters/reader/README.md.
 
-Defaults: codex/codex-reader use --project-root '.', openclaw uses ~/.openclaw/workspace.
+Defaults: --project-root '.', except openclaw (~/.openclaw/workspace).
 """
 import argparse
 import os
@@ -64,11 +68,13 @@ def _display_path(path, base):
         return path.as_posix()
 
 
-def _replace_block(existing, block, begin, end):
+def _replace_block(existing, block, begin, end, heading="AGENTS.md"):
     # Replace only a well-formed, IN-ORDER BEGIN..END pair. Anything else — no markers, a
     # lone/duplicated marker, or END before BEGIN from a botched hand-edit — is treated as
     # "no managed block": drop any stray marker LINES and append a fresh block. This never
     # crashes on a malformed file and never silently deletes the surrounding user content.
+    # `heading` titles a freshly-created empty file, so a new CLAUDE.md / .clinerules isn't
+    # mislabelled "# AGENTS.md".
     i = existing.find(begin)
     j = existing.find(end)
     if 0 <= i < j:
@@ -78,7 +84,7 @@ def _replace_block(existing, block, begin, end):
                         if begin not in ln and end not in ln)
     if cleaned.strip():
         return cleaned.rstrip() + "\n\n" + block + "\n"
-    return "# AGENTS.md\n\n" + block + "\n"
+    return f"# {heading}\n\n" + block + "\n"
 
 
 def _ensure_gitignore(project_root, memory_root):
@@ -158,13 +164,13 @@ def _openclaw_note(index_display, check_display, protocol_display):
 - Full protocol reference: `{protocol_display}`."""
 
 
-def _codex_reader_note(index_display, check_display, protocol_display):
-    # Read-only reader: it never writes, so there is no engramory_check step and
-    # check_display is intentionally unused (signature kept uniform for _render_block).
-    return f"""Codex read-only wiring:
+def _reader_note(index_display, check_display, protocol_display):
+    # Read-only reader (host-agnostic): it never writes, so there is no engramory_check
+    # step and check_display is intentionally unused (signature kept uniform for _render_block).
+    return f"""Read-only wiring:
 
-- Recall from `{index_display}` — this is another agent's memory index (typically Claude
-  Code's native auto-memory). You have READ access only; Claude Code is the sole writer.
+- Recall from `{index_display}` — the memory index of a store another agent (typically
+  Claude Code's native auto-memory) owns and writes. You have READ access only.
 - NEVER create, edit, move, or delete anything in this store (no new notes, no edits to
   `MEMORY.md`). If you learn something durable, surface it to the user instead of writing it.
 - Full protocol reference (recall + the write side you do NOT use): `{protocol_display}`."""
@@ -188,21 +194,54 @@ HOST_CONFIG = {
         "default_root": "~/.openclaw/workspace",
         "note": _openclaw_note,
     },
-    # Read-only reader: wire Codex to RECALL from a store another agent (Claude Code) owns
-    # and writes. It creates no store, touches no .gitignore, and uses a recall-only snippet
-    # (no write protocol). Distinct markers so it coexists with the write `codex` block in the
-    # same AGENTS.md. `--memory-root` MUST point at an existing store (e.g. Claude Code's
-    # memory dir). See adapters/codex-reader/README.md.
-    "codex-reader": {
-        "label": "Codex (read-only)",
-        "begin": "<!-- BEGIN ENGRAMORY CODEX-READER -->",
-        "end": "<!-- END ENGRAMORY CODEX-READER -->",
+}
+
+
+# Read-only READER hosts ("<host>-reader"): wire an agent to RECALL from a store that
+# ANOTHER agent (typically Claude Code) owns and writes — one writer, N readers. The recall
+# discipline is identical and host-agnostic; the ONLY per-host difference is which
+# always-loaded rules file it lands in (and, for Cursor/Kiro, the frontmatter that file
+# needs). Every reader creates no store, touches no .gitignore, installs no write tools, and
+# uses the shared read-only snippet (no write protocol). It injects either as a marked block
+# in a shared rules file (default) or — when `frontmatter` is set — as a dedicated
+# always-loaded rule file. `tested` marks the wiring dogfooded on a real machine here; the
+# rest are built from each host's DOCUMENTED rules-file format but NOT verified to load
+# (Engramory's honesty rule — see adapters/reader/README.md).
+READER_HOSTS = {
+    "codex":    {"label": "Codex",       "rules_file": "AGENTS.md",      "tested": True},
+    "claude":   {"label": "Claude Code", "rules_file": "CLAUDE.md",      "tested": False},
+    "openclaw": {"label": "OpenClaw",    "rules_file": "AGENTS.md",      "tested": False},
+    "hermes":   {"label": "Hermes",      "rules_file": "AGENTS.md",      "tested": False},
+    "cline":    {"label": "Cline",       "rules_file": ".clinerules",    "tested": False},
+    "windsurf": {"label": "Windsurf",    "rules_file": ".windsurfrules", "tested": False},
+    "cursor":   {"label": "Cursor",      "rules_file": ".cursor/rules/engramory-recall.mdc",
+                 "frontmatter": "---\ndescription: Engramory read-only memory recall\nalwaysApply: true\n---",
+                 "tested": False},
+    "kiro":     {"label": "Kiro",        "rules_file": ".kiro/steering/engramory-recall.md",
+                 "frontmatter": "---\ninclusion: always\n---", "tested": False},
+}
+
+
+def _reader_config(host, spec):
+    up = host.upper()
+    cfg = {
+        "label": f"{spec['label']} (read-only)",
+        "begin": f"<!-- BEGIN ENGRAMORY {up}-READER -->",
+        "end": f"<!-- END ENGRAMORY {up}-READER -->",
         "default_root": ".",
         "creates_store": False,
-        "snippet": "adapters/codex-reader/recall-snippet.md",
-        "note": _codex_reader_note,
-    },
-}
+        "snippet": "adapters/reader/reader-snippet.md",
+        "note": _reader_note,
+        "rules_file": spec["rules_file"],
+        "tested": spec["tested"],
+    }
+    if "frontmatter" in spec:
+        cfg["frontmatter"] = spec["frontmatter"]
+    return cfg
+
+
+# codex-reader, claude-reader, cursor-reader, kiro-reader, … alongside the write hosts.
+HOST_CONFIG.update({f"{h}-reader": _reader_config(h, s) for h, s in READER_HOSTS.items()})
 
 
 def _render_block(cfg, source_root, project_root, memory_root, install_skill):
@@ -219,7 +258,13 @@ def _render_block(cfg, source_root, project_root, memory_root, install_skill):
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
 
     note = cfg["note"](index_display, check_display, protocol_display)
-    return cfg["begin"] + "\n" + snippet + "\n\n" + note + "\n" + cfg["end"]
+    body = snippet + "\n\n" + note
+    fm = cfg.get("frontmatter")
+    if fm:
+        # A dedicated always-loaded rule file (e.g. Cursor `.mdc` / Kiro steering): the whole
+        # file is ours, so no markers — just the host-required frontmatter + the recall body.
+        return fm + "\n\n" + body + "\n"
+    return cfg["begin"] + "\n" + body + "\n" + cfg["end"]
 
 
 def _require_sources(source_root, install_skill, snippet_rel="rules-snippet.md"):
@@ -261,15 +306,20 @@ def init_host(args, host):
         if args.install_skill:
             raise SystemExit(
                 f"read-only host '{host}': --install-skill is not supported — a reader installs "
-                f"no skill and no write tools, it only adds a recall block to AGENTS.md. "
-                f"Re-run without --install-skill.")
-        # AGENTS.md is written under --project-root; if that is inside the store, the write
-        # would modify the very store the reader must not touch. Refuse it.
-        if _same_or_inside(project_root, memory_root):
+                f"no skill and no write tools, it only adds a recall block to the host's rules "
+                f"file. Re-run without --install-skill.")
+        # The reader writes its rules file (project_root / rules_file) and mkdir's the dirs to
+        # it. If EITHER that file or --project-root resolves inside the store, the write would
+        # modify the very store the reader must not touch — refuse. Checking the resolved TARGET
+        # (not just project_root) also catches a nested rules file (e.g. Cursor
+        # .cursor/rules/*.mdc) landing inside a store like <root>/.cursor.
+        target = project_root / cfg.get("rules_file", "AGENTS.md")
+        if _same_or_inside(project_root, memory_root) or _same_or_inside(target, memory_root):
             raise SystemExit(
-                f"read-only host '{host}': --project-root ({project_root}) is inside the memory "
-                f"store ({memory_root}) — writing AGENTS.md there would modify the read-only "
-                f"store. Point --project-root outside the store (e.g. ~/.codex).")
+                f"read-only host '{host}': its rules file ({target}) or --project-root "
+                f"({project_root}) resolves inside the memory store ({memory_root}) — writing "
+                f"there would modify the read-only store. Point --project-root outside the store "
+                f"(e.g. ~/.codex).")
         # The store must already exist; this host never creates one.
         if not (memory_root / "MEMORY.md").is_file():
             raise SystemExit(
@@ -293,30 +343,45 @@ def init_host(args, host):
     results.append(("skill", skill_result))
 
     block = _render_block(cfg, source_root, project_root, memory_root, args.install_skill)
-    agents = project_root / "AGENTS.md"
-    old = _read_text(agents) if agents.exists() else ""
-    _write_text(agents, _replace_block(old, block, cfg["begin"], cfg["end"]))
-    results.append(("AGENTS.md", f"created/updated Engramory {cfg['label']} block"))
+    rules_file = cfg.get("rules_file", "AGENTS.md")
+    target = project_root / rules_file
+    if cfg.get("frontmatter"):
+        # A dedicated rule file we own (Cursor/Kiro): write it whole (idempotent overwrite).
+        _write_text(target, block)
+        results.append((rules_file, f"wrote Engramory {cfg['label']} rule file"))
+    else:
+        old = _read_text(target) if target.exists() else ""
+        _write_text(target, _replace_block(old, block, cfg["begin"], cfg["end"],
+                                           heading=Path(rules_file).name))
+        results.append((rules_file, f"created/updated Engramory {cfg['label']} block"))
 
     print(f"Engramory {cfg['label']} init complete")
     print(f"project root: {_display_path(project_root, Path.cwd())}")
     print(f"memory root: {_display_path(memory_root, project_root)}")
     for label, message in results:
         print(f"- {label}: {message}")
+    # A reader host whose wiring hasn't been dogfooded here: write it per the documented
+    # rules-file format, but tell the user plainly it's unverified (honesty rule).
+    if "tested" in cfg and not cfg["tested"]:
+        print(f"NOTE: this reader wiring for {cfg['label']} is written from {rules_file}'s "
+              f"documented format but has NOT been verified on a real host here — confirm your "
+              f"host actually loads {rules_file} as an always-on rule.")
     return 0
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Bootstrap Engramory for an agent host.")
     parser.add_argument("host", nargs="?", default="codex", choices=tuple(HOST_CONFIG),
-                        help="agent host to initialize (codex, openclaw, codex-reader)")
+                        help="host to initialize: write hosts (codex, openclaw) or a read-only "
+                             "reader host '<host>-reader' (codex-reader, claude-reader, "
+                             "cursor-reader, kiro-reader, cline-reader, …)")
     parser.add_argument("--project-root", default=None,
-                        help="project/workspace root (default: '.' for codex/codex-reader, ~/.openclaw/workspace for openclaw)")
+                        help="project/workspace root (default: '.'; openclaw defaults to ~/.openclaw/workspace)")
     parser.add_argument(
         "--memory-root",
         default=".engramory-memory",
-        help="memory store path; relative paths are resolved under --project-root. For the "
-             "read-only 'codex-reader' host this MUST be an existing store (it is not created), "
+        help="memory store path; relative paths are resolved under --project-root. For a "
+             "read-only '<host>-reader' this MUST be an EXISTING store (it is not created), "
              "e.g. Claude Code's memory dir ~/.claude/projects/<project>/memory",
     )
     parser.add_argument("--install-skill", action="store_true", help="copy Engramory into .agents/skills/engramory")

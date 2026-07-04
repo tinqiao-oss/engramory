@@ -4,6 +4,43 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.5.0 — 2026-07-04
+
+Generalize the read-only reader (0.4.0's `codex-reader`) to **any host** — one writer, N
+readers. Additive and backward-compatible: `codex-reader` keeps working unchanged; the write
+hosts, `rules-snippet.md`, the tools, and the Claude Code hook are untouched.
+
+Added
+- **Reader host family `<host>-reader`** in `engramory_init.py`: `codex-reader`, `claude-reader`,
+  `openclaw-reader`, `hermes-reader`, `cline-reader`, `windsurf-reader`, `cursor-reader`,
+  `kiro-reader`. Each wires that host to RECALL (read-only) from a store another agent owns and
+  writes, landing the recall block in **that host's own always-loaded rules file** — a marked
+  block in a shared file (`AGENTS.md` / `CLAUDE.md` / `.clinerules` / `.windsurfrules`), or a
+  dedicated rule file with the required frontmatter (Cursor `.mdc` `alwaysApply: true`, Kiro
+  steering `inclusion: always`). All keep the 0.4.0 read-only guarantees (no store, no write
+  tools, refuses `--install-skill` and an in-store `--project-root`).
+- **Honesty flag.** Only `codex-reader` is dogfooded end-to-end here; the others are wired from
+  each host's *documented* rules-file format and the tool prints an "unverified — confirm your
+  host loads it" note on init (and the adapter README table marks which is tested).
+
+Changed
+- `adapters/codex-reader/` → **`adapters/reader/`** (`README.md` + host-neutral
+  `reader-snippet.md`), covering the whole family; README/INSTALL links updated. The
+  `codex-reader` marker and behavior are unchanged.
+
+Hardened (from a codex + multi-agent review)
+- The read-only "don't touch the store" guard now checks the actual **target rules file**, not
+  just `--project-root` — so a nested rules file (e.g. Cursor `.cursor/rules/*.mdc`) can't land
+  inside a store like `<root>/.cursor`.
+- A freshly created marker-mode rules file is titled with its own name (`# CLAUDE.md`), not a
+  hardcoded `# AGENTS.md`.
+- Cline/Windsurf use the single-file form (`.clinerules` / `.windsurfrules`, still read by
+  current versions); the adapter README notes the newer rules-directory alternative.
+
+Verified
+- All four injection shapes smoke-tested (AGENTS.md / CLAUDE.md marker; Cursor `.mdc` + Kiro
+  steering frontmatter). +7 tests (82 tool + 29 hook). Green on Windows + a real Mac (py3.9).
+
 ## 0.4.0 — 2026-07-04
 
 New **read-only Codex reader** adapter — additive and backward-compatible; the existing

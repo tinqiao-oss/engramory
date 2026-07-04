@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.4.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.5.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(Bash/MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -76,17 +76,18 @@ python tools/engramory_init.py codex --project-root /path/to/project --install-s
 
 默认创建 `<project>/.engramory-memory/`。如果你已有记忆目录,传 `--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹。Codex 细节见 [adapters/codex/README.md](adapters/codex/README.md)。
 
-### Codex —— 只读读取器(召回 Claude Code 的记忆)
+### 只读读取器(召回另一个 agent 的记忆)
 
-把 Codex 指向一个**由另一个 agent 拥有并写入**的记忆库(比如 Claude Code 的原生 auto-memory),让委派给 Codex 的活也能用上同一份项目记忆——**只读**,Claude Code 仍是唯一写者(Engramory 假设单写者):
+把**任意**宿主指向一个**由另一个 agent 拥有并写入**的记忆库(比如 Claude Code 的原生 auto-memory),让委派出去的活也能用上同一份项目记忆——**只读**,拥有者仍是唯一写者(Engramory 假设单写者;多个读者没问题):
 
 ```sh
-python tools/engramory_init.py codex-reader \
-  --project-root ~/.codex \
+python tools/engramory_init.py codex-reader   --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
+# 任意宿主同样写法——落进该宿主自己的规则文件:
+python tools/engramory_init.py cursor-reader  --project-root /path/to/repo --memory-root <store>
 ```
 
-它不建库、绝不写入;`--memory-root` 必须是一个已存在的库。它用独立 marker,可与写入型 `codex` 块共存。细节见 [adapters/codex-reader/README.md](adapters/codex-reader/README.md)(含数据出境提示)。
+读取器宿主:`codex-reader`(已真机验)外加 `claude-reader`、`cursor-reader`、`kiro-reader`、`cline-reader`、`windsurf-reader`、`openclaw-reader`、`hermes-reader`(照各宿主**文档化**的规则文件格式接线,并打印"未验证"提示)。它不建库、绝不写入;`--memory-root` 必须是一个已存在的库。细节见 [adapters/reader/README.md](adapters/reader/README.md)(含已测宿主表 + 数据出境提示)。
 
 ### OpenClaw
 
