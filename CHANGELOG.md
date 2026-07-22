@@ -4,6 +4,16 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## Unreleased
+
+Docs
+- README (en/zh), bounded-index section: note that Claude Code has since shipped
+  native follow-ups — v2.1.186 (2026-06-22) nudges the agent to compact a near-cap
+  index, and v2.1.210 (2026-07-14) makes a write that leaves `MEMORY.md` over its
+  read limit an explicit error instead of a silent truncation. Both fire *after*
+  the write lands; Engramory's pre-write deny hook remains the only gate that keeps
+  the index from ever entering an over-cap state.
+
 ## 0.5.0 — 2026-07-04
 
 Generalize the read-only reader (0.4.0's `codex-reader`) to **any host** — one writer, N

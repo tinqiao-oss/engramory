@@ -75,6 +75,16 @@ index, atomic notes, or curation hygiene — all are prior art.
    byte caps apply — whichever is hit first triggers (an index can be under the line
    count yet over on bytes when the lines run long).
 
+   Claude Code has since followed up on this natively: v2.1.186 (released
+   2026-06-22) reminds the agent to compact the index when it nears the cap, and
+   v2.1.210 (released 2026-07-14) turned an over-cap write into an explicit error
+   instead of a silent truncation. Both are after-the-fact alerts, though — the
+   write still lands, and entries past the cap stay invisible until someone
+   compacts. Engramory's hook denies the write *before* it happens, so the index
+   never enters an over-cap state in the first place. The native alerts validate
+   the direction and make a welcome second layer — and older versions and other
+   hosts still have neither.
+
 ## How it compares
 
 | | storage | recall | human-readable | typed ontology | curation discipline | bounded index | infra |
