@@ -88,7 +88,9 @@ def main(argv):
     text = raw.decode("utf-8", "replace")
     lines, nbytes = _lines(text), len(raw)
     size = f"{lines} lines / {_kb(nbytes)}"
-    caps = f"{hard} lines / {hard_b // 1024} KB"
+    # _kb, not integer //1024: a custom cap like ENGRAMORY_HARD_BYTES=1000 rendered
+    # as a contradictory "cap ... / 0 KB" while the comparison itself was right.
+    caps = f"{hard} lines / {_kb(hard_b)}"
     if lines > hard or nbytes > hard_b:
         print(f"OVER: index is {size} — over {_over(lines, nbytes, hard, hard_b)} "
               f"(cap {caps}), past the load window. Compact now: {_first_step(nbytes > hard_b)} "

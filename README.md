@@ -18,10 +18,11 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.5.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.5.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
-> NOT a global write guard (Bash / MCP file tools / external editors / sync clients
-> bypass it); the discipline loads as standing rules the model follows, so it's
+> NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
+> command — plus MCP file tools, external editors, and sync clients bypass it);
+> the discipline loads as standing rules the model follows, so it's
 > best-effort, not guaranteed on every task (see [SKILL.md](SKILL.md) §8). Assumes a
 > single writer / serialized writes. Don't rely on it as a "mandatory, reliable,
 > cross-agent" memory layer yet.
@@ -80,10 +81,12 @@ index, atomic notes, or curation hygiene — all are prior art.
    v2.1.210 (released 2026-07-14) turned an over-cap write into an explicit error
    instead of a silent truncation. Both are after-the-fact alerts, though — the
    write still lands, and entries past the cap stay invisible until someone
-   compacts. Engramory's hook denies the write *before* it happens, so the index
-   never enters an over-cap state in the first place. The native alerts validate
-   the direction and make a welcome second layer — and older versions and other
-   hosts still have neither.
+   compacts. Engramory's hook denies the write *before* it happens, so a write
+   through the matched edit tools never leaves the index over-cap in the first
+   place (writes outside them — a shell, an MCP file tool — are not gated; see the
+   status note above and SKILL.md §8). The native alerts validate the direction
+   and make a welcome second layer — and older versions and other hosts still
+   have neither.
 
 ## How it compares
 

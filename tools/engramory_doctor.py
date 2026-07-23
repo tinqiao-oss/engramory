@@ -179,10 +179,16 @@ def _frontmatter(text):
             problems.append(f"malformed frontmatter line (not 'key: value'): {line!r}")
             continue
         k, v = line.split(":", 1)
+        k = k.strip()
         v = v.strip()
         if v[:1] in ("'", '"') and not (len(v) >= 2 and v[-1] == v[0]):
-            problems.append(f"unclosed quote in frontmatter value for '{k.strip()}'")
-        fm[k.strip()] = v.strip('"').strip("'")
+            problems.append(f"unclosed quote in frontmatter value for '{k}'")
+        if k in fm:
+            # Last-value-wins would let e.g. a second `type:` silently reclassify a
+            # feedback note as reference and dodge the Why/How requirement — ambiguity
+            # is a schema problem, not something to resolve silently.
+            problems.append(f"duplicate frontmatter key '{k}' (keep exactly one)")
+        fm[k] = v.strip('"').strip("'")
     return fm, problems, text[m.end():]
 
 

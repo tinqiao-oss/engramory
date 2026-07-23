@@ -4,15 +4,61 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
-## Unreleased
+## 0.5.1 — 2026-07-24
+
+Hardening + honesty pass from a two-model deep audit (Claude × Codex at max reasoning
+effort), verdicts grounded in the current Claude Code hooks schema/docs and a live-hook
+experiment — on Claude Code 2.1.218 a user-settings `PreToolUse` hook fired for a
+*subagent's* over-cap `Write` too (both the main loop's and the subagent's writes were
+denied), so "subagent edits bypass the guard" did not reproduce there. No behavior
+changes for a correctly-installed hook; the code fixes are init/validator hardening.
+
+Fixed
+- **init refuses a `--memory-root` overlapping the skill install dir.**
+  `--memory-root .agents/skills/engramory --install-skill --force` would `rmtree`
+  the very directory holding the memory store (data loss); either direction of
+  containment is now refused up front. Without `--install-skill` nothing touches
+  the skill dir, so that layout stays allowed.
+- **init refuses writing through a symlink that escapes `--project-root`** —
+  `AGENTS.md` / `.gitignore` / a dedicated rule file / the skill dir that *resolves*
+  outside the project root would rewrite an unrelated external file (the same
+  boundary doctor enforces on the store). All written paths are preflighted
+  **before any side effect**, so a refusal never leaves a partial init behind
+  (the preflight ordering itself was caught by the codex re-review of the first
+  version of this fix). A deliberate out-of-tree layout should point
+  `--project-root` at the real location.
+- **doctor reports duplicate frontmatter keys as an ISSUE.** Last-value-wins let a
+  second `type:` silently reclassify a feedback note as `reference` and dodge the
+  Why/How requirement. Zero false positives on a real 142-note Claude Code store
+  (top-level and `metadata:`-nested keys are disjoint there).
+- **check renders custom byte caps correctly.** `ENGRAMORY_HARD_BYTES=1000` printed
+  a contradictory `cap … / 0 KB` (integer division); now uses the shared `_kb`
+  formatter (exit codes were always right).
 
 Docs
-- README (en/zh), bounded-index section: note that Claude Code has since shipped
-  native follow-ups — v2.1.186 (2026-06-22) nudges the agent to compact a near-cap
-  index, and v2.1.210 (2026-07-14) makes a write that leaves `MEMORY.md` over its
-  read limit an explicit error instead of a silent truncation. Both fire *after*
-  the write lands; Engramory's pre-write deny hook remains the only gate that keeps
-  the index from ever entering an over-cap state.
+- **Absolute claims scoped to what the hook actually gates.** "the index never
+  enters an over-cap state" (README en/zh, this changelog's unreleased note),
+  "the *deterministic backstop* the model cannot skip" (hooks/INSTALL.md) and
+  "runs on every edit — deterministic" (PORTING.md) contradicted the repo's own
+  §8 disclosure; all now read "for the matched edit tools (`Edit|Write|MultiEdit`)"
+  with a pointer to SKILL.md §8.
+- **Bypass disclosure names today's real channels**: shell tools are Bash,
+  PowerShell and a background Monitor command (README en/zh, SKILL.md §8,
+  SECURITY.md) — not just a "Bash redirect".
+- **Install-time fail-open warning + self-test** (hooks/INSTALL.md +
+  settings.snippet.json): if the configured interpreter cannot be spawned
+  (`python3` on stock Windows), Claude Code treats it as a *non-blocking* hook
+  error and the edit proceeds — the guard silently never fires. Added a quick
+  post-install check: a 250-line `Write` to a scratch `MEMORY.md` must be denied.
+- README (en/zh), bounded-index section (was Unreleased): Claude Code's native
+  follow-ups — v2.1.186 (2026-06-22) nudges the agent to compact a near-cap index,
+  v2.1.210 (2026-07-14) makes an over-cap write an explicit error instead of a
+  silent truncation. Both fire *after* the write lands; the hook's niche stays the
+  *pre-write* deny, for the matched edit tools.
+
+Verified
+- +5 tests (89 tool + 29 hook = 118), green; doctor re-run clean (structure) on a
+  real 142-note store with zero new dup-key false positives.
 
 ## 0.5.0 — 2026-07-04
 

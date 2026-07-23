@@ -58,6 +58,21 @@ def _same_or_inside(child, parent):
         return False
 
 
+def _refuse_symlink_escape(target, project_root, what):
+    # Every file init writes under --project-root (AGENTS.md / .gitignore / a dedicated
+    # rule file / the skill dir) must actually RESOLVE inside it. If the target or one of
+    # its parent dirs is a symlink pointing elsewhere, writing "through" it would rewrite
+    # an unrelated external file — the same boundary doctor enforces on the store
+    # (SECURITY.md). A deliberate out-of-tree layout should point --project-root at the
+    # real location instead.
+    if not _same_or_inside(target, project_root):
+        raise SystemExit(
+            f"refusing to write {what} at {target}: it resolves to "
+            f"{Path(os.path.realpath(target)).as_posix()}, outside --project-root "
+            f"({project_root.as_posix()}) — a symlink escape. Edit the real file "
+            f"directly, or point --project-root at the real location.")
+
+
 def _display_path(path, base):
     path = path.resolve()
     base = base.resolve()
@@ -296,10 +311,25 @@ def init_host(args, host):
     if memory_root == project_root:
         raise SystemExit("memory root must be a directory inside or outside the project, not the project root itself")
 
+    # --install-skill (re)creates .agents/skills/engramory — with --force by rmtree'ing
+    # it first. If the memory store overlaps that directory, installing the skill would
+    # DELETE the store (--force), or mistake a store-only dir for an installed skill
+    # (without it). Refuse the overlap up front, before any side effect.
+    if args.install_skill:
+        skill_root = project_root / ".agents" / "skills" / "engramory"
+        if _same_or_inside(memory_root, skill_root) or _same_or_inside(skill_root, memory_root):
+            raise SystemExit(
+                f"--memory-root ({memory_root}) overlaps the skill install dir "
+                f"({skill_root}); --install-skill (re)creates that directory and with "
+                f"--force would delete the memory store inside it. Put the store "
+                f"somewhere else (default: .engramory-memory).")
+
     # A read-only host (creates_store=False) never creates or touches the store — it only
     # wires the host to RECALL from a store another agent owns and writes. Enforce that up
     # front (before any side effect / directory creation) with clear messages:
     creates_store = cfg.get("creates_store", True)
+    rules_file = cfg.get("rules_file", "AGENTS.md")
+    target = project_root / rules_file
     if not creates_store:
         # It installs no skill and no write tools — only a recall block. Passing
         # --install-skill would copy engramory_check/doctor etc., contradicting that.
@@ -313,7 +343,6 @@ def init_host(args, host):
         # modify the very store the reader must not touch — refuse. Checking the resolved TARGET
         # (not just project_root) also catches a nested rules file (e.g. Cursor
         # .cursor/rules/*.mdc) landing inside a store like <root>/.cursor.
-        target = project_root / cfg.get("rules_file", "AGENTS.md")
         if _same_or_inside(project_root, memory_root) or _same_or_inside(target, memory_root):
             raise SystemExit(
                 f"read-only host '{host}': its rules file ({target}) or --project-root "
@@ -326,6 +355,17 @@ def init_host(args, host):
                 f"read-only host '{host}': no MEMORY.md at {memory_root} — pass --memory-root "
                 f"pointing at an EXISTING memory store (e.g. Claude Code's memory directory, "
                 f"~/.claude/projects/<project>/memory). This host never creates a store.")
+
+    # Preflight EVERY path this run will write — BEFORE any side effect (mkdir, store,
+    # gitignore, skill, rules file) — so a symlink-escape refusal can never leave a
+    # partial init behind. The gitignore/skill checks mirror the conditions under which
+    # those writes actually happen, so an escaped-but-unused path is not a false refusal.
+    _refuse_symlink_escape(target, project_root, rules_file)
+    if creates_store and _same_or_inside(memory_root, project_root):
+        _refuse_symlink_escape(project_root / ".gitignore", project_root, ".gitignore")
+    if args.install_skill:
+        _refuse_symlink_escape(project_root / ".agents" / "skills" / "engramory",
+                               project_root, "the skill install dir")
 
     project_root.mkdir(parents=True, exist_ok=True)
 
@@ -343,8 +383,6 @@ def init_host(args, host):
     results.append(("skill", skill_result))
 
     block = _render_block(cfg, source_root, project_root, memory_root, args.install_skill)
-    rules_file = cfg.get("rules_file", "AGENTS.md")
-    target = project_root / rules_file
     if cfg.get("frontmatter"):
         # A dedicated rule file we own (Cursor/Kiro): write it whole (idempotent overwrite).
         _write_text(target, block)

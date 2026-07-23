@@ -916,6 +916,78 @@ def test_doctor_wikilink_with_path_does_not_rescue_orphan(tmp_path):
     assert "isn't a bare slug" in out  # the bad link is reported (info)
 
 
+# --- 0.5.1 audit fixes: init overlap / symlink-escape, doctor dup keys, check cap display ---
+
+def test_init_refuses_memory_root_overlapping_skill_dir(tmp_path):
+    # --install-skill (re)creates .agents/skills/engramory (with --force via rmtree). A
+    # memory store inside that dir would be DELETED by the install — must refuse up front,
+    # before any side effect, with the pre-existing store left byte-identical.
+    project = tmp_path / "project"
+    store = project / ".agents" / "skills" / "engramory"
+    store.mkdir(parents=True)
+    (store / "MEMORY.md").write_text("# Index\n- [fact](fact.md) — precious\n", encoding="utf-8")
+    (store / "fact.md").write_text("irreplaceable user memory", encoding="utf-8")
+    p = subprocess.run([sys.executable, INIT, "codex", "--project-root", str(project),
+                        "--memory-root", str(store), "--install-skill", "--force"],
+                       capture_output=True, text=True)
+    assert p.returncode != 0 and "overlap" in (p.stdout + p.stderr).lower()
+    assert (store / "fact.md").read_text(encoding="utf-8") == "irreplaceable user memory"
+    assert not (project / "AGENTS.md").exists()  # refused before side effects
+
+
+def test_init_refuses_skill_dir_inside_memory_root(tmp_path):
+    # the reverse containment: --memory-root .agents would put the skill install dir
+    # INSIDE the store — same refusal.
+    project = tmp_path / "project"
+    p = subprocess.run([sys.executable, INIT, "codex", "--project-root", str(project),
+                        "--memory-root", ".agents", "--install-skill"],
+                       capture_output=True, text=True)
+    assert p.returncode != 0 and "overlap" in (p.stdout + p.stderr).lower()
+    # without --install-skill nothing rmtree's the skill dir -> the same layout is allowed
+    rc, _ = _run(INIT, "codex", "--project-root", str(project),
+                 "--memory-root", ".agents/skills/engramory")
+    assert rc == 0
+
+
+def test_init_refuses_symlink_escaped_rules_file(tmp_path):
+    # AGENTS.md that is a symlink resolving OUTSIDE --project-root must be refused, not
+    # written through (doctor enforces the same boundary on the store).
+    outside = tmp_path / "outside.md"
+    outside.write_text("external file — must not be rewritten\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    try:
+        os.symlink(str(outside), str(project / "AGENTS.md"))
+    except (OSError, NotImplementedError):
+        return  # no symlink privilege (e.g. Windows without Developer Mode) -> skip
+    p = subprocess.run([sys.executable, INIT, "codex", "--project-root", str(project)],
+                       capture_output=True, text=True)
+    assert p.returncode != 0 and "symlink escape" in (p.stdout + p.stderr)
+    assert outside.read_text(encoding="utf-8") == "external file — must not be rewritten\n"
+    # refusal is a PREFLIGHT: no partial init may be left behind
+    assert not (project / ".engramory-memory").exists()
+    assert not (project / ".gitignore").exists()
+
+
+def test_doctor_duplicate_frontmatter_key_is_issue(tmp_path):
+    # last-value-wins would let a second `type:` reclassify a feedback note as reference
+    # and dodge the Why/How requirement — ambiguity must be an ISSUE, not silent.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: d\ntype: feedback\ntype: reference\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "duplicate frontmatter key 'type'" in out
+
+
+def test_check_custom_byte_cap_display_not_zero_kb(tmp_path):
+    # a sub-1024 custom cap used to render as a contradictory "cap ... / 0 KB"
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text("z" * 2000, encoding="utf-8")
+    rc, out = _run(CHECK, str(idx), env={"ENGRAMORY_HARD_BYTES": "1000"})
+    assert rc == 2 and "cap 200 lines / 1000 B" in out and "/ 0 KB" not in out
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

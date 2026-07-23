@@ -295,10 +295,10 @@ Two layers, different guarantees:
 - The **hook** (the hard index cap) is a `PreToolUse` hook: it runs on *every*
   matching edit (`Edit | Write | MultiEdit`), whether or not this skill is
   "loaded." It is **deterministic for those direct-edit tools** — but NOT a global
-  write guard: a write that bypasses them (a shell `Bash` redirect, an MCP
-  filesystem tool, an external editor, a sync client, or a host-internal write) is
-  not intercepted. So: deterministic for the matched edit tools, best-effort
-  everywhere else.
+  write guard: a write that bypasses them (a shell-tool write — `Bash`,
+  `PowerShell`, a background `Monitor` command — an MCP filesystem tool, an
+  external editor, a sync client, or a host-internal write) is not intercepted.
+  So: deterministic for the matched edit tools, best-effort everywhere else.
 - The **discipline** in this file (recall-at-start, dedup, the ontology, the
   curation contract) is loaded via the host's instruction mechanism — ideally
   always-loaded rules, or a relevance-loaded skill — so it is model-followed and

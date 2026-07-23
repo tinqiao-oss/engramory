@@ -40,7 +40,9 @@ set. Claude reads the `description` to decide when to load the skill.
 ## 3. The hard-cap hook (deterministic enforcement)
 
 The standing rules' 150/200 behavior is model-followed; the hook is the
-*deterministic backstop* the model cannot skip. It's written and tested for Claude
+*deterministic backstop* for the matched edit tools (`Edit|Write|MultiEdit`) — the
+model cannot skip it on those calls, but writes outside them (a shell command, an
+MCP file tool) are not intercepted (SKILL.md §8). It's written and tested for Claude
 Code only. Some other hosts expose a pre-write deny you can adapt the shim to (Hermes —
 whose `pre_tool_call` has a reported non-firing bug in some worker contexts, #25204;
 Cursor, though its is newer/flaky); OpenClaw blocks only via a `before_tool_call` plugin,
@@ -61,6 +63,15 @@ and some hosts have none — see PORTING.md (coverage varies by host and version
    - **Most robust on any OS:** the absolute interpreter path from
      `python -c "import sys; print(sys.executable)"` (e.g. `C:\Python312\python.exe`),
      which sidesteps the `python`-vs-`python3` question entirely.
+
+> ⚠️ **Verify the hook actually fires after installing.** If the interpreter in
+> `"command"` cannot be spawned at all — e.g. `python3` on a stock Windows, where
+> only `python` exists (or `python3` is a Microsoft Store stub) — Claude Code
+> treats it as a *non-blocking* hook error and lets the tool call proceed: the
+> guard silently never gates anything. Quick self-test: ask the agent to Write a
+> 250-line file named `MEMORY.md` in a scratch folder — the write must be
+> **denied** with the Engramory message (by default the hook gates *any* file
+> named `MEMORY.md`, so a scratch copy exercises it; delete the folder after).
 
 The hook fires on every `Edit` / `Write` / `MultiEdit`, returns instantly for any
 file that isn't the index, and only acts when the target's filename is the index

@@ -80,9 +80,10 @@ ready-to-copy template: [adapters/kiro/README.md](adapters/kiro/README.md).
 
 The cap stops the index growing past the host's load window. Strongest → softest:
 
-1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every edit and
-   can DENY one that would grow the index past the cap — deterministic. It's written
-   for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
+1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every matching
+   edit-tool call (`Edit|Write|MultiEdit`) and can DENY one that would grow the index
+   past the cap — deterministic for those tools, not for other write channels
+   (SKILL.md §8). It's written for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
    are **not interchangeable**, so each needs its own shim:
    - **Hermes** — a `pre_tool_call` shell hook can block a tool call; matcher
      `write_file|patch` catches the agent's *file* writes (an Engramory separate-store

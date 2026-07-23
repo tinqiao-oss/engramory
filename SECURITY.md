@@ -22,8 +22,9 @@ formal SLA, but we take memory-content and hook-safety issues seriously.
   pointers to where they live). This is unenforced discipline — see `SKILL.md` §5.
 - The PreToolUse hook is a **size nudge, not a security control.** It fails open
   on unexpected input (so it can never brick editing), and it only intercepts the
-  matched direct-edit tools (`Edit | Write | MultiEdit`) — not Bash, MCP file
-  tools, external editors, or sync clients. It is not a global write guard.
+  matched direct-edit tools (`Edit | Write | MultiEdit`) — not shell tools (Bash,
+  PowerShell, a background Monitor command), MCP file tools, external editors, or
+  sync clients. It is not a global write guard.
 - **Memory is attacker-influenceable input.** The store is plain files another
   process, a synced document, or a manipulated earlier session can write or alter;
   because `feedback` notes are designed to shape behavior across sessions, a
