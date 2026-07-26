@@ -62,9 +62,10 @@ An unfinished task is resumed through an ordinary `project` note in the canonica
 store, not a fifth `handoff` type. That note may contain the current goal, status,
 decisions, constraints, blockers, and next concrete step. `feedback` remains only
 for a reusable correction or workflow. Such a note stores only **stable**
-pointers (branch name, issue/PR number, file path), never volatile values
-(commit hashes, version numbers, test results), and every recorded pointer must
-be checked against the live repo/environment before use.
+pointers (branch name, issue/PR number, file path) and may record a settled fact
+("2.0 shipped on 2026-01-15"), but never **current state** — the version you are
+on now, the tip commit, the current test count. Every recorded pointer must be
+checked against the live repo/environment before use.
 
 Before a deliberate compact, clear, or new thread, run the unified sync in
 `SKILL.md`: scan → dedup/update → project → reusable feedback → durable

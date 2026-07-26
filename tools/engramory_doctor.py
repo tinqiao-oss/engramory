@@ -115,6 +115,13 @@ def _read(p):
     return None if raw is None else raw.decode("utf-8-sig", "replace")
 
 
+def _is_remote_url(target):
+    # Only a REMOTE scheme is exempt from the store-containment check. `file://`,
+    # and anything else that resolves to a local path, must still be gated —
+    # treating every "://" as external turned the scheme into a bypass.
+    return bool(re.match(r"^(https?|ftps?|mailto|ssh|git\+[a-z]+)://", target, re.I))
+
+
 def _contained(real, root_abs):
     # True if an ALREADY-realpath'd `real` is the store root or lies inside it. The
     # trailing-separator boundary stops a sibling like `<root>-old` from counting as
@@ -296,8 +303,17 @@ def main(argv):
     # .md, and resolve the path itself — a bare basename match is too loose (it would
     # green-light `wrong/path/a.md` whenever some `a.md` exists elsewhere in the store).
     for tgt in sorted(set(_PTR_RE.findall(itext))):
+        if _is_remote_url(tgt):
+            continue  # genuinely external (http/https/…), not a local note pointer
         if "://" in tgt:
-            continue  # external URL, not a local note pointer
+            # A `file://` (or any non-remote scheme) target is NOT external: it
+            # names a local path, and one that escapes the store is exactly the
+            # read primitive the escape check exists to stop. Skipping every
+            # `://` let `[x](file:///C:/outside/secret.md)` pass as "external"
+            # and report clean, after which recall would open it.
+            issues.append(f"index pointer uses a non-remote URL scheme (use a "
+                          f"path relative to the store): {tgt}")
+            continue
         full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
         if not _contained(full, root_abs):
             issues.append(f"index pointer escapes the store root: {tgt}")
@@ -319,6 +335,10 @@ def main(argv):
     ptr_counts = {}
     for tgt in _PTR_RE.findall(itext):
         if "://" in tgt:
+            # Broader than the containment loop's _is_remote_url on purpose: this
+            # only tallies duplicate LOCAL pointers, and a non-remote scheme has
+            # already been reported as an issue there — it is not a valid pointer
+            # to count here.
             continue
         full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
         b = _real_basename(full, notes) if os.path.isfile(full) else os.path.basename(full)

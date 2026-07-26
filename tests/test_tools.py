@@ -1014,3 +1014,54 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# --- 0.6.1: a non-remote URL scheme is a local path, not an "external" pointer ---
+
+def test_doctor_file_url_pointer_is_not_treated_as_external(tmp_path):
+    # Skipping every target containing '://' made the scheme a bypass: a
+    # `file://` pointer names a LOCAL path, and one outside the store is exactly
+    # the read primitive the escape check exists to stop. Doctor reported clean,
+    # and recall would then open it.
+    _note(tmp_path / "good.md", "good")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n"
+        "- [Good](good.md) - hook\n"
+        "- [Evil](file:///C:/outside/secret.md) - hook\n",
+        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1
+    assert "non-remote URL scheme" in out
+    assert "file:///C:/outside/secret.md" in out
+
+
+def test_doctor_real_http_pointer_still_treated_as_external(tmp_path):
+    # The fix must not start flagging genuine remote links.
+    _note(tmp_path / "good.md", "good")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n"
+        "- [Good](good.md) - hook\n"
+        "- [Spec](https://example.com/spec.md) - external\n",
+        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_init_refuses_to_adopt_a_symlinked_index(tmp_path):
+    # `exists()` follows symlinks, so a planted `MEMORY.md -> outside` used to be
+    # reported as "kept existing" and every later recall would read that file.
+    import os
+    outside = tmp_path / "outside.md"
+    outside.write_text("SECRET\n", encoding="utf-8")
+    project = tmp_path / "project"
+    store = project / ".engramory-memory"
+    store.mkdir(parents=True)
+    try:
+        os.symlink(str(outside), str(store / "MEMORY.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return  # no symlink privilege (e.g. Windows without Developer Mode) -> skip
+    rc, out = _run(INIT, "codex", "--project-root", str(project),
+                   "--memory-root", str(store))
+    assert rc != 0
+    assert "symlink" in out.lower()
+    assert "SECRET" not in out

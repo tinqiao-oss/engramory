@@ -4,6 +4,40 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.6.1 — 2026-07-26
+
+Three-lane audit (tooling / protocol prose / adversarial) plus local verification.
+
+- **Fixed: a session the bookkeeping never observed could open the manual gate.**
+  When a `PreCompact` was the FIRST event seen for a session — hooks trusted
+  mid-session, state deleted or reset, an earlier dirty write failed — a blank
+  record was synthesized and read as "clean", so manual compaction proceeded. An
+  unobserved session now counts as unsynced. A session whose `SessionStart` was
+  recorded and that submitted no prompt is still genuinely clean and still passes.
+- **Fixed: the volatile-value rule contradicted the spec's own examples.** 0.6.0
+  banned "version numbers / test results" outright, while `SKILL.md`'s example,
+  the index example, and `templates/example-project.md` all teach release-2.0
+  state. The line is now drawn where it belongs — **settled fact vs. current
+  state**: "2.0 shipped on 2026-01-15" is fine (the event cannot be falsified by
+  time); the version you are on now, the tip commit, and the current test count
+  are not, and the note records where to read them.
+- **Fixed: installer writes could truncate user-owned files.** `AGENTS.md`, a
+  dedicated rules file, and `.gitignore` were written with a truncating
+  `open(..., "w")`, so a disk-full/I/O error/kill in between left the user's file
+  empty or half-written. All install writes now stage and `os.replace`.
+- **Fixed: three holes in read-side store confinement.** `init` adopted an
+  existing `MEMORY.md` on `exists()` alone, so a symlinked index was "kept" and
+  every later recall read the target; doctor skipped any pointer containing
+  `://`, making `file:///…/x.md` an "external URL" that reported clean; and the
+  recall protocol never told the agent to confine pointers to `<MEMORY_ROOT>`.
+  All three are closed — a non-remote scheme is now an issue, genuine
+  `http(s)` links still pass, and §4 states the containment rule.
+- **Fixed: "use the host's memory directory" was over-generalized.** It is right
+  for a host whose memory is plain files you control (Claude Code) and wrong for
+  one that manages its own (Codex Memories, OpenClaw, Hermes) — where it invites
+  exactly the two-writer conflict `PORTING.md` warns about. `SKILL.md` §0/§7 and
+  both READMEs now scope it.
+
 ## 0.6.0 — 2026-07-26
 
 Protocol/docs

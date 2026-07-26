@@ -52,11 +52,16 @@ def _read_text(path):
 
 
 def _write_text(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # open(newline="\n") rather than Path.write_text(newline=...) — the latter's newline
-    # kwarg only exists on Python 3.10+, and the project floor is 3.9.
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
+    """Every install write is atomic — several targets are USER-OWNED files.
+
+    `AGENTS.md`, a dedicated rules file, and `.gitignore` routinely already exist
+    and hold content this installer did not write. A plain `open(..., "w")`
+    truncates before writing, so a disk-full, an I/O error, or a killed process
+    in between leaves the user's rules file empty or half-written. Staging into a
+    temp file and `os.replace`-ing means the previous content survives any
+    failure.
+    """
+    _write_text_atomic(path, text)
 
 
 def _write_text_atomic(path, text):
@@ -163,6 +168,22 @@ def _ensure_memory_store(source_root, memory_root):
     memory_root.mkdir(parents=True, exist_ok=True)
     index = memory_root / "MEMORY.md"
     if index.exists():
+        # `exists()` follows symlinks, so a planted `MEMORY.md -> /etc/passwd`
+        # used to be reported as "kept existing" and every later recall would
+        # read that file into the model's context. The store is
+        # attacker-influenceable input (SECURITY.md), so refuse an index that is
+        # a symlink or that resolves outside the store instead of adopting it.
+        if index.is_symlink():
+            raise SystemExit(
+                f"refusing to adopt {index}: it is a symlink. The memory index "
+                f"must be a real file inside the store.")
+        if not index.is_file():
+            raise SystemExit(
+                f"refusing to adopt {index}: it is not a regular file.")
+        if not _same_or_inside(index, memory_root):
+            raise SystemExit(
+                f"refusing to adopt {index}: it resolves outside the memory root "
+                f"({memory_root}).")
         return "kept existing MEMORY.md"
     template = source_root / "templates" / "MEMORY.md"
     shutil.copy2(template, index)

@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.6.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.6.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
@@ -126,12 +126,19 @@ enforce the size cap.
 
 **The goal is the same discipline on *any* agent — by riding the real cross-agent rails,
 not by inventing a new standard.** Paste [`rules-snippet.md`](rules-snippet.md) into the
-host's always-loaded rules so the discipline fires every task; an **Engramory MCP server
-(planned)** would then let any MCP-capable agent (Claude Code, Cursor, Cline, Codex,
-Windsurf, …) share the same store, the same tools, and a **server-enforced cap** — making
-the one deterministic guarantee cross-agent instead of per-host. On a host that only gives
+host's always-loaded rules so the discipline fires every task. On a host that only gives
 you a flat rules file or a raw file store, that is a real upgrade; on a host that already
 ships structured memory, Engramory is a thin discipline layer on top — and says so.
+
+**On MCP: deliberately not the route for a host that can already read files and
+load standing rules.** Serving memory over MCP would (a) open a *second write
+channel* that bypasses the pre-write hook — the single deterministic guarantee
+this project has, and one that already lists MCP file tools among the things that
+slip past it — and (b) demote recall from an index the host loads *every session*
+to a tool the model has to remember to call, i.e. back to the weakest rung in
+§8. For a host that lacks files or standing rules, an MCP entry point is the only
+way in and is worth adding as a **supplement**; it is not a replacement for the
+protocol, and it is not the cross-agent plan.
 
 ---
 
@@ -149,8 +156,9 @@ state, promote reusable feedback, keep durable reference pointers, retire stale
 or completed transient state, run the size check plus doctor, and verify that a
 cold-started agent could continue from the repo and memory alone. Continuity
 never duplicates code or git: a note may keep a **stable** pointer (branch name,
-issue/PR number, file path) to re-check, but never a volatile value (commit
-hash, version number, test result) — it records where to read that instead.
+issue/PR number, file path) to re-check, and may record a **settled fact**
+("2.0 shipped on 2026-01-15"), but never **current state** — the version you are
+on now, the tip commit, the current test count. It records where to read those.
 
 After a write, the agent reports what was added, updated, archived, and skipped
 (with reasons, identifying any deletion under archived), plus the index size and
@@ -258,7 +266,9 @@ Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's 
 memory store. Full wiring is in **[PORTING.md](PORTING.md)**; in short: paste
 [`rules-snippet.md`](rules-snippet.md) into the host's always-loaded rules (so the
 discipline is always-on, not just a by-relevance skill), import [`SKILL.md`](SKILL.md)
-if the host supports skills, point `<MEMORY_ROOT>` at the host's memory dir, and
+if the host supports skills, point `<MEMORY_ROOT>` at the host's memory dir **when
+that dir is plain files you control** (against a host that manages its own memory —
+Codex, OpenClaw, Hermes — use a separate folder instead), and
 wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a

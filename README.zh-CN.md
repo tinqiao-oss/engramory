@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.6.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.6.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -54,7 +54,9 @@ Engramory 的赛道:**极简 + 可执行的角色类型 + 策展纪律,零基础
 
 Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据库、不是框架、不是按相关性加载的 skill,也不是只能用在 Claude Code 的插件。它所依赖的底层管道(markdown 索引 + 单文件单事实笔记、`user | feedback | project | reference` 四类型、有界加载索引)正越来越多地被宿主**原生**内置——Claude Code 自带的 auto-memory 就已经做到了。所以 Engramory 的价值在于宿主**不**提供的那部分:显式的策展契约(写前查重、发现错就删、git/代码里已有的别记)、带强制 Why/How 的程序性 `feedback` 笔记,以及一条可移植的尺寸上限强制方式。
 
-**目标是让*任何* agent 都能用上同一套纪律——靠骑在真正的跨 agent 轨道上,而不是另造一个标准。** 把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的常驻规则,纪律就每个任务都生效;再配一个**(规划中的)Engramory MCP server**,任何支持 MCP 的 agent(Claude Code、Cursor、Cline、Codex、Windsurf……)就能共享同一个记忆库、同一套工具,以及一个 **server 端强制的 cap**——让那个唯一的确定性保证从"逐宿主"变成"跨 agent"。对只给你一个扁平规则文件或裸文件存储的宿主,这是实打实的升级;对已经自带结构化记忆的宿主,Engramory 就是叠在上面的一层薄纪律——并且坦白承认这一点。
+**目标是让*任何* agent 都能用上同一套纪律——靠骑在真正的跨 agent 轨道上,而不是另造一个标准。** 把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的常驻规则,纪律就每个任务都生效。对只给你一个扁平规则文件或裸文件存储的宿主,这是实打实的升级;对已经自带结构化记忆的宿主,Engramory 就是叠在上面的一层薄纪律——并且坦白承认这一点。
+
+**关于 MCP:对已经具备文件读写与常驻规则的宿主,这是刻意不走的路线。** 把记忆架在 MCP 上会:(a) 开出**第二条写入通道**、绕过写前 hook——那是本项目唯一的确定性保证,而 MCP 文件工具本来就在"绕得过"的清单里;(b) 把召回从"宿主**每个会话**自动加载的索引"降级成"模型得记得去调用的工具",退回 §8 里最弱的那一档。对**缺少**文件能力或常驻规则的宿主,MCP 入口是唯一进得去的路,值得作为**补充**提供;但它不替代协议,也不是跨 agent 的主线方案。
 
 ---
 
@@ -70,8 +72,9 @@ Engramory 只有**一个 canonical store(规范真值库)**。它不新增 `hand
 feedback → 保存持久 reference 指针 → 归档/删除过时或已完成的瞬时状态 →
 运行尺寸检查与 doctor → 确认一个冷启动 agent 只靠仓库和记忆就能安全继续。
 续接绝不复述代码或 git 已有的内容:只保存**稳定**指针(分支名、issue/PR
-编号、文件路径)并在 recall 时复核,**绝不**保存易变值(commit 哈希、版本号、
-测试结果)——只记「去哪里读」,不记数值本身。
+编号、文件路径)并在 recall 时复核。**已成定局的事实**(「2.0 于 2026-01-15
+发布」)可以记;**当前状态**——你现在在哪个版本、tip commit、当前测试数——
+不可以记,只记「去哪里读」。
 
 每次写入后,agent 必须汇报 added、updated、archived、skipped(含理由;删除项
 在 archived 类别中明确标成 deleted),以及索引行数/字节数和检查结果。宿主
@@ -150,7 +153,7 @@ markdown 的智能体,还有真正的写前 deny hook。目前手动接线(还�
 > 落地/实测)。完整说明:[adapters/kiro/README.md](adapters/kiro/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Windsurf……)
-Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录,并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里只有 Claude Code 的写好并实测过;部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
+Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录(**仅当那是你自己掌控的普通文件目录**;对自带记忆管理器的宿主——Codex、OpenClaw、Hermes——请另用一个独立目录,别去接管它),并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里只有 Claude Code 的写好并实测过;部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
 
 把**已有的存量记忆库**首次接入严格 `doctor` 会报一堆机械问题(缺 `created`/`updated`、Why/How 还没用规范标签)——别盲修,见 **[PORTING.md](PORTING.md)** 的「Adopting an existing store」:先 `--no-schema` 过结构、用片段批量补日期、再手写 Why/How。
 

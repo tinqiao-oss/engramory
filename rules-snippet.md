@@ -30,10 +30,10 @@ in a `project` note.
 - `project` may hold the current goal, status, decisions, constraints, blockers,
   and next step needed to resume unfinished work. `feedback` is only for a
   reusable correction/workflow. Never restate what code/git already says: store
-  only **stable** pointers (branch name, issue/PR number, file path), never
-  volatile values (commit hashes, version numbers, test results) — record where
-  to read those. Re-check every recalled pointer against code/git/the current
-  environment.
+  only **stable** pointers (branch name, issue/PR number, file path). A *settled
+  fact* ("2.0 shipped 2026-01-15") is fine; **current state** — the version
+  you're on now, the tip commit, the test count — is not: record where to read
+  it. Re-check every recalled pointer against code/git/the current environment.
 - **Before a deliberate compact, clear, or new thread**, sync once: scan the task;
   dedup/update; refresh `project`; promote only reusable `feedback`; save durable
   `reference` pointers; archive/delete stale or completed transient state; run

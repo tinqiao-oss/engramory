@@ -716,6 +716,35 @@ class CodexHookContractTests(unittest.TestCase):
         self.assertIn("symlink", combined)
         self.assertIs(self._session_state(session_id).get("dirty"), True)
 
+    def test_a_session_never_observed_cannot_open_the_manual_gate(self):
+        """A compaction that is the FIRST event for a session must fail closed.
+
+        The bookkeeping cannot have seen the prompts that came before, so it has
+        no evidence the work is synced. This happens when the hooks are trusted
+        mid-session, when the state file is deleted or reset, or when an earlier
+        dirty write failed. Synthesizing a blank 'clean' record and letting the
+        manual gate open is the exact opposite of the fail-closed contract.
+        """
+        manual = self._base_event(
+            "PreCompact", "never-observed", self.project, trigger="manual"
+        )
+        blocked = self._hook_json(self._run_hook(manual))
+        self.assertIs(blocked.get("continue"), False)
+
+        # A session the hook DID observe, with no prompt submitted, is genuinely
+        # clean and must still pass — the guard tightens without wedging.
+        self._run_hook(
+            self._base_event("SessionStart", "observed", self.project, source="startup")
+        )
+        allowed = self._hook_json(
+            self._run_hook(
+                self._base_event(
+                    "PreCompact", "observed", self.project, trigger="manual"
+                )
+            )
+        )
+        self.assertIs(allowed.get("continue"), True)
+
 
 if __name__ == "__main__":
     unittest.main()

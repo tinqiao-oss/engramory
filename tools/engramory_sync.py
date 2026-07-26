@@ -326,12 +326,16 @@ def _new_session(mode):
 
 
 def _session(state, session_id, mode):
+    """Return (record, is_new). `is_new` matters: a session the bookkeeping has
+    never seen carries no evidence either way, and callers that gate on it must
+    not read a freshly synthesized record as proof of a synced session."""
     sessions = state["sessions"]
     record = sessions.get(session_id)
     if record is None:
         record = _new_session(mode)
         sessions[session_id] = record
-    return record
+        return record, True
+    return record, False
 
 
 def _mutate(memory_root, session_id, mode, change):
@@ -341,9 +345,9 @@ def _mutate(memory_root, session_id, mode, change):
         raise SyncError("unsupported sync mode: {}".format(mode))
     with _state_lock(root):
         state = _load_state(root)
-        record = _session(state, session_id, mode)
+        record, is_new = _session(state, session_id, mode)
         timestamp = _now()
-        change(record, timestamp)
+        change(record, timestamp, is_new)
         record["mode"] = mode
         record["updated_at"] = timestamp
         state["last_session_id"] = session_id
@@ -356,7 +360,7 @@ def _mutate(memory_root, session_id, mode, change):
 def record_session_start(memory_root, session_id, mode="explicit", source=None):
     """Register a session without changing its dirty/synced generations."""
 
-    def change(record, timestamp):
+    def change(record, timestamp, is_new):
         record["last_event"] = "SessionStart"
         if isinstance(source, str) and source:
             record["last_session_start_source"] = source[:64]
@@ -367,7 +371,7 @@ def record_session_start(memory_root, session_id, mode="explicit", source=None):
 def mark_dirty(memory_root, session_id, mode="explicit"):
     """Mark a session dirty. No user prompt or prompt-derived text is accepted/stored."""
 
-    def change(record, timestamp):
+    def change(record, timestamp, is_new):
         try:
             generation = int(record.get("dirty_generation", 0))
         except (TypeError, ValueError):
@@ -385,9 +389,20 @@ def record_precompact(memory_root, session_id, mode="explicit", trigger="unknown
     trigger = trigger if isinstance(trigger, str) and trigger else "unknown"
     trigger = trigger.lower()[:32]
 
-    def change(record, timestamp):
+    def change(record, timestamp, is_new):
         record["last_event"] = "PreCompact"
         record["last_precompact_trigger"] = trigger
+        # A compaction is the FIRST thing this bookkeeping ever saw of the
+        # session: it cannot have observed the prompts that came before, so it
+        # has no evidence the work is synced. That happens when the hooks were
+        # trusted mid-session, when the state file was deleted or reset, or when
+        # an earlier dirty write failed. Treating the synthesized blank record as
+        # "clean" would open the one gate that is supposed to fail CLOSED, so
+        # count it as unsynced instead. A normal session is unaffected: its
+        # SessionStart already created the record.
+        if is_new:
+            record["dirty"] = True
+            record["unobserved_session"] = True
         # Only an explicitly identified manual compaction may be blocked by the
         # hook. Auto and unknown/missing trigger values fail open, so preserve a
         # reconciliation marker whenever unsynced work crosses that boundary.
