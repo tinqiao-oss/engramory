@@ -7,7 +7,8 @@
 > live); keep this store git-ignored and out of cloud-synced / backed-up folders.
 
 ## user
-<!-- who the user is: identity, role, durable preferences -->
+<!-- who the user is: identity, role, expertise, durable preferences ABOUT THEM.
+     A preference about how YOU work ("reply in Chinese") is feedback, not user. -->
 
 ## feedback
 <!-- reusable corrections/workflows only (not task-local state). Why: / How to apply: -->

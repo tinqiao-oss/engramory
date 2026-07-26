@@ -44,6 +44,15 @@ The command is intentionally conservative. It does not overwrite an existing
 Engramory skill or managed hook-script copy already exists, it is kept unless
 you pass `--force`; unrelated hook handlers are preserved.
 
+> **When you upgrade Engramory, re-run this with `--install-hooks --force`.**
+> `.codex/engramory/engramory_sync.py` is a COPY taken at install time, so an
+> upgraded checkout otherwise leaves the old runtime driving your hooks. It matters
+> across 0.6.3 → 0.6.4 in particular: the state lock changed from "the lock file
+> exists" to a kernel lock on an open descriptor, and the two schemes cannot see
+> each other — running both against one store can lose a state update. After
+> re-installing, re-trust the handlers in Codex's `/hooks` (their content hash
+> changed).
+
 ## Use an existing memory folder
 
 ```sh
@@ -178,8 +187,15 @@ managed scripts under `.codex/engramory/`. It preserves unrelated hook handlers;
 review both locations before granting project trust.
 
 On its first event, the hook creates
-`<MEMORY_ROOT>/.engramory-codex-state.json` (and a short-lived lock beside it).
-This is bounded technical bookkeeping: session identifiers, mode/source,
+`<MEMORY_ROOT>/.engramory-codex-state.json`, plus an empty
+`.engramory-codex-state.lock` beside it. That lock file stays on disk by design:
+exclusion comes from a kernel lock on an open descriptor (POSIX `flock` / Windows
+`msvcrt`), not from the file's existence, so the OS releases it even if a writer
+is killed — and deleting the file would let a waiting writer lock an orphaned
+inode. It is empty and safe to ignore.
+
+The state file is bounded technical bookkeeping: session identifiers, mode, the
+SessionStart `source` (stored as one of Codex's four enum values, or `other`),
 dirty/synced generations, timestamps, reconciliation state, and the index
 hash/size. It never stores a prompt, transcript, or memory-note body. Deleting
 it resets the hook's knowledge of pending synchronization; it does not delete

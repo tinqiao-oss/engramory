@@ -31,12 +31,24 @@ import sys
 import tempfile
 import time
 
+try:  # POSIX
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - platform dependent
+    _fcntl = None
+try:  # Windows
+    import msvcrt as _msvcrt
+except ImportError:  # pragma: no cover - platform dependent
+    _msvcrt = None
+
 
 STATE_FILENAME = ".engramory-codex-state.json"
 LOCK_FILENAME = ".engramory-codex-state.lock"
 SCHEMA_VERSION = 1
 MAX_SESSIONS = 64
 MAX_STATE_BYTES = 1024 * 1024
+# Codex's SessionStart `source` enum — the same four values the installer writes as
+# the SessionStart matcher in `.codex/hooks.json`. Anything else is stored as "other".
+SESSION_START_SOURCES = ("startup", "resume", "clear", "compact")
 DEFAULT_HARD_LINES = 200
 DEFAULT_HARD_BYTES = 25600
 
@@ -293,47 +305,123 @@ def _atomic_write_json(path, value):
                 pass
 
 
+def _try_kernel_lock(fd):
+    """Take an exclusive, non-blocking KERNEL lock on `fd`. True if acquired.
+
+    Returns False when another descriptor holds it (the contended case), and
+    None when this interpreter offers neither backend, so the caller can fall
+    back. Both backends are per-descriptor, so a second `os.open` in the SAME
+    process contends exactly like another process would.
+    """
+    if _fcntl is not None:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+    if _msvcrt is not None:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)  # msvcrt locks a range from the file position
+            _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    return None
+
+
+def _release_kernel_lock(fd):
+    try:
+        if _fcntl is not None:
+            _fcntl.flock(fd, _fcntl.LOCK_UN)
+        elif _msvcrt is not None:
+            os.lseek(fd, 0, os.SEEK_SET)
+            _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
+    except OSError:
+        # Closing the descriptor drops the lock anyway; a failure here must not
+        # mask the outcome of the state update that just completed.
+        pass
+
+
 @contextlib.contextmanager
 def _state_lock(root, timeout=2.0):
-    """Small cross-platform lock preventing lost read/modify/write updates."""
+    """Exclusive lock around the state file's read/modify/write.
+
+    Ownership is a KERNEL lock on an open descriptor, not the mere EXISTENCE of a
+    lock file. The advisory-file scheme this replaces declared a lock "stale" once
+    its mtime was 30s old and simply unlinked it, which is only true of a DEAD
+    owner: a writer that merely paused — slow disk, a suspended laptop, a
+    breakpoint — was silently displaced, and both processes then ran the same
+    read/modify/write, the later one clobbering the earlier one's update. Release
+    made it worse: it unlinked by PATH unconditionally, so the displaced writer
+    deleted the NEW owner's lock on its way out and a third writer could walk in.
+
+    A kernel lock cannot be taken from a live holder however long it pauses, and
+    the OS drops it when the owning process exits — so a crash cannot wedge the
+    store either, which is the one real problem the stale-takeover was there to
+    solve. The lock FILE is intentionally left behind (empty): unlinking it would
+    let a waiter that already opened the same path lock a now-orphaned inode.
+    """
     path = root / LOCK_FILENAME
     deadline = time.monotonic() + timeout
-    fd = None
-    while fd is None:
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            try:
-                stale = (time.time() - path.stat().st_mtime) > 30.0
-            except OSError:
-                stale = False
-            if stale:
-                try:
-                    path.unlink()
-                    continue
-                except OSError:
-                    pass
+    # O_NOFOLLOW (POSIX) refuses a planted symlink at the lock path; the store is
+    # attacker-influenceable input (SECURITY.md) and a lock is opened read-write.
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(path), flags, 0o600)
+    except OSError as exc:
+        raise SyncError("cannot open state lock {}: {}".format(path, exc))
+    try:
+        while True:
+            taken = _try_kernel_lock(fd)
+            if taken is None:
+                # Neither fcntl nor msvcrt exists (not CPython on POSIX/Windows).
+                # Degrade to an exclusive-CREATE file lock — no stale takeover, so
+                # it can strand on a crash, but it never displaces a live writer.
+                os.close(fd)
+                fd = None  # or the finally below closes it a SECOND time, and a
+                # descriptor number reused in between belongs to someone else by then
+                with _fallback_file_lock(path, deadline):
+                    yield
+                return
+            if taken:
+                break
             if time.monotonic() >= deadline:
                 raise SyncError("timed out waiting for state lock: {}".format(path))
             time.sleep(0.025)
-        except OSError as exc:
-            raise SyncError("cannot create state lock {}: {}".format(path, exc))
-    try:
-        os.write(fd, "{} {}\n".format(os.getpid(), time.time()).encode("ascii"))
-        os.fsync(fd)
-        os.close(fd)
-        fd = None
-        yield
+        try:
+            yield
+        finally:
+            _release_kernel_lock(fd)
     finally:
         if fd is not None:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+@contextlib.contextmanager
+def _fallback_file_lock(path, deadline):
+    marker = path.with_name(path.name + ".excl")
+    while True:
         try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+            fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise SyncError(
+                    "timed out waiting for state lock: {} (delete it only after "
+                    "confirming no other Engramory writer is running)".format(marker))
+            time.sleep(0.025)
+        except OSError as exc:
+            raise SyncError("cannot create state lock {}: {}".format(marker, exc))
+    try:
+        os.close(fd)
+        yield
+    finally:
+        try:
+            marker.unlink()
         except OSError:
-            # The state update is already atomic; a leftover lock becomes stale and
-            # is recoverable, so cleanup failure must not corrupt the state.
             pass
 
 
@@ -387,7 +475,15 @@ def record_session_start(memory_root, session_id, mode="explicit", source=None):
     def change(record, timestamp, is_new):
         record["last_event"] = "SessionStart"
         if isinstance(source, str) and source:
-            record["last_session_start_source"] = source[:64]
+            # Record the ENUM, never the event's raw text. Truncating to 64 chars
+            # still persisted attacker-chosen prose from a crafted hook event
+            # (SECURITY.md), and `status --json` prints the session records
+            # straight back into a model's context. Anything unrecognised is
+            # bookkeeping-equivalent to "some other source".
+            record["last_session_start_source"] = (
+                source.strip().lower()
+                if source.strip().lower() in SESSION_START_SOURCES
+                else "other")
 
     return _mutate(memory_root, session_id, mode, change)
 

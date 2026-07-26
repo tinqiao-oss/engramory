@@ -105,14 +105,19 @@ def _load_sync_tool(path_value):
 
 
 def _command_text(sync_tool, memory_root, session_id=None, action="mark-synced"):
+    # `--opt=value`, and `--` before the positional, because this text is emitted for
+    # a human or an agent to RUN. A session id or path beginning with `-` was
+    # otherwise parsed as an option by the receiving argparse ("expected one
+    # argument"), so the one recovery command the hook hands out could not run.
+    # Options must precede `--`; everything after it is positional.
     argv = [
         os.path.abspath(sys.executable),
         str(sync_tool),
         action,
-        str(memory_root),
     ]
     if session_id is not None:
-        argv += ["--session-id", session_id]
+        argv += ["--session-id={}".format(session_id)]
+    argv += ["--", str(memory_root)]
     if os.name == "nt":
         # Render the Windows user-facing command explicitly as PowerShell.
         # Quote every argument so `&`, `%NAME%`, `$`, and embedded apostrophes

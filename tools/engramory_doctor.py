@@ -20,6 +20,13 @@ and an index pointer using a NON-REMOTE URL scheme (`file://…` names a local p
 so it must be gated like any other path). Only a scheme on the remote allowlist in
 `_is_remote_url` (http/https, ftp/ftps, mailto, ssh, git+…) counts as external.
 
+`templates/` and `archive/` are outside the note graph: files there are never
+schema-checked and can never be orphans. An index pointer INTO one of them is
+therefore reported as INFO and credited to nothing — the protocol requires the
+folded-archive index line to stay a pointer (SKILL.md §5), so it is not an error,
+but crediting it would let `archive/foo.md` mark a live `foo.md` as indexed and
+hide a real orphan.
+
 Reads are bounded, because the store is attacker-influenceable and a planted or
 runaway file must not take down the validator meant to report it: an index far past
 the cap is reported and NOT parsed, and a note larger than NOTE_READ_CAP is flagged
@@ -27,8 +34,9 @@ rather than read. Echoed frontmatter fragments are quoted and truncated for the 
 reason — an agent reads this output, so a hostile note cannot flood or instruct it.
 
 PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — each
-note must have well-formed frontmatter (no malformed lines, unclosed quotes, or a
-missing closing fence) carrying a non-empty `name`, `description`, a valid `type`
+note must have well-formed frontmatter (no malformed lines, unclosed or malformed
+quotes, or a missing closing fence) carrying a non-empty `name`, `description`, a
+valid `type`
 (user|feedback|project|reference), and real-calendar `created` + `updated` dates;
 feedback/project notes must carry `Why:` + `How to apply:`. Soft hygiene is INFO
 (exit 0): a `name` not matching the filename slug (tolerating `-`/`_`/case), and a
@@ -38,7 +46,15 @@ session start). Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed
 Note: indentation is ignored, so fields nested under a host's `metadata:` block
 (e.g. Claude Code's) are read; the name<->filename check ignores `-`/`_`/case so
 CC's `a-b` name vs `a_b.md` file isn't flagged. The frontmatter grammar is the
-restricted `key: value` form, not full YAML (so the tool keeps zero dependencies).
+restricted `key: value` form, not full YAML (so the tool keeps zero dependencies):
+a value is unquoted, or wrapped in ONE matching quote pair whose inner quotes are
+backslash-escaped. An unquoted value is never de-quoted, so a trailing `"` in
+prose survives.
+
+A `[[wikilink]]` whose case doesn't match the file resolves exactly like a
+miscased index pointer does: the FILESYSTEM decides. It resolves on a
+case-insensitive FS (Windows/macOS), where the link really does open that file,
+and stays broken on a case-sensitive one.
 
 Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Caps via
 ENGRAMORY_HARD / ENGRAMORY_HARD_BYTES.
@@ -163,7 +179,35 @@ def _is_remote_url(target):
     # Only a REMOTE scheme is exempt from the store-containment check. `file://`,
     # and anything else that resolves to a local path, must still be gated —
     # treating every "://" as external turned the scheme into a bypass.
-    return bool(re.match(r"^(https?|ftps?|mailto|ssh|git\+[a-z]+)://", target, re.I))
+    # `mailto:` is matched separately: it is the one allowlisted scheme with NO
+    # `//` authority, so folding it into the `://` alternation (as this did)
+    # silently dropped it — a real `mailto:x@example.md` was then treated as a
+    # local path and reported as a non-remote-scheme ISSUE.
+    return bool(re.match(r"^(?:(?:https?|ftps?|ssh|git\+[a-z]+)://|mailto:)", target, re.I))
+
+
+# Top-level dirs that are deliberately NOT part of the note graph (see os.walk below).
+_EXCLUDED_DIRS = ("templates", "archive")
+
+
+def _excluded_dir(real, root_abs):
+    # The first path component of `real` relative to the store root, when that
+    # component is an excluded dir — else None. Computed from the RESOLVED path so
+    # `./archive/x.md` and `sub/../archive/x.md` are classified the same way, and
+    # matched on the component (not a string prefix) so `archive-old/` is unaffected.
+    # Case-FOLDED, and the os.walk exclusion below folds identically: on macOS
+    # `realpath` keeps the CALLER's spelling, so an index pointer written
+    # `Archive/foo.md` stayed unexcluded while the walk had already skipped the real
+    # `archive/` — and the basename map then credited the pointer to a LIVE `foo.md`,
+    # resurrecting the hidden-orphan bug this function exists to prevent. Both sides
+    # must fold or neither can: fold one only, and a real `Archive/` dir on Linux
+    # becomes notes nothing may point at.
+    try:
+        rel = os.path.relpath(real, root_abs).replace("\\", "/")
+    except ValueError:  # different drive on Windows
+        return None
+    first = rel.split("/")[0]
+    return first if first.lower() in _EXCLUDED_DIRS else None
 
 
 def _contained(real, root_abs):
@@ -201,6 +245,38 @@ def _real_basename(full, notes):
     return base
 
 
+def _ci_note_match(cand, notes):
+    # Resolve a case-mismatched [[wikilink]] the way an index pointer is resolved, so
+    # the two agree. A pointer carries a path, so `os.path.isfile` decides for it
+    # (see _real_basename); a wikilink is a bare slug with no path, so probe the
+    # LINK'S OWN SPELLING next to the candidate note and let the filesystem decide the
+    # same way. On a case-insensitive FS (Windows/macOS) `[[Foo]]` really does open
+    # `foo.md`, so folding is correct; on a case-sensitive FS (Linux) the probe fails
+    # and the link stays correctly broken. Returns the real notes key, or None.
+    low = cand.lower()
+    for nk, npath in sorted(notes.items()):
+        if nk != cand and nk.lower() == low:
+            if os.path.isfile(os.path.join(os.path.dirname(npath), cand)):
+                return nk
+    return None
+
+
+def _unescaped(text, quote):
+    # True if `quote` appears in `text` without a preceding backslash. The restricted
+    # frontmatter grammar has no string escapes of its own, but real stores DO carry
+    # backslash-escaped quotes inside quoted descriptions (host writers emit them), so
+    # they must not be reported as malformed.
+    i = 0
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return True
+        i += 1
+    return False
+
+
 def _frontmatter(text):
     # Validate + parse Engramory's restricted `key: value` frontmatter between
     # leading `---` fences. Indentation is ignored (so a nested `metadata:` block's
@@ -232,14 +308,28 @@ def _frontmatter(text):
         k, v = line.split(":", 1)
         k = k.strip()
         v = v.strip()
-        if v[:1] in ("'", '"') and not (len(v) >= 2 and v[-1] == v[0]):
-            problems.append(f"unclosed quote in frontmatter value for {_short(k)}")
+        # Strip AT MOST ONE matching quote pair, and only when the value is actually
+        # quoted. The old `v.strip('"').strip("'")` ran on EVERY value, so an unquoted
+        # value ending in a quote lost it (`he said "hi"` -> `he said "hi`), and a
+        # malformed `"foo""` was silently accepted as `foo`. A quote INSIDE the pair is
+        # reported unless it is backslash-escaped — real stores carry `\"` in quoted
+        # descriptions, and failing those would flag a large set of valid notes.
+        quote = v[:1]
+        if quote in ("'", '"'):
+            if len(v) >= 2 and v[-1] == quote:
+                v = v[1:-1]
+                if _unescaped(v, quote):
+                    problems.append(f"malformed quoted value for {_short(k)}: an "
+                                    f"unescaped {quote} inside the quotes")
+            else:
+                problems.append(f"unclosed quote in frontmatter value for {_short(k)}")
+                v = v[1:]  # report it, but keep the rest usable for the later checks
         if k in fm:
             # Last-value-wins would let e.g. a second `type:` silently reclassify a
             # feedback note as reference and dodge the Why/How requirement — ambiguity
             # is a schema problem, not something to resolve silently.
             problems.append(f"duplicate frontmatter key {_short(k)} (keep exactly one)")
-        fm[k] = v.strip('"').strip("'")
+        fm[k] = v
     return fm, problems, text[m.end():]
 
 
@@ -324,7 +414,9 @@ def main(argv):
     for dp, _, fs in os.walk(root):
         rel = os.path.relpath(dp, root).replace("\\", "/")
         parts = rel.split("/")
-        if parts and parts[0] in ("templates", "archive"):
+        # `.lower()` to stay in lockstep with _excluded_dir — see the note there on why
+        # folding only one side reintroduces a hidden orphan (or invents a false one).
+        if parts and parts[0].lower() in _EXCLUDED_DIRS:
             continue
         for f in fs:
             if not f.lower().endswith(".md"):  # tolerate .MD/.Md so they aren't skipped (and bypass schema) on case-insensitive FS
@@ -380,6 +472,20 @@ def main(argv):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
         if os.path.isfile(full):
+            excluded = _excluded_dir(full, root_abs)
+            if excluded:
+                # `archive/` and `templates/` sit OUTSIDE the note graph (os.walk skips
+                # them), so a file there is never schema-checked and can never be an
+                # orphan. Crediting it through `_real_basename` — which maps by BASENAME
+                # only — was worse than a no-op: with both `foo.md` and `archive/foo.md`
+                # present, the archive pointer marked the LIVE `foo.md` as indexed and
+                # HID a real orphan. Report and skip instead. A pointer into `archive/`
+                # is legitimate — the protocol REQUIRES the folded-archive index line to
+                # stay a pointer (SKILL.md §5) — so this is INFO, not an ISSUE.
+                info.append(f"index points into {excluded}/ ({tgt}): files there are not "
+                            f"validated as notes and are not part of the note graph — "
+                            f"keep this line only if it is the folded-archive pointer")
+                continue
             # Match the real note-dict key (from os.walk), not the pointer's possibly-
             # miscased text, so a miscased-but-existing pointer on a case-insensitive FS
             # (macOS/Windows) doesn't yield a false 'orphan'. See _real_basename — realpath
@@ -402,6 +508,8 @@ def main(argv):
             # to count here.
             continue
         full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
+        if _excluded_dir(full, root_abs):
+            continue  # not in the note graph (see the containment loop) — nothing to tally
         b = _real_basename(full, notes) if os.path.isfile(full) else os.path.basename(full)
         if b in indexed:
             ptr_counts[b] = ptr_counts.get(b, 0) + 1
@@ -436,13 +544,15 @@ def main(argv):
                 info.append(f"[[{w}]] in {base} isn't a bare slug (engramory links are flat "
                             f"slugs, no path) — can't resolve it")
                 continue
-            cand = target if target.endswith(".md") else target + ".md"
-            if cand == base:
-                continue  # a note linking to itself isn't "referenced by another note"
-            if cand in notes:
-                referenced.add(cand)
-            else:
+            # `.lower()` so `[[note.MD]]` isn't turned into `note.MD.md` (the store
+            # tolerates .MD/.Md files, so the link spelling must be tolerated too).
+            cand = target if target.lower().endswith(".md") else target + ".md"
+            hit = cand if cand in notes else _ci_note_match(cand, notes)
+            if hit is None:
                 info.append(f"[[{w}]] in {base} has no target file yet (ok if a forward-ref stub)")
+            elif hit != base:
+                # (a note linking to itself isn't "referenced by another note")
+                referenced.add(hit)
 
         if not schema:
             continue  # --no-schema: structural checks only, skip frontmatter validation

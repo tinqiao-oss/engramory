@@ -41,10 +41,21 @@ formal SLA, but we take memory-content and hook-safety issues seriously.
   or proof that semantic memory was synced.
 - The Codex shim's `<MEMORY_ROOT>/.engramory-codex-state.json` is bounded
   bookkeeping, not memory. It records session identifiers, timestamps,
-  generations, mode/source, reconciliation state, and index hash/size. The
-  runtime never passes prompt text to the state layer and never stores prompts,
-  transcripts, or note bodies there. The index and state paths reject symlinks
+  generations, mode, the SessionStart source, reconciliation state, and index
+  hash/size. The runtime never passes prompt text to the state layer and never
+  stores prompts, transcripts, or note bodies there. The `source` is normalized
+  to Codex's own enum (`startup|resume|clear|compact`, else `other`) rather than
+  stored verbatim: it arrives in an untrusted event, and `status --json` prints
+  session records straight back into a model's context. The index and state paths reject symlinks
   when validation or mutation would otherwise follow them.
+- **The installer's symlink-escape checks are best-effort, not a closed race.**
+  `engramory_init.py` refuses a target that resolves outside `--project-root`, and
+  re-checks immediately before each write, delete, and copy rather than trusting
+  the run's preflight. A local attacker who can swap a parent directory for a
+  symlink *between* that check and the write still wins; closing that needs
+  fd-relative, reparse-point-refusing directory handles the stdlib does not offer
+  portably. The installer also does not roll back: a failure part-way leaves the
+  completed steps on disk and reports exactly which ones they were.
 
 In scope: a crafted `tool_input` that makes the hook mis-gate (wrongly block or
 wrongly pass) a real index edit; a crafted Codex hook event that incorrectly

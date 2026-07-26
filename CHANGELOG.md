@@ -4,6 +4,121 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.6.4 — 2026-07-27
+
+The deferred P2 tier from the 0.6.1–0.6.3 audits, cleared. A cross-model review of
+the proposed fixes then refuted most of them and surfaced four defects that were
+not on the list — including two that destroy data — so this release is larger than
+the backlog it set out to close. Every defect below is reproduced by a new test,
+except the two hardening items with no deterministic repro: the narrowed TOCTOU
+window and the atomic index create.
+
+Correctness
+- **An `archive/` index pointer could hide a real orphan.** Files under `archive/`
+  and `templates/` are outside the note graph, but a pointer into them was resolved
+  through a BASENAME map: with both `foo.md` and `archive/foo.md` present, the
+  archive pointer marked the live `foo.md` as indexed, and the doctor reported a
+  clean store while a genuinely unreferenced note sat in it. Such a pointer is now
+  reported as INFO and credited to nothing. It stays INFO because the protocol
+  *requires* the folded-archive index line to remain a pointer (SKILL.md §5). The
+  exclusion is case-folded on BOTH sides (pointer and directory walk): on macOS
+  `realpath` keeps the caller's spelling, so a pointer written `Archive/foo.md`
+  would otherwise have slipped past it and resurrected the same hidden orphan.
+- **The installer deleted user content around a block marker.** Markers were matched
+  as raw substrings, which conflated two very different files. A genuinely duplicated
+  `BEGIN` made the splice run from the FIRST begin to the END, silently dropping
+  every line in between; and a file where the user merely *quotes* the marker in
+  prose ("wrap it in `<!-- BEGIN … -->`") was treated as malformed — skipping the
+  real replacement AND deleting that user line. A marker now counts only as a whole
+  line, which is how the installer writes it.
+- **A dangling `MEMORY.md` symlink was written through.** `exists()` is False for a
+  broken link, so the symlink refusal was skipped and `copy2` created the template
+  at the link's target, outside the store. The check is now unconditional and runs
+  first.
+- **A miscased `[[wikilink]]` was reported as broken.** Index pointers already
+  case-folded when the filesystem said the file existed; wikilinks matched exactly,
+  so on Windows/macOS `[[Foo]]` → `foo.md` was reported as a dangling link *and*
+  `foo.md` as an orphan — a clean store exiting 1. Both paths now resolve the same
+  way, by probing the link's own spelling and letting the filesystem decide.
+  `[[note.MD]]` also no longer becomes `note.MD.md`.
+- **An unquoted frontmatter value lost a trailing quote.** The parser ran
+  `.strip('"').strip("'")` over every value, so `description: he said "hi"` became
+  `he said "hi` — and `created: 2026-01-01"` was quietly repaired into a valid date.
+  Quotes are now stripped only from an actually-quoted value, one pair at a time.
+  A malformed pair (`"foo""`) is reported instead of silently accepted; a
+  backslash-escaped inner quote stays valid, because real stores contain them.
+- **`mailto:` pointers were treated as local paths.** It is the one allowlisted
+  scheme with no `//` authority, so folding it into the `://` alternation dropped
+  it — contradicting the documented allowlist.
+
+Concurrency
+- **The Codex state lock could be taken from a live writer.** It declared a lock
+  stale once its mtime was 30 s old and simply unlinked it — true of a dead owner,
+  but also of one that merely paused on a slow disk, a suspended laptop, or a
+  breakpoint. Both processes then ran the same read/modify/write and the later
+  clobbered the earlier; worse, release unlinked by PATH unconditionally, so the
+  displaced writer deleted the *new* owner's lock on its way out. Exclusion is now
+  a kernel lock on an open descriptor (POSIX `flock` / Windows `msvcrt`), which
+  cannot be taken from a live holder and is released by the OS if that process
+  dies — so crash recovery, the one real problem the stale-takeover solved,
+  still works. The (now empty) lock file is deliberately left on disk.
+
+Hardening
+- **The emitted recovery command could not run.** A session id beginning with `-`
+  was parsed as an option by the receiving `argparse`, so the single command the
+  hook hands out on a blocked manual compaction failed with "expected one
+  argument". It now uses `--session-id=<id>` and `--` before the positional.
+- **`SessionStart.source` is stored as an enum**, not 64 characters of whatever the
+  event carried. It arrives in an untrusted event and `status --json` prints
+  session records straight back into a model's context.
+- **Symlink-escape checks are re-run immediately before each write, delete, and
+  copy**, instead of only in the run's preflight. This narrows the TOCTOU window
+  rather than closing it, and `SECURITY.md` now says so plainly.
+- **`MEMORY.md` is created atomically.** An interrupted `copy2` left a truncated
+  index, which every later run then adopted as "kept existing" — permanent, silent
+  damage.
+- **A failed install now reports what landed.** Nothing is rolled back (several
+  targets are user-owned files), so the run prints the completed steps and names
+  the two that a re-run will NOT repair on its own: a truncated index is kept, and
+  a half-copied skill dir is kept without `--force`.
+
+Tests
+- **CI was running fewer tests than it appeared to.** `tests/test_tools.py` doubles
+  as a dependency-free script, and its `if __name__ == "__main__"` block sat in the
+  MIDDLE of the file — `_main()` collects `test_*` from `globals()` at call time, so
+  the 14 tests defined below that block (including everything added in 0.6.1) were
+  silently skipped in CI while passing locally under pytest. The runner now sits at
+  the end of the file, with a comment saying why it must stay there; the script and
+  pytest paths both collect 108. One new test also had to drop its `monkeypatch` /
+  `capsys` fixtures, which the script runner cannot supply.
+- `tests/test_state_lock.py` is new and wired into the CI matrix: lock semantics
+  differ per platform (POSIX `flock` vs Windows `msvcrt`), so it has to run on all
+  three, and it uses a real second process — the two-writers-at-once failure has no
+  single-process repro.
+- **The test harness dropped stderr.** `_run` returned stdout only, but every
+  installer refusal is a `raise SystemExit`, which prints to stderr — so any test
+  asserting on a refusal was vacuous *exactly where the refusal fired*. Two symlink
+  tests would have started failing the moment the runner fix above let CI reach them
+  on a platform where `os.symlink` succeeds. Both streams are returned now.
+
+Upgrading
+- **Do not run 0.6.3 and 0.6.4 against the same store at the same time.** The two
+  lock schemes cannot see each other: 0.6.3 takes the lock by CREATING the file,
+  0.6.4 by locking an already-open one, so each would happily enter a critical
+  section the other holds. There is no fix that keeps interoperability without
+  reintroducing the displacement bug (0.6.3 unlinks any lock file older than 30 s,
+  including 0.6.4's). `.codex/engramory/engramory_sync.py` is a COPY made at install
+  time, so after upgrading, re-run `engramory_init.py codex --install-hooks --force`
+  to replace it — then re-trust the hooks in Codex's `/hooks`.
+
+Docs
+- `templates/MEMORY.md` reopened the settled `user`/`feedback` split by listing
+  "durable preferences" under `user` without SKILL.md §2's disambiguation — a
+  reply-style preference is `feedback`. The template now carries it.
+- SKILL.md documents the restricted grammar's quoting rule; the doctor docstring,
+  `SECURITY.md`, and the Codex adapter README are updated to match the new lock,
+  `source`, and installer behavior.
+
 ## 0.6.3 — 2026-07-26
 
 A documentation-drift sweep after three fast releases: every doc and module

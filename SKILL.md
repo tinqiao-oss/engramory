@@ -76,7 +76,10 @@ never create a series of snapshot files, and retire its transient state when the
 task completes.
 
 File frontmatter (a restricted `key: value` subset — not full YAML; no multi-line
-values or lists, parsed by a zero-dependency reader):
+values or lists, parsed by a zero-dependency reader). A value is either bare, or
+wrapped in ONE matching quote pair; a quote inside that pair must be
+backslash-escaped, and a bare value is never de-quoted (so a trailing `"` in
+prose survives intact):
 
 ```markdown
 ---

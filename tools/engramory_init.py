@@ -51,7 +51,7 @@ def _read_text(path):
     return path.read_text(encoding="utf-8")
 
 
-def _write_text(path, text):
+def _write_text(path, text, guard_root=None):
     """Every install write is atomic — several targets are USER-OWNED files.
 
     `AGENTS.md`, a dedicated rules file, and `.gitignore` routinely already exist
@@ -61,11 +61,21 @@ def _write_text(path, text):
     temp file and `os.replace`-ing means the previous content survives any
     failure.
     """
-    _write_text_atomic(path, text)
+    _write_text_atomic(path, text, guard_root=guard_root)
 
 
-def _write_text_atomic(path, text):
-    """Atomically replace a managed file without following a final symlink/hardlink."""
+def _write_text_atomic(path, text, guard_root=None):
+    """Atomically replace a managed file without following a final symlink/hardlink.
+
+    `guard_root` re-checks containment HERE, immediately before the write, rather
+    than trusting the run's preflight: a parent directory swapped for a symlink in
+    between would otherwise redirect this write outside the tree. This narrows the
+    window to the gap between the check and the `mkstemp` below — it does not close
+    it. Closing it needs fd-relative, reparse-point-refusing directory handles that
+    the stdlib does not offer portably, so this stays best-effort (SECURITY.md).
+    """
+    if guard_root is not None:
+        _refuse_symlink_escape(path, guard_root, path.name)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name = None
     try:
@@ -129,13 +139,23 @@ def _replace_block(existing, block, begin, end, heading="AGENTS.md"):
     # crashes on a malformed file and never silently deletes the surrounding user content.
     # `heading` titles a freshly-created empty file, so a new CLAUDE.md / .clinerules isn't
     # mislabelled "# AGENTS.md".
-    i = existing.find(begin)
-    j = existing.find(end)
-    if 0 <= i < j:
-        before, after = existing[:i], existing[j + len(end):]
+    # A marker counts only when it is the WHOLE line — which is how this installer
+    # writes it. Matching the raw substring conflated two very different files: one
+    # with a genuinely duplicated marker, and one where the user merely QUOTES the
+    # marker in prose ("wrap it in `<!-- BEGIN … -->`"). The first must take the
+    # conservative path; the second is an ordinary single-block file, and treating it
+    # as malformed both skipped the real replacement and deleted the user's line.
+    lines = existing.splitlines()
+    begins = [n for n, ln in enumerate(lines) if ln.strip() == begin]
+    ends = [n for n, ln in enumerate(lines) if ln.strip() == end]
+    if len(begins) == 1 and len(ends) == 1 and begins[0] < ends[0]:
+        before = "\n".join(lines[:begins[0]])
+        after = "\n".join(lines[ends[0] + 1:])
         return before.rstrip() + "\n\n" + block + "\n\n" + after.lstrip()
-    cleaned = "\n".join(ln for ln in existing.splitlines()
-                        if begin not in ln and end not in ln)
+    # Malformed: drop the stray marker LINES only. A line that merely mentions a marker
+    # is left alone — it is user prose, not a marker.
+    cleaned = "\n".join(ln for ln in lines
+                        if ln.strip() != begin and ln.strip() != end)
     if cleaned.strip():
         return cleaned.rstrip() + "\n\n" + block + "\n"
     return f"# {heading}\n\n" + block + "\n"
@@ -160,6 +180,7 @@ def _ensure_gitignore(project_root, memory_root):
         + "# Engramory live memory store (plain text, machine-local)\n"
         + rel
         + "\n",
+        guard_root=project_root,
     )
     return f"added {rel}"
 
@@ -167,16 +188,21 @@ def _ensure_gitignore(project_root, memory_root):
 def _ensure_memory_store(source_root, memory_root):
     memory_root.mkdir(parents=True, exist_ok=True)
     index = memory_root / "MEMORY.md"
+    # is_symlink() FIRST, and unconditionally. `exists()` follows the link, so a
+    # DANGLING `MEMORY.md -> /outside/anything.md` answered False, fell through to the
+    # create path, and `copy2` then wrote the template THROUGH the link — creating a
+    # file outside the store, which every later recall would read. A planted symlink is
+    # exactly the attacker-influenceable input SECURITY.md covers, dangling or not.
+    if index.is_symlink():
+        raise SystemExit(
+            f"refusing to adopt {index}: it is a symlink. The memory index "
+            f"must be a real file inside the store.")
     if index.exists():
         # `exists()` follows symlinks, so a planted `MEMORY.md -> /etc/passwd`
         # used to be reported as "kept existing" and every later recall would
         # read that file into the model's context. The store is
-        # attacker-influenceable input (SECURITY.md), so refuse an index that is
-        # a symlink or that resolves outside the store instead of adopting it.
-        if index.is_symlink():
-            raise SystemExit(
-                f"refusing to adopt {index}: it is a symlink. The memory index "
-                f"must be a real file inside the store.")
+        # attacker-influenceable input (SECURITY.md), so refuse an index that
+        # resolves outside the store instead of adopting it.
         if not index.is_file():
             raise SystemExit(
                 f"refusing to adopt {index}: it is not a regular file.")
@@ -186,12 +212,21 @@ def _ensure_memory_store(source_root, memory_root):
                 f"({memory_root}).")
         return "kept existing MEMORY.md"
     template = source_root / "templates" / "MEMORY.md"
-    shutil.copy2(template, index)
+    # Stage + os.replace rather than copy2: a copy interrupted by a full disk, an I/O
+    # error, or a kill leaves a TRUNCATED index — which the branch above then adopts
+    # ("kept existing") on every later run, so the damage is permanent and silent.
+    # Either the index appears whole or it does not appear at all.
+    _write_text_atomic(index, _read_text(template), guard_root=memory_root)
     return "created MEMORY.md from template"
 
 
 def _copy_skill(source_root, project_root, force):
     skill_root = project_root / ".agents" / "skills" / "engramory"
+    # Re-check containment immediately before the rmtree/copytree, not just in the
+    # run's preflight: with --force this DELETES a tree, and a parent swapped for a
+    # symlink in between would aim that delete outside the project. Best-effort
+    # narrowing, not a closed window — see _write_text_atomic.
+    _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
     if skill_root.exists():
         if not force:
             return "kept existing .agents/skills/engramory (use --force to replace)"
@@ -565,7 +600,10 @@ def _merge_codex_hooks(
     return data
 
 
-def _copy_managed_file(source, target, force):
+def _copy_managed_file(source, target, force, guard_root=None):
+    if guard_root is not None:
+        # Re-checked here, immediately before the write (see _write_text_atomic).
+        _refuse_symlink_escape(target, guard_root, f"managed file {target.name}")
     if target.is_symlink():
         raise SystemExit(
             f"cannot install Codex hooks: managed target {target} is a symlink")
@@ -658,7 +696,8 @@ def _drop_codex_hooks_gitignore_entry(project_root):
     if not removed:
         return ("left the existing {0} ignore rule alone: it carries no Engramory "
                 "marker, so it looks like your own".format(_CODEX_HOOKS_IGNORE_ENTRY))
-    _write_text(gitignore, ("\n".join(kept).rstrip() + "\n") if kept else "")
+    _write_text(gitignore, ("\n".join(kept).rstrip() + "\n") if kept else "",
+                guard_root=project_root)
     return "removed the stale {0} ignore rule".format(_CODEX_HOOKS_IGNORE_ENTRY)
 
 
@@ -679,6 +718,7 @@ def _ensure_codex_hooks_gitignored(project_root, hooks_path, merged):
     _write_text(
         gitignore,
         prefix + _CODEX_HOOKS_IGNORE_COMMENT + "\n" + entry + "\n",
+        guard_root=project_root,
     )
     return "gitignored {0}".format(entry)
 
@@ -698,11 +738,13 @@ def _install_codex_hooks(
         source_root / "hooks" / "codex" / "engramory_codex_hook.py",
         hook_path,
         force,
+        guard_root=project_root,
     )
     sync_status = _copy_managed_file(
         source_root / "tools" / "engramory_sync.py",
         sync_path,
         force,
+        guard_root=project_root,
     )
 
     hooks_path = project_root / ".codex" / "hooks.json"
@@ -718,6 +760,7 @@ def _install_codex_hooks(
     _write_text_atomic(
         hooks_path,
         json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
+        guard_root=project_root,
     )
     ignore_status = _ensure_codex_hooks_gitignored(project_root, hooks_path, merged)
     interpreter = hook_python or sys.executable
@@ -843,6 +886,63 @@ def init_host(args, host):
     project_root.mkdir(parents=True, exist_ok=True)
 
     results = []
+    try:
+        _run_install_steps(args, cfg, source_root, project_root, memory_root,
+                           creates_store, rules_file, target, existing_hooks, results)
+    # UnicodeError too: _read_text is strict UTF-8, so an existing .gitignore or rules
+    # file in another encoding raises UnicodeDecodeError (a ValueError, not an OSError)
+    # AFTER earlier steps have already written — exactly when the report is needed.
+    except (SystemExit, KeyboardInterrupt, OSError, UnicodeError, shutil.Error):
+        # Nothing is rolled back: several targets are user-owned files that this
+        # installer must not delete on the way out. Say exactly what did land, so the
+        # user is never left guessing which half of an install they have.
+        _report_partial(results, args)
+        raise
+
+    print(f"Engramory {cfg['label']} init complete")
+    print(f"project root: {_display_path(project_root, Path.cwd())}")
+    print(f"memory root: {_display_path(memory_root, project_root)}")
+    for label, message in results:
+        print(f"- {label}: {message}")
+    # A reader host whose wiring hasn't been dogfooded here: write it per the documented
+    # rules-file format, but tell the user plainly it's unverified (honesty rule).
+    if "tested" in cfg and not cfg["tested"]:
+        print(f"NOTE: this reader wiring for {cfg['label']} is written from {rules_file}'s "
+              f"documented format but has NOT been verified on a real host here — confirm your "
+              f"host actually loads {rules_file} as an always-on rule.")
+    return 0
+
+
+def _report_partial(results, args):
+    """Report a half-finished install honestly. Re-running is NOT unconditionally safe.
+
+    Each step is individually recoverable, but two of them keep whatever a failed
+    earlier run left behind — a truncated `MEMORY.md` is adopted as "kept existing",
+    and a half-copied skill dir is kept without `--force`. Naming those two beats a
+    blanket "just re-run it".
+    """
+    out = sys.stderr
+    print("Engramory init FAILED partway. Nothing was rolled back.", file=out)
+    if results:
+        print("completed before the failure:", file=out)
+        for label, message in results:
+            print(f"- {label}: {message}", file=out)
+    else:
+        print("- (no step completed)", file=out)
+    print("the step that failed may have written PART of its output; every later step "
+          "did not run at all.", file=out)
+    print("re-running is safe for .gitignore and the rules block, but check by hand "
+          "first:", file=out)
+    print("  - MEMORY.md: a truncated index is KEPT ('kept existing MEMORY.md') on the "
+          "next run — open it, and delete it if it is incomplete", file=out)
+    if args.install_skill:
+        print("  - .agents/skills/engramory: a half-copied dir is KEPT without --force "
+              "— re-run with --force to replace it", file=out)
+
+
+def _run_install_steps(args, cfg, source_root, project_root, memory_root,
+                       creates_store, rules_file, target, existing_hooks, results):
+    """Perform the writes, appending each completed step to `results` as it lands."""
     if creates_store:
         results.append(("memory", _ensure_memory_store(source_root, memory_root)))
         results.append(("gitignore", _ensure_gitignore(project_root, memory_root)))
@@ -879,26 +979,14 @@ def init_host(args, host):
     )
     if cfg.get("frontmatter"):
         # A dedicated rule file we own (Cursor/Kiro): write it whole (idempotent overwrite).
-        _write_text(target, block)
+        _write_text(target, block, guard_root=project_root)
         results.append((rules_file, f"wrote Engramory {cfg['label']} rule file"))
     else:
         old = _read_text(target) if target.exists() else ""
         _write_text(target, _replace_block(old, block, cfg["begin"], cfg["end"],
-                                           heading=Path(rules_file).name))
+                                           heading=Path(rules_file).name),
+                    guard_root=project_root)
         results.append((rules_file, f"created/updated Engramory {cfg['label']} block"))
-
-    print(f"Engramory {cfg['label']} init complete")
-    print(f"project root: {_display_path(project_root, Path.cwd())}")
-    print(f"memory root: {_display_path(memory_root, project_root)}")
-    for label, message in results:
-        print(f"- {label}: {message}")
-    # A reader host whose wiring hasn't been dogfooded here: write it per the documented
-    # rules-file format, but tell the user plainly it's unverified (honesty rule).
-    if "tested" in cfg and not cfg["tested"]:
-        print(f"NOTE: this reader wiring for {cfg['label']} is written from {rules_file}'s "
-              f"documented format but has NOT been verified on a real host here — confirm your "
-              f"host actually loads {rules_file} as an always-on rule.")
-    return 0
 
 
 def build_parser():

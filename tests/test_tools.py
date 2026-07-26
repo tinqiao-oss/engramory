@@ -20,7 +20,10 @@ def _run(script, *args, env=None):
     if env:
         e.update(env)
     p = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, env=e)
-    return p.returncode, (p.stdout or "").strip()
+    # BOTH streams: the tools report findings on stdout, but a `raise SystemExit(msg)`
+    # refusal (every installer guard) prints to stderr. Returning stdout alone made any
+    # test asserting on a refusal silently vacuous wherever the refusal actually fired.
+    return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
 
 
 # --- engramory_check (layer-2 degradation) ---
@@ -1098,10 +1101,6 @@ def test_reinstall_keeps_a_gitignore_rule_engramory_did_not_write(tmp_path):
     assert "looks like your own" in out
 
 
-if __name__ == "__main__":
-    sys.exit(_main())
-
-
 # --- 0.6.1: a non-remote URL scheme is a local path, not an "external" pointer ---
 
 def test_doctor_file_url_pointer_is_not_treated_as_external(tmp_path):
@@ -1151,3 +1150,225 @@ def test_init_refuses_to_adopt_a_symlinked_index(tmp_path):
     assert rc != 0
     assert "symlink" in out.lower()
     assert "SECRET" not in out
+
+
+# --- 0.6.4: archive pointers, wikilink case, quote parsing, mailto ---
+
+def test_doctor_archive_pointer_is_info_not_issue(tmp_path):
+    # the protocol REQUIRES the folded-archive index line to stay a pointer
+    # (SKILL.md §5), so pointing into archive/ is legal — but the file there is
+    # outside the note graph, which the report must say rather than stay silent.
+    (tmp_path / "archive").mkdir()
+    _note(tmp_path / "archive" / "old.md", "old")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [Archived](archive/old.md) — 12 notes\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "points into archive/" in out
+
+
+def test_doctor_archive_pointer_does_not_hide_a_live_orphan(tmp_path):
+    # `_real_basename` maps by BASENAME, so an `archive/foo.md` pointer used to mark the
+    # LIVE `foo.md` as indexed and hide that nothing references it.
+    (tmp_path / "archive").mkdir()
+    _note(tmp_path / "archive" / "foo.md", "foo")
+    _note(tmp_path / "foo.md", "foo")  # live, unreferenced -> a real orphan
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [Archived](archive/foo.md) — 12 notes\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "orphan" in out and "foo.md" in out
+
+
+def test_doctor_miscased_wikilink_matches_the_index_pointer_rule(tmp_path):
+    # A wikilink must resolve exactly like a miscased index pointer: the FILESYSTEM
+    # decides. Correct outcome is therefore FS-dependent (like the pointer test above).
+    _note(tmp_path / "a.md", "a", body="see [[B]]")
+    _note(tmp_path / "b.md", "b")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — h\n- [B](b.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))  # run BEFORE the probe writes its file
+    if _fs_case_insensitive(tmp_path):
+        assert rc == 0 and "has no target file yet" not in out
+    else:
+        assert "has no target file yet" in out  # genuinely broken on a case-sensitive FS
+
+
+def test_doctor_uppercase_md_wikilink_not_double_suffixed(tmp_path):
+    # `[[note.MD]]` must not become `note.MD.md` (the store tolerates .MD files).
+    _note(tmp_path / "a.md", "a", body="see [[b.MD]]")
+    (tmp_path / "b.MD").write_text(
+        "---\nname: b\ndescription: x\ntype: reference\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — h\n- [B](b.MD) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "no target file yet" not in out
+
+
+def test_doctor_malformed_quoted_value_is_issue(tmp_path):
+    # `"foo""` closes on the first/last char, so the old check passed it and the
+    # double `strip` silently reduced it to `foo`.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: \"a-note\"\"\ndescription: x\ntype: reference\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "malformed quoted value" in out
+
+
+def test_doctor_backslash_escaped_quote_is_accepted(tmp_path):
+    # Real stores carry `\"` inside quoted descriptions; rejecting an inner quote
+    # outright would fail a large set of valid notes.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: \"a \\\"quoted\\\" phrase\"\ntype: reference\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_unquoted_value_keeps_its_trailing_quote(tmp_path):
+    # The old `v.strip('"')` ran on EVERY value, so an UNQUOTED one ending in a quote
+    # lost it — which silently turned `2026-01-01"` into a valid date.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: x\ntype: reference\n"
+        "created: 2026-01-01\"\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — h\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "not a valid" in out
+
+
+def test_doctor_mailto_pointer_is_external(tmp_path):
+    # `mailto:` is on the documented remote allowlist but has no `//` authority, so
+    # folding it into the `://` alternation dropped it and it read as a local path.
+    _note(tmp_path / "a.md", "a")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — h\n- [Mail](mailto:support@example.md) — contact\n",
+        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_init_duplicate_begin_marker_keeps_user_content(tmp_path):
+    # A duplicated BEGIN made `find` splice from the FIRST begin to the END, deleting
+    # every line in between — user content the installer never wrote.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_ini", INIT)
+    ini = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ini)
+    begin, end = "<!-- BEGIN -->", "<!-- END -->"
+    existing = f"KEEP-A\n{begin}\nold\n{begin}\nKEEP-B\n{end}\nKEEP-C\n"
+    out = ini._replace_block(existing, "NEW", begin, end)
+    assert "KEEP-A" in out and "KEEP-B" in out and "KEEP-C" in out and "NEW" in out
+    # a well-formed single pair must still be REPLACED, not appended
+    out1 = ini._replace_block(f"KEEP\n{begin}\nold\n{end}\n", "NEW", begin, end)
+    assert "old" not in out1 and "NEW" in out1 and "KEEP" in out1
+
+
+def test_init_refuses_a_dangling_symlinked_index(tmp_path):
+    # `exists()` is False for a DANGLING link, so the symlink check was skipped and
+    # copy2 wrote the template THROUGH the link, outside the store.
+    import os
+    project = tmp_path / "project"
+    store = project / ".engramory-memory"
+    store.mkdir(parents=True)
+    outside = tmp_path / "outside.md"  # deliberately does NOT exist
+    try:
+        os.symlink(str(outside), str(store / "MEMORY.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return  # no symlink privilege (e.g. Windows without Developer Mode) -> skip
+    rc, out = _run(INIT, "codex", "--project-root", str(project),
+                   "--memory-root", str(store))
+    assert rc != 0 and "symlink" in out.lower()
+    assert not outside.exists()  # nothing was written through the link
+
+
+def test_init_reports_what_landed_when_a_step_fails(tmp_path):
+    # Nothing is rolled back (several targets are user-owned files), so a failure must
+    # at least say which steps completed — and must NOT claim re-running is
+    # unconditionally safe: a truncated index and a half-copied skill dir are both
+    # KEPT by the next run.
+    # No pytest fixtures here (no monkeypatch/capsys): this suite also runs as a plain
+    # script in CI, where each test is called with tmp_path alone.
+    import contextlib
+    import importlib.util
+    import io
+    import types
+    spec = importlib.util.spec_from_file_location("_ini_partial", INIT)
+    ini = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ini)
+
+    def boom(*args, **kwargs):
+        raise SystemExit("simulated failure during skill copy")
+
+    ini._copy_skill = boom  # a private module instance; nothing else imports it
+    args = types.SimpleNamespace(
+        project_root=str(tmp_path), memory_root=".engramory-memory",
+        install_skill=True, install_hooks=False, mode="explicit",
+        force=False, hook_python=None)
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        try:
+            ini.init_host(args, "codex")
+            raise AssertionError("the simulated failure did not propagate")
+        except SystemExit:
+            pass
+    err = captured.getvalue()
+    assert "FAILED partway" in err
+    assert "created MEMORY.md" in err and "gitignore" in err  # what actually landed
+    assert "--force" in err                                   # the skill-dir caveat
+    assert "delete it if it is incomplete" in err             # the index caveat
+
+
+def test_doctor_archive_exclusion_is_case_folded(tmp_path):
+    # On macOS `realpath` keeps the CALLER's spelling, so an index pointer written
+    # `Archive/foo.md` used to miss the exclusion while os.walk had already skipped the
+    # real `archive/` — and the basename map then credited it to the LIVE `foo.md`,
+    # bringing back the hidden orphan. Both sides fold now, so this holds on every FS.
+    (tmp_path / "archive").mkdir()
+    _note(tmp_path / "archive" / "foo.md", "foo")
+    _note(tmp_path / "foo.md", "foo")  # live, unreferenced -> a real orphan
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [Archived](Archive/foo.md) — 12 notes\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    if _fs_case_insensitive(tmp_path):
+        assert rc == 1 and "orphan" in out       # the live foo.md is still reported
+    else:
+        assert rc == 1 and "missing file" in out  # `Archive/` does not exist there
+
+
+def test_init_keeps_a_line_that_merely_quotes_a_marker(tmp_path):
+    # A user line QUOTING the marker in prose is not a duplicated marker. Matching the
+    # raw substring treated the file as malformed: it skipped the real replacement AND
+    # deleted the user's line.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_ini_marker", INIT)
+    ini = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ini)
+    begin, end = "<!-- BEGIN E -->", "<!-- END E -->"
+    block = f"{begin}\nbody NEW\n{end}"
+    existing = (f"KEEP-TOP\n{begin}\nbody OLD\n{end}\n\n"
+                f"We wrap it in `{begin}` markers.\n\nKEEP-TAIL\n")
+    out = ini._replace_block(existing, block, begin, end)
+    assert "We wrap it in" in out          # the user's prose line survives
+    assert "body OLD" not in out           # the real block WAS replaced
+    assert "body NEW" in out and "KEEP-TOP" in out and "KEEP-TAIL" in out
+    # and it stays stable on the next run
+    out2 = ini._replace_block(out, block.replace("NEW", "NEWER"), begin, end)
+    assert "body NEW\n" not in out2 and "body NEWER" in out2 and "We wrap it in" in out2
+
+
+def test_run_helper_reports_stderr_refusals(tmp_path):
+    # Guard for the harness itself: every installer refusal is a `raise SystemExit`,
+    # which prints to stderr. A `_run` that returned stdout alone made those assertions
+    # vacuous wherever the refusal actually fired (and only there).
+    rc, out = _run(INIT, "codex", "--project-root", str(tmp_path),
+                   "--memory-root", str(tmp_path))
+    assert rc != 0 and "memory root must be a directory" in out
+
+
+# The direct runner must stay at the very END of this file: `_main()` collects the
+# test_* names present in globals() at CALL time, so anything defined below this
+# block is invisible to it — and CI runs this suite as a plain script, so those
+# tests would silently never run there. (14 of them already had that fate.)
+if __name__ == "__main__":
+    sys.exit(_main())

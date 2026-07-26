@@ -23,3 +23,7 @@ jobs:
         run: python tests/test_index_guard.py
       - name: tool tests
         run: python tests/test_tools.py
+      # Concurrency semantics differ per platform (POSIX flock vs Windows msvcrt),
+      # so this one earns its place in the matrix rather than a local run.
+      - name: state-lock tests
+        run: python tests/test_state_lock.py
