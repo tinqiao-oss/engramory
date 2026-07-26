@@ -39,7 +39,14 @@ def _lines(text):
 
 
 def _kb(n):
-    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
+    # MB/GB tiers so a runaway index reads as "300.0 MB", not "307200.0 KB".
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.1f} GB"
 
 
 def _over(lines, nbytes, lcap, bcap):
@@ -79,12 +86,29 @@ def main(argv):
     warn = _envint("ENGRAMORY_WARN", 150)
     hard_b = _envint("ENGRAMORY_HARD_BYTES", 25600)
     warn_b = _envint("ENGRAMORY_WARN_BYTES", 20480)
+    # Size first, WITHOUT reading: a planted or runaway index (a sync client can
+    # drop a multi-gigabyte file here) would otherwise be slurped into memory and
+    # the checker would hang or die with MemoryError instead of answering OVER —
+    # the one thing it exists to say. Past the byte cap the verdict is already
+    # decided, so the content is never needed.
+    try:
+        nbytes = os.path.getsize(path)
+    except OSError as e:
+        print(f"engramory: cannot read {path}: {e}")
+        return 66  # EX_NOINPUT — "could not check" must be distinct from OK
+    if nbytes > hard_b:
+        print(f"OVER: index is {_kb(nbytes)} — over {_kb(nbytes)} > {_kb(hard_b)} "
+              f"(cap {hard} lines / {_kb(hard_b)}), past the load window. Compact now: "
+              f"{_first_step(True)} — before adding more, or the tail stops being recalled.")
+        return 2
+    # Under the byte cap, so the file is small (<= 25 KB by default) and reading
+    # it to count lines is bounded by that cap.
     try:
         with open(path, "rb") as fh:
             raw = fh.read()
     except OSError as e:
         print(f"engramory: cannot read {path}: {e}")
-        return 66  # EX_NOINPUT — "could not check" must be distinct from OK
+        return 66
     text = raw.decode("utf-8", "replace")
     lines, nbytes = _lines(text), len(raw)
     size = f"{lines} lines / {_kb(nbytes)}"

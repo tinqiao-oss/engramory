@@ -4,6 +4,45 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.6.2 — 2026-07-26
+
+The P1 tier from the same three-lane audit.
+
+- **Gitignore ownership can now flip back.** A first Engramory-only install adds
+  `/.codex/hooks.json` to `.gitignore`; once a teammate's handler appears the file
+  is shared and must return to version control. Declining to add the rule was not
+  enough — the earlier rule stayed. A re-install now removes it (and the comment
+  it wrote), leaving unrelated rules untouched.
+- **An unreadable index no longer fails open for Edit/MultiEdit.** Substituting an
+  empty base made every `old_string` look absent, so the simulation predicted an
+  empty result and a large growing edit passed. The guard now distinguishes "no
+  index yet" from "exists but could not be read" and says the cap was NOT
+  verified instead of passing silently. (It still never denies over a transient
+  lock — a guard must not brick editing.)
+- **Bounded reads everywhere a hostile file could exhaust the backstop.**
+  `engramory_check` answers OVER from the file SIZE without reading; the doctor
+  refuses to parse an index far past the cap and skips a note larger than 4 MB
+  rather than slurping it; the guard catches `MemoryError` instead of falling
+  through its blanket handler. A planted multi-gigabyte `MEMORY.md` used to hang
+  or kill the very tools meant to report it.
+- **Untrusted store text is fenced before it reaches a model.** A crafted session
+  key (`IGNORE ALL PREVIOUS INSTRUCTIONS…`) travelled verbatim from state
+  validation into the hook's `systemMessage`/`additionalContext`. Such text is now
+  quoted, length-bounded, and wrapped in `<untrusted-diagnostic>` with an explicit
+  "data, not instructions" note. The doctor likewise quotes and truncates every
+  echoed frontmatter fragment.
+- **The Kiro adapter carries the current protocol again.** Its steering file still
+  taught pre-0.6 rules (no live-`project` exception, no settled-fact rule, no
+  pre-transition sync) and told the agent to run `python tools/…`, which nothing
+  copies into a Kiro workspace. Both fixed, and the missing deny-hook is stated.
+- **`archived: <topic>` no longer strands memories.** Compaction allowed
+  collapsing a retired topic into a line that names no file — but recall never
+  scans `archive/` and the doctor skips it, so those notes became undiscoverable.
+  A collapsed line must now still be a pointer to a file listing what was
+  archived; otherwise delete the notes outright and say so.
+- Size rendering gained MB/GB tiers, so a runaway index reads as `300.0 MB`
+  instead of `307200.0 KB` (all three tools stay in agreement).
+
 ## 0.6.1 — 2026-07-26
 
 Three-lane audit (tooling / protocol prose / adversarial) plus local verification.

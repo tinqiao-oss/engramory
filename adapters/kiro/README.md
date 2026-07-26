@@ -88,8 +88,17 @@ tested here yet**, so treat the Phase-1 cap as **rules + an explicit check**
 1. The always-on steering file makes the recall/write discipline visible every session.
 2. `SKILL.md` (as a `manual`/`auto` steering file) gives the full protocol on demand.
 3. After editing the index, run
-   `python tools/engramory_check.py .engramory-memory/MEMORY.md` and compact if it
-   prints `OVER`; `engramory_doctor.py` is the occasional full health check.
+   `python <ENGRAMORY>/tools/engramory_check.py .engramory-memory/MEMORY.md` and
+   compact if it prints `OVER`; `engramory_doctor.py` is the occasional full health
+   check. **`<ENGRAMORY>` is wherever you cloned this repo — no step here copies
+   `tools/` into the Kiro workspace**, so a bare `python tools/…` will not resolve.
+   Keep the repo reachable from the machine running Kiro, or treat the cap as
+   discipline only.
+
+> **Protocol version.** The steering file in this adapter carries the same 0.6.x
+> rules as `SKILL.md` (one live `project` note per unfinished task, settled-fact vs.
+> current-state, the pre-transition sync). If you copy an older steering file
+> forward, re-sync it against `SKILL.md` rather than assuming it still matches.
 
 > **Why no deterministic cap shipped here yet (Phase 2).** Kiro genuinely supports a
 > pre-write deny gate: a **CLI `PreToolUse` hook** with `matcher: fs_write` can inspect

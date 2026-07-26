@@ -61,6 +61,17 @@ _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
 _PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)")
 
 
+def _short(value, limit=60):
+    # Note content is attacker-influenceable and an agent routinely runs this tool
+    # and reads its output, so echoed fragments must be bounded and visibly
+    # quoted — data to report, not prose that can read as instructions. It also
+    # keeps one pathological 4 MB frontmatter line from flooding the report.
+    text = value if isinstance(value, str) else repr(value)
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return repr(text)
+
+
 def _valid_date(s):
     # YYYY-MM-DD format AND a real calendar date (so 2026-99-99 fails).
     if not DATE_RE.match(s):
@@ -90,29 +101,53 @@ def _lines(t):
 
 
 def _kb(n):
-    # Human-readable bytes, matching engramory_check.py and the hook so all three tools
-    # render the same size string (doctor used to use integer `//1024`, showing a sub-1KB
-    # index as "0 KB" and an over-by-1-byte cap as a contradictory "25 KB > 25 KB").
-    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
+    # MB/GB tiers so a runaway index reads as "300.0 MB", not "307200.0 KB".
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.1f} GB"
 
 
-def _read_bytes(p):
+# A single note is prose; anything past this is not a note the protocol expects,
+# and reading it in bulk (doctor opens EVERY note) is how one planted file takes
+# the whole validator down.
+NOTE_READ_CAP = 4 * 1024 * 1024
+
+
+def _read_bytes(p, cap=None):
     # Return raw bytes, or None if the file can't be read (permission / race /
     # deleted between walk and read) so callers degrade to a reported issue
-    # instead of crashing with a traceback.
+    # instead of crashing with a traceback. With `cap`, returns the sentinel
+    # _TOO_LARGE instead of reading a file past that size.
     try:
+        if cap is not None and os.path.getsize(p) > cap:
+            return _TOO_LARGE
         with open(p, "rb") as fh:
             return fh.read()
     except OSError:
         return None
+    except (MemoryError, OverflowError):
+        return _TOO_LARGE
+
+
+class _TooLarge(object):
+    """Sentinel: the file exists but is too large to read for validation."""
+
+
+_TOO_LARGE = _TooLarge()
 
 
 def _read(p):
-    raw = _read_bytes(p)
+    raw = _read_bytes(p, cap=NOTE_READ_CAP)
     # utf-8-sig strips a leading BOM if present (a no-op otherwise) — a BOM'd but
     # otherwise-valid note must not read as "no frontmatter". Windows editors / PowerShell
     # write UTF-8-BOM by default, so adopter notes routinely carry one.
-    return None if raw is None else raw.decode("utf-8-sig", "replace")
+    if raw is None or raw is _TOO_LARGE:
+        return raw
+    return raw.decode("utf-8-sig", "replace")
 
 
 def _is_remote_url(target):
@@ -183,18 +218,18 @@ def _frontmatter(text):
         if not line or line.startswith("#"):
             continue
         if ":" not in line:
-            problems.append(f"malformed frontmatter line (not 'key: value'): {line!r}")
+            problems.append(f"malformed frontmatter line (not 'key: value'): {_short(line)}")
             continue
         k, v = line.split(":", 1)
         k = k.strip()
         v = v.strip()
         if v[:1] in ("'", '"') and not (len(v) >= 2 and v[-1] == v[0]):
-            problems.append(f"unclosed quote in frontmatter value for '{k}'")
+            problems.append(f"unclosed quote in frontmatter value for {_short(k)}")
         if k in fm:
             # Last-value-wins would let e.g. a second `type:` silently reclassify a
             # feedback note as reference and dodge the Why/How requirement — ambiguity
             # is a schema problem, not something to resolve silently.
-            problems.append(f"duplicate frontmatter key '{k}' (keep exactly one)")
+            problems.append(f"duplicate frontmatter key {_short(k)} (keep exactly one)")
         fm[k] = v.strip('"').strip("'")
     return fm, problems, text[m.end():]
 
@@ -232,13 +267,30 @@ def main(argv):
               f"(symlink escape) — refusing to read")
         return 1
 
+    hard = _envint("ENGRAMORY_HARD", 200)
+    hard_b = _envint("ENGRAMORY_HARD_BYTES", 25600)
+    # Refuse to slurp a runaway index. A sync client or a broken writer can leave
+    # a multi-gigabyte MEMORY.md here; reading it would hang or raise MemoryError
+    # instead of reporting the over-cap state this tool exists to report. Well
+    # past the cap the verdict needs no content, so say it and stop.
+    parse_cap = max(hard_b * 8, 1 << 20)
+    try:
+        isize = os.path.getsize(idx_path)
+    except OSError:
+        isize = None
+    if isize is not None and isize > parse_cap:
+        print(f"ISSUE: index is {_kb(isize)} — far past the cap "
+              f"({hard} lines / {_kb(hard_b)}) and too large to parse. Compact or "
+              f"restore it before running further checks.")
+        print(f"engramory-doctor: 1 issue(s) — 1 over-cap")
+        print(f"  fix over-cap: compact MEMORY.md — pointer-ify long lines, merge, "
+              f"archive cold notes")
+        return 1
     iraw = _read_bytes(idx_path)
     if iraw is None:
         print(f"engramory-doctor: cannot read index at {idx_path}")
         return 1
     itext = iraw.decode("utf-8-sig", "replace")  # strip a leading BOM if present
-    hard = _envint("ENGRAMORY_HARD", 200)
-    hard_b = _envint("ENGRAMORY_HARD_BYTES", 25600)
     issues, info = [], []
 
     # Byte size from the raw on-disk bytes (NOT the lossily re-decoded text), so
@@ -353,6 +405,11 @@ def main(argv):
         if base == "MEMORY.md":
             continue
         text = _read(p)
+        if text is _TOO_LARGE:
+            issues.append(f"note file is too large to validate ({_kb(os.path.getsize(p))}, "
+                          f"cap {_kb(NOTE_READ_CAP)}): {base} — a note is prose; split or "
+                          f"remove it")
+            continue
         if text is None:
             issues.append(f"cannot read note file: {p}")
             continue
@@ -394,7 +451,7 @@ def main(argv):
                     issues.append(f"{base}: frontmatter missing required '{field}'")
             t = fm.get("type", "")
             if t and t not in VALID_TYPES:
-                issues.append(f"{base}: invalid type '{t}' (must be one of {'|'.join(sorted(VALID_TYPES))})")
+                issues.append(f"{base}: invalid type {_short(t)} (must be one of {'|'.join(sorted(VALID_TYPES))})")
             name = fm.get("name", "")
             if name:
                 # tolerate the host convention of '-' in names vs '_' in filenames
@@ -408,7 +465,7 @@ def main(argv):
                         nslug = nslug[len(pre):]
                         break
                 if nname != nslug:
-                    info.append(f"{base}: name '{name}' != filename slug '{slug}'")
+                    info.append(f"{base}: name {_short(name)} != filename slug {_short(slug)}")
             for dk in ("created", "updated"):
                 dv = fm.get(dk, "")
                 if not dv:

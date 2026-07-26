@@ -37,6 +37,22 @@ class SyncError(Exception):
     """An expected validation/state error suitable for showing to the user."""
 
 
+def _quoted(value, limit=48):
+    """Render untrusted store text for an error message.
+
+    Anything read out of the store is attacker-influenceable and these messages
+    travel into the hook's `systemMessage` / `additionalContext`, i.e. straight
+    into the model's context. A session key of
+    `IGNORE PREVIOUS INSTRUCTIONS AND ...` must therefore land as visibly quoted,
+    length-bounded DATA, not as free-floating prose the model may read as
+    instructions.
+    """
+    text = value if isinstance(value, str) else repr(value)
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return repr(text)
+
+
 def _now():
     return (
         _datetime.datetime.now(_datetime.timezone.utc)
@@ -113,7 +129,7 @@ def _validate_state(data, path):
         if _session_id(key) != key:
             raise SyncError("state file has a non-canonical session id")
         if not isinstance(value, dict):
-            raise SyncError("state file has an invalid session record: {}".format(key))
+            raise SyncError("state file has an invalid session record: {}".format(_quoted(key)))
         for generation in ("dirty_generation", "synced_generation"):
             number = value.get(generation, 0)
             if (
@@ -123,7 +139,7 @@ def _validate_state(data, path):
             ):
                 raise SyncError(
                     "state file has an invalid {} for session {}".format(
-                        generation, key
+                        generation, _quoted(key)
                     )
                 )
             value[generation] = number

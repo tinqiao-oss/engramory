@@ -109,7 +109,14 @@ def _bytes(text):
 
 
 def _kb(n):
-    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
+    # MB/GB tiers so a runaway index reads as "300.0 MB", not "307200.0 KB".
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.1f} GB"
 
 
 def _plural(n, word):
@@ -179,11 +186,23 @@ def main():
 
     # Current index. Read raw bytes so a non-UTF-8 / corrupt index can't throw and
     # silently disable the guard: decode lossily for line/edit math, size by bytes.
+    # A read FAILURE on a file that exists is different from "no index yet": for
+    # Edit/MultiEdit, substituting an empty base makes every old_string look
+    # absent, so the simulation predicts an empty result and a large growing edit
+    # sails through. Remember that we could not read it and warn instead of
+    # silently passing (denying would brick editing over a transient lock).
+    unreadable = False
     try:
         with open(file_path, "rb") as fh:
             raw = fh.read()
     except OSError:
         raw = b""
+        unreadable = os.path.exists(file_path)
+    except (MemoryError, OverflowError):
+        # A planted multi-gigabyte index must not let the guard fall open through
+        # the blanket handler in __main__.
+        raw = b""
+        unreadable = True
     current = raw.decode("utf-8", "replace")
     cur_lines = _lines(current)
     cur_bytes = len(raw)
@@ -197,6 +216,19 @@ def main():
             new_text = ti.get("file_text", "")
         result = new_text or ""
     elif tool in ("Edit", "MultiEdit"):
+        if unreadable:
+            # The prediction would be fiction: report that the cap was NOT
+            # checked rather than pass silently, and point at the portable
+            # checker that can verify after the write lands.
+            _emit(
+                context=(
+                    "Engramory: the memory index could not be read, so this "
+                    "edit's effect on the size cap was NOT verified. The write "
+                    "is allowed (a guard must never brick editing), but run "
+                    "`python tools/engramory_check.py <index>` afterwards and "
+                    "compact if it reports OVER."
+                ),
+            )
         edits = [ti] if tool == "Edit" else (ti.get("edits", []) or [])
         result = _apply_edits(current, edits)
     else:

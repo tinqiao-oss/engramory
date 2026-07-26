@@ -620,13 +620,52 @@ def _codex_hooks_are_machine_local(data):
     return True
 
 
+_CODEX_HOOKS_IGNORE_ENTRY = "/.codex/hooks.json"
+_CODEX_HOOKS_IGNORE_COMMENT = (
+    "# Engramory Codex hooks (absolute machine-local paths, not portable)")
+
+
+def _drop_codex_hooks_gitignore_entry(project_root):
+    """Remove an entry THIS installer added once the file stops being ours.
+
+    Ownership can flip after the first install: a teammate adds their own handler
+    to `.codex/hooks.json`, making it a shared config that must stay in version
+    control. Merely declining to add the rule is not enough — the rule added by
+    an earlier Engramory-only install is still in `.gitignore`, so the now-shared
+    file keeps being ignored.
+    """
+    gitignore = project_root / ".gitignore"
+    if not gitignore.exists():
+        return None
+    lines = _read_text(gitignore).splitlines()
+    if _CODEX_HOOKS_IGNORE_ENTRY not in lines:
+        return None
+    kept = []
+    for line in lines:
+        if line == _CODEX_HOOKS_IGNORE_ENTRY:
+            # Drop the comment we wrote directly above it, and the blank line
+            # that separated the block, so no orphaned header is left behind.
+            while kept and kept[-1].strip() == "":
+                kept.pop()
+            if kept and kept[-1] == _CODEX_HOOKS_IGNORE_COMMENT:
+                kept.pop()
+                while kept and kept[-1].strip() == "":
+                    kept.pop()
+            continue
+        kept.append(line)
+    _write_text(gitignore, ("\n".join(kept).rstrip() + "\n") if kept else "")
+    return "removed the stale {0} ignore rule".format(_CODEX_HOOKS_IGNORE_ENTRY)
+
+
 def _ensure_codex_hooks_gitignored(project_root, hooks_path, merged):
-    entry = "/.codex/hooks.json"
+    entry = _CODEX_HOOKS_IGNORE_ENTRY
     if not _codex_hooks_are_machine_local(merged):
-        return (
+        note = (
             "NOT gitignored: this file also holds non-Engramory handlers, so it "
             "looks shared; the Engramory entries in it are machine-local and will "
             "not work on another machine")
+        dropped = _drop_codex_hooks_gitignore_entry(project_root)
+        return "{0} ({1})".format(note, dropped) if dropped else note
     gitignore = project_root / ".gitignore"
     old = _read_text(gitignore) if gitignore.exists() else ""
     if entry in old.splitlines():
@@ -634,10 +673,7 @@ def _ensure_codex_hooks_gitignored(project_root, hooks_path, merged):
     prefix = old.rstrip() + "\n\n" if old.strip() else ""
     _write_text(
         gitignore,
-        prefix
-        + "# Engramory Codex hooks (absolute machine-local paths, not portable)\n"
-        + entry
-        + "\n",
+        prefix + _CODEX_HOOKS_IGNORE_COMMENT + "\n" + entry + "\n",
     )
     return "gitignored {0}".format(entry)
 

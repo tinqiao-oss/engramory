@@ -349,9 +349,15 @@ judgment are your job either way.
 2. **Merge duplicates.** Find pointers to overlapping facts; merge their detail
    files, fix the `[[links]]`, delete the redundant index line.
 3. **Archive cold/superseded memories.** Move rarely-relevant or superseded files
-   to `archive/` and drop their index lines (or collapse a whole retired topic
-   into a single "archived: <topic>" line). The files are kept; they just leave
+   to `archive/` and drop their index lines. The files are kept; they just leave
    the always-loaded index.
+   A whole retired topic may collapse to a **single line — but that line must
+   still be a pointer**, e.g. `- [Archived: 2025 launch](archive/2025-launch-index.md)
+   — 12 notes`, where that one file lists what was archived. A bare
+   `archived: <topic>` line names no file: recall never scans `archive/` and the
+   doctor deliberately skips it, so those notes become undiscoverable — kept on
+   disk, but effectively deleted. If you will not write the pointer file, delete
+   the notes outright and say so; silently stranding them is the worse outcome.
 4. **Re-count.** Under 200 → proceed. Still over → stop and ask the user which
    memories to retire.
 

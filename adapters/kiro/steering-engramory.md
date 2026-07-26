@@ -22,13 +22,29 @@ individual note on demand — never load the whole store into context.**
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line. Add one pointer line to `MEMORY.md`. **Delete** notes that
   turn out wrong.
+- **One unfinished task may keep ONE live `project` note** holding its goal, status,
+  decisions, constraints, blockers, and next step together — that is the single
+  exception to one-file-one-fact. Update it in place; never accumulate snapshots, and
+  retire its transient state when the task completes.
+- **Store settled facts, never current state.** "2.0 shipped on 2026-01-15" is fine —
+  time cannot falsify it. The version you are on now, the tip commit, the current test
+  count are not: record *where to read* them. Keep only stable pointers (branch name,
+  issue/PR number, file path) and re-verify them on recall.
+- **Before a deliberate compact, clear, or new thread**, sync once: scan the task;
+  dedup/update; refresh the live `project` note; promote only reusable `feedback`;
+  retire completed transient state; then re-check the index size. Report what you
+  added / updated / archived / skipped.
 - **Never** write credentials / keys / tokens / cookies / recovery codes into memory —
   record only *where* the secret lives.
 - Keep `MEMORY.md` small (soft 150 lines / 20 KB, hard 200 lines / 25 KB). If a write
   would push it past the hard cap, compact first (pointer-ify long lines, merge
   duplicates, archive cold notes) — don't just append. After editing the index you may
-  run `python tools/engramory_check.py .engramory-memory/MEMORY.md` (path relative to
-  the Engramory repo/skill) and compact if it prints `OVER`.
+  run the portable checker and compact if it prints `OVER`:
+  `python <ENGRAMORY>/tools/engramory_check.py .engramory-memory/MEMORY.md`, where
+  `<ENGRAMORY>` is wherever you cloned this repo. **Kiro has no pre-write deny hook
+  installed by this adapter, and nothing copies `tools/` into your workspace** — a bare
+  `python tools/…` will not resolve here. If the repo is not reachable from this
+  machine, the cap is discipline only: count the index lines/bytes yourself.
 
 Full protocol & rationale: the engramory `SKILL.md`.
 
