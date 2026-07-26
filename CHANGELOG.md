@@ -4,6 +4,53 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.6.3 — 2026-07-26
+
+A documentation-drift sweep after three fast releases: every doc and module
+docstring re-checked against the code it describes. Two items turned out to be
+code bugs rather than wording, and were fixed as such.
+
+Code
+- The doctor truncated every echoed frontmatter fragment **except** an invalid
+  `created`/`updated` value, so a multi-megabyte bad date could still be echoed
+  near-whole. It now goes through the same bounded quoting.
+- The Codex hook fenced the untrusted state diagnostic in `additionalContext` but
+  repeated it **unfenced in `systemMessage`** — fencing one copy and not the other
+  defeats the purpose. Both are fenced now.
+- Removing the `.codex/hooks.json` ignore rule now checks provenance: only a rule
+  carrying this installer's comment marker is removed. A rule the user wrote
+  themselves is left alone (and said so), instead of being silently un-ignored.
+
+Docs corrected to match the code
+- The index guard's docstring still described the pre-0.6.2 behavior it lost
+  ("an unreadable index is treated as empty … a growing write still stays gated"),
+  which is exactly the claim 0.6.2 fixed. `CONTRIBUTING.md` likewise still said the
+  guard "fails open silently" in all cases.
+- The doctor's docstring omitted the non-remote-URL check and the bounded reads,
+  and named a narrower remote-scheme set than `_is_remote_url` accepts.
+- `engramory_check`'s docstring claimed the hook "enforces the cap on every edit";
+  it enforces it for the tools it matches, not for shell/MCP/external writes.
+- `engramory_sync`'s docstring said the cap evicts the oldest unsynced records;
+  it evicts CLEAN records first and only drops unsynced ones when those alone
+  exceed the cap.
+- `PORTING.md` claimed `tools/` are all read-only validators — `init` and `sync`
+  both write.
+- `hooks/INSTALL.md` still gave the unscoped "reuse the host's native memory
+  directory" advice that 0.6.1 scoped everywhere else.
+- The three recall snippets (`rules-snippet`, Kiro steering, reader snippet) never
+  got the root-confinement rule added to `SKILL.md` §4.
+- The Kiro steering file's sync omitted durable references, doctor, the cold-start
+  test, and the reporting details, while its README claimed parity with `SKILL.md`.
+- `templates/example-project.md` still told the reader to treat "2.1 as the next
+  free slot" and to re-verify the current version — current state, and precisely
+  the "warns you not to trust its own numbers" tell the protocol names. It now
+  keeps only the settled decision and points at the version tool.
+- Host claims are now version-scoped: `PORTING.md`'s per-host hook notes and the
+  Kiro adapter carry a "checked on" date and a re-verify instruction; the
+  `codex exec` finding is stated as one version's measurement (0.144.1) rather
+  than a permanent property, noting `--dangerously-bypass-hook-trust` exists and
+  the area is moving; the OpenClaw default is scoped to the base profile.
+
 ## 0.6.2 — 2026-07-26
 
 The P1 tier from the same three-lane audit.

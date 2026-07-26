@@ -99,7 +99,12 @@ systems).
 
 ## 4. Point `<MEMORY_ROOT>` at your memory directory
 
-Tell the agent where memory lives (or reuse the host's native memory directory).
+Tell the agent where memory lives. You may reuse the host's native memory
+directory **only when it is a plain directory of files you control** (Claude
+Code). If the host *manages* its own memory — Codex's native Memories,
+OpenClaw's auto-written store, Hermes's managed files — point Engramory at a
+**separate folder** instead; two writers with different house styles will fight
+over the same files (SKILL.md §0).
 If it's inside a git repo, confirm it is `.gitignore`d — memories often hold
 machine-local detail (server IPs, ssh paths, serial numbers). Never write a
 secret's *value* into memory at all (keys, tokens, passwords) — see SKILL.md §5.

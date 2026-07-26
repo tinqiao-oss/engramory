@@ -125,12 +125,18 @@ fixed from here:
    installer or editing the command invalidates it and you must trust again**. If
    `/hooks` does not show the expected entry, assume the assistance is absent and
    use explicit sync.
-2. **Non-interactive `codex exec` does not fire these lifecycle hooks.** Measured
-   on 0.144.1: a correctly-shaped, successfully-parsed hook config produced no
-   `SessionStart` / `UserPromptSubmit` execution under `codex exec`, even at the
-   user level with a writable sandbox. Treat this assistance as **interactive-TUI
-   only** — for scripted/CI runs, rely on explicit sync, `engramory_check.py`,
-   and `engramory_doctor.py` instead.
+2. **Non-interactive `codex exec` did not fire these lifecycle hooks when tested.**
+   Measured on **0.144.1**: a correctly-shaped, successfully-parsed config produced
+   no `SessionStart` / `UserPromptSubmit` execution under `codex exec` — including
+   at the *user* level (`~/.codex/hooks.json`, which needs no project trust) with a
+   writable sandbox, so project-trust alone does not explain it.
+
+   This is one version's observation, not a permanent property: Codex ships a
+   `--dangerously-bypass-hook-trust` flag aimed at running enabled hooks in
+   automation, and this area is moving. **Re-test on your version** rather than
+   assuming either answer. Until you have, treat the assistance as interactive-TUI
+   only and rely on explicit sync plus `engramory_check.py` /
+   `engramory_doctor.py` for scripted runs.
 
 ### Cost per prompt
 

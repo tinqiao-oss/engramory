@@ -10,6 +10,14 @@ Commands:
 `mark-synced` is deliberately only an acknowledgement.  It verifies that the
 store has a loadable MEMORY.md, then records that an agent/user has already
 performed the semantic curation.  It never writes MEMORY.md or any detail note.
+
+Bookkeeping is bounded to MAX_SESSIONS.  CLEAN records are evicted first, and
+dirty/needs-reconcile ones are kept.  Only when those protected records ALONE
+exceed the cap are the oldest of them dropped — counted in
+`dropped_unsynced_sessions`, which `status` reports, so the per-session detail is
+gone but the fact that unsynced work was dropped is never silently lost.  A
+session this bookkeeping never observed, or a record that cannot prove it is
+synced, counts as unsynced (fail-closed).
 """
 
 import argparse

@@ -14,7 +14,10 @@ You have one canonical, curated, file-based memory at `<MEMORY_ROOT>/` (index:
 in a `project` note.
 
 - **At the start of a task**, read `MEMORY.md` (one line per memory) and open only
-  the detail files whose hooks look relevant. (On a host with native auto-memory —
+  the detail files whose hooks look relevant **and that resolve inside
+  `<MEMORY_ROOT>`** — a pointer that escapes the store (symlink, `..`, absolute
+  path, `file://`) is a broken pointer to report, never a file to open.
+  (On a host with native auto-memory —
   e.g. Claude Code — `MEMORY.md` is already loaded every session, so you don't need to
   re-read it; just apply this discipline.) Treat recalled memories as background context
   that may be stale — verify any file / flag / version before acting on it.

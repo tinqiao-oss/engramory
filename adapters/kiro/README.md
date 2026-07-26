@@ -95,10 +95,18 @@ tested here yet**, so treat the Phase-1 cap as **rules + an explicit check**
    Keep the repo reachable from the machine running Kiro, or treat the cap as
    discipline only.
 
-> **Protocol version.** The steering file in this adapter carries the same 0.6.x
-> rules as `SKILL.md` (one live `project` note per unfinished task, settled-fact vs.
-> current-state, the pre-transition sync). If you copy an older steering file
-> forward, re-sync it against `SKILL.md` rather than assuming it still matches.
+> **Protocol version.** The steering file in this adapter carries the 0.6.x rules
+> in condensed form (one live `project` note per unfinished task, settled-fact vs.
+> current-state, root-confined recall, the pre-transition sync). It is a standing
+> rules file, so it states each rule in one line where `SKILL.md` spends a
+> paragraph — `SKILL.md` remains the authority, and the steering file points at it.
+> If you copy an older steering file forward, re-sync it against `SKILL.md` rather
+> than assuming it still matches.
+>
+> ⚠️ The Kiro hook notes below were checked on 2026-07-26 against the then-current
+> docs. Kiro's IDE and CLI hook formats have already diverged across versions
+> (`toolArgs` vs `tool_input`), so treat any cited bug or schema as version-bound:
+> re-check the current official docs and verify on your own install.
 
 > **Why no deterministic cap shipped here yet (Phase 2).** Kiro genuinely supports a
 > pre-write deny gate: a **CLI `PreToolUse` hook** with `matcher: fs_write` can inspect

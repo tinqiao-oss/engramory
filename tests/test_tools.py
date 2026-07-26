@@ -1080,6 +1080,24 @@ def test_reinstall_drops_the_ignore_rule_once_the_file_becomes_shared(tmp_path):
     assert "/.engramory-memory/" in remaining      # unrelated rules survive
 
 
+def test_reinstall_keeps_a_gitignore_rule_engramory_did_not_write(tmp_path):
+    # Ownership works both ways: an entry the USER added deliberately must survive.
+    # Provenance is the comment this installer emits above its own rule; without it
+    # the line is not ours to remove.
+    project = tmp_path / "project"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".gitignore").write_text("/.codex/hooks.json\n", encoding="utf-8")
+    (project / ".codex" / "hooks.json").write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command",
+                                                   "command": "echo teammate",
+                                                   "statusMessage": "team hook"}]}]}}),
+        encoding="utf-8")
+    rc, out = _run(INIT, "codex", "--project-root", str(project), "--install-hooks")
+    assert rc == 0, out
+    assert "/.codex/hooks.json" in (project / ".gitignore").read_text(encoding="utf-8")
+    assert "looks like your own" in out
+
+
 if __name__ == "__main__":
     sys.exit(_main())
 

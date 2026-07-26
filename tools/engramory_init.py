@@ -640,19 +640,24 @@ def _drop_codex_hooks_gitignore_entry(project_root):
     lines = _read_text(gitignore).splitlines()
     if _CODEX_HOOKS_IGNORE_ENTRY not in lines:
         return None
+    # Only remove a rule THIS installer wrote. Provenance is the comment we emit
+    # directly above it: without that marker the line may be the user's own
+    # deliberate choice to ignore the file, and silently un-ignoring it would be
+    # its own kind of damage.
     kept = []
+    removed = False
     for line in lines:
-        if line == _CODEX_HOOKS_IGNORE_ENTRY:
-            # Drop the comment we wrote directly above it, and the blank line
-            # that separated the block, so no orphaned header is left behind.
+        if (line == _CODEX_HOOKS_IGNORE_ENTRY
+                and kept and kept[-1] == _CODEX_HOOKS_IGNORE_COMMENT):
+            kept.pop()  # drop our comment header too
             while kept and kept[-1].strip() == "":
                 kept.pop()
-            if kept and kept[-1] == _CODEX_HOOKS_IGNORE_COMMENT:
-                kept.pop()
-                while kept and kept[-1].strip() == "":
-                    kept.pop()
+            removed = True
             continue
         kept.append(line)
+    if not removed:
+        return ("left the existing {0} ignore rule alone: it carries no Engramory "
+                "marker, so it looks like your own".format(_CODEX_HOOKS_IGNORE_ENTRY))
     _write_text(gitignore, ("\n".join(kept).rstrip() + "\n") if kept else "")
     return "removed the stale {0} ignore rule".format(_CODEX_HOOKS_IGNORE_ENTRY)
 

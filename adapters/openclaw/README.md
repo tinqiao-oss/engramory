@@ -10,7 +10,10 @@ the authority over OpenClaw's managed memory.
 
 ## Quick start
 
-From the Engramory repo (defaults to the OpenClaw workspace `~/.openclaw/workspace`):
+From the Engramory repo. The installer defaults to the **base-profile** workspace
+`~/.openclaw/workspace`; OpenClaw can also select a workspace by profile,
+`OPENCLAW_WORKSPACE_DIR`, or per-agent config, so pass `--project-root` explicitly
+if yours is not the base one:
 
 ```sh
 python tools/engramory_init.py openclaw --install-skill

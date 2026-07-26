@@ -14,8 +14,17 @@ Catches drift the per-write checks miss, on two levels:
 
 STRUCTURE (ISSUE -> exit 1): an over-cap index, index pointers to files that no
 longer exist, pointers OR note files (symlinks) that escape the store root, orphan
-notes that nothing references, and duplicate note slugs — two files sharing a
-basename, or two that differ only by case (they collide on a case-insensitive FS).
+notes that nothing references, duplicate note slugs — two files sharing a
+basename, or two that differ only by case (they collide on a case-insensitive FS) —
+and an index pointer using a NON-REMOTE URL scheme (`file://…` names a local path,
+so it must be gated like any other path). Only a scheme on the remote allowlist in
+`_is_remote_url` (http/https, ftp/ftps, mailto, ssh, git+…) counts as external.
+
+Reads are bounded, because the store is attacker-influenceable and a planted or
+runaway file must not take down the validator meant to report it: an index far past
+the cap is reported and NOT parsed, and a note larger than NOTE_READ_CAP is flagged
+rather than read. Echoed frontmatter fragments are quoted and truncated for the same
+reason — an agent reads this output, so a hostile note cannot flood or instruct it.
 
 PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — each
 note must have well-formed frontmatter (no malformed lines, unclosed quotes, or a
@@ -471,7 +480,8 @@ def main(argv):
                 if not dv:
                     issues.append(f"{base}: frontmatter missing required '{dk}'")
                 elif not _valid_date(dv):
-                    issues.append(f"{base}: '{dk}' is not a valid YYYY-MM-DD date ('{dv}')")
+                    issues.append(f"{base}: '{dk}' is not a valid YYYY-MM-DD date "
+                                  f"({_short(dv)})")
             if t in ("feedback", "project"):
                 # scan the BODY only — a Why:/How to apply: line in the frontmatter
                 # doesn't count as the required reflection.

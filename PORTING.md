@@ -121,7 +121,15 @@ The cap stops the index growing past the host's load window. Strongest → softe
    edit-tool call (`Edit|Write|MultiEdit`) and can DENY one that would grow the index
    past the cap — deterministic for those tools, not for other write channels
    (SKILL.md §8). It's written for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
-   are **not interchangeable**, so each needs its own shim:
+   are **not interchangeable**, so each needs its own shim.
+
+   > ⚠️ **The per-host notes below are a snapshot, last checked 2026-07-26, and
+   > carry no version guarantee.** Hook APIs on these hosts are young and move
+   > fast — Kiro's CLI, for one, has already reorganised hooks across a major
+   > version. Treat each entry as a starting point: **check the host's current
+   > official docs, then verify on the real host** before relying on any of it.
+   > A claim here that has quietly gone stale is exactly the kind of drift this
+   > project tells you not to trust in a memory note.
    - **Hermes** — a `pre_tool_call` shell hook can block a tool call; matcher
      `write_file|patch` catches the agent's *file* writes (an Engramory separate-store
      index), but **not** Hermes's native `memory` tool — which is already code-capped, so
@@ -180,8 +188,10 @@ hand-fix hundreds of issues blind — triage:
 1. **Structure first:** `engramory_doctor.py <root> --no-schema` and get the
    structural problems (broken pointers, orphans, duplicate slugs) to zero by hand —
    those genuinely need a human.
-2. **Backfill dates mechanically.** There is no migration *tool* (by design — `tools/`
-   are read-only validators), but a one-off stdlib snippet fills only the missing
+2. **Backfill dates mechanically.** There is no migration *tool* for note content
+   (by design — `engramory_check` and `engramory_doctor` never write; `init` writes
+   only setup files and `sync` only its bookkeeping state), but a one-off stdlib
+   snippet fills only the missing
    `created:`/`updated:`. Run it on a copy / clean git, dry-run first, and note that
    **mtime is the file's timestamp, not necessarily the fact's** real last-update:
 

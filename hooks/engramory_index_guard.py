@@ -28,12 +28,18 @@ of the current text (honouring uniqueness / replace_all, skipping sub-edits whos
 old_string is absent or non-unique), because Claude Code applies MultiEdit
 sub-edits in order, each on the previous result.
 
-Fail-SAFE, not fail-open, for the things that matter: an UNREADABLE index (OSError)
-is treated as empty, and a NON-UTF-8 index is decoded lossily for the line/edit math
-while its size is taken from the raw on-disk bytes — either way a growing write still
-counts as growth and stays gated (never silently allowed). A malformed numeric env var
-falls back to its default. Only a genuine unexpected exception falls open (a guard must
-never brick the user's editing).
+Fail-SAFE, not fail-open, for the things that matter. A NON-UTF-8 index is decoded
+lossily for the line/edit math while its size is taken from the raw on-disk bytes, so
+a growing write still counts as growth and stays gated. A malformed numeric env var
+falls back to its default.
+
+An index that EXISTS but cannot be read is a separate case: substituting an empty
+base would make every Edit/MultiEdit `old_string` look absent, so the simulation
+would predict an empty result and a large growing edit would pass unnoticed. The
+hook therefore reports that the cap was NOT verified (and points at
+engramory_check.py) instead of passing silently. It still does not deny — a
+transient lock must not brick editing. A missing index (no file yet) legitimately
+starts from empty. Only a genuine unexpected exception falls open.
 
 Wire it up in settings.json (PreToolUse, matcher "Edit|Write|MultiEdit"). Use the EXEC
 form so the path is passed literally — no shell, so no quoting / backslash pitfalls:

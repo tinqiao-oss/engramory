@@ -3,8 +3,10 @@
 engramory_check — portable index-size check (the no-hard-hook degradation, layer 2).
 
 On Claude Code the PreToolUse hook (hooks/engramory_index_guard.py) enforces the
-cap deterministically on every edit. On any other host that lacks such a hook,
-the agent should run THIS after writing the index, and compact if it says OVER:
+cap deterministically for the tools it matches (Edit | Write | MultiEdit) — NOT for
+a shell tool, an MCP file tool, or an external editor. On any other host that lacks
+such a hook, and on this host for the writes it cannot see, the agent should run
+THIS after writing the index, and compact if it says OVER:
 
     python tools/engramory_check.py <path-to-MEMORY.md>
 
