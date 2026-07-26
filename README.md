@@ -18,7 +18,7 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.5.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.6.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
@@ -50,7 +50,7 @@ for agent memory, and it ships in several places already. Engramory stands on:
 
 What Engramory contributes is the **opinionated bundle + the discipline**, not the
 primitives. Do not claim novelty on markdown, frontmatter, wikilinks, a loaded
-index, atomic notes, or curation hygiene — all are prior art.
+index, one-file-per-fact notes, or curation hygiene — all are prior art.
 
 ## What's actually differentiated
 
@@ -117,7 +117,7 @@ vary, so the window stays configurable via the hook's env vars.
 
 Engramory is a **portable memory *discipline*, not a product** — not a database, not a
 framework, not a relevance-loaded skill, not a Claude-Code-only plugin. The plumbing it rides on (a markdown index +
-atomic notes, the `user | feedback | project | reference` types, a bounded loaded index)
+one-file-per-fact notes, the `user | feedback | project | reference` types, a bounded loaded index)
 is increasingly shipped *natively* by the host — Claude Code's built-in auto-memory
 already does it. So Engramory's value is the part hosts **don't** ship: the explicit
 curation contract (dedup-before-write, delete-when-wrong, don't-store-what-the-repo-
@@ -132,6 +132,30 @@ Windsurf, …) share the same store, the same tools, and a **server-enforced cap
 the one deterministic guarantee cross-agent instead of per-host. On a host that only gives
 you a flat rules file or a raw file store, that is a real upgrade; on a host that already
 ships structured memory, Engramory is a thin discipline layer on top — and says so.
+
+---
+
+## Continuity without a second handoff store
+
+Engramory uses **one canonical store**. It does not add a `handoff` type or a
+parallel handoff folder. A live `project` note may hold the current goal, status,
+decisions, constraints, blockers, and next concrete step needed to resume an
+unfinished task. A `feedback` note is narrower: only a correction or workflow
+that should be reused beyond that task.
+
+Before a deliberate compact, clear, or move to a new thread, the agent performs
+one continuity sync: scan the task, dedup/update existing notes, refresh project
+state, promote reusable feedback, keep durable reference pointers, retire stale
+or completed transient state, run the size check plus doctor, and verify that a
+cold-started agent could continue from the repo and memory alone. Continuity
+never duplicates code or git: a note may keep a **stable** pointer (branch name,
+issue/PR number, file path) to re-check, but never a volatile value (commit
+hash, version number, test result) — it records where to read that instead.
+
+After a write, the agent reports what was added, updated, archived, and skipped
+(with reasons, identifying any deletion under archived), plus the index size and
+check result. Host lifecycle hooks can remind, mark a task dirty, or gate a
+manual transition; they do **not** perform or guarantee this semantic sync.
 
 ---
 
@@ -163,10 +187,19 @@ memory template, optionally install the full protocol as a Codex skill, and add 
 python tools/engramory_init.py codex --project-root /path/to/project --install-skill
 ```
 
+Optional Codex lifecycle assistance can also be installed with
+`--install-hooks --mode explicit` (default), or `--mode assisted` to ask for the
+same agent-run sync at meaningful milestones. Neither mode silently creates a
+semantic summary; review/trust project hooks and confirm them with `/hooks`.
+The hook's bounded `.engramory-codex-state.json` stores only synchronization
+bookkeeping, never prompts, transcripts, or note bodies.
+
 By default this creates `<project>/.engramory-memory/`. Pass `--memory-root` to
 use an existing folder. Keep this store separate from Codex native Memories:
 Codex Memories are generated state, while Engramory is a user-auditable plain
-folder. Full Codex notes are in [adapters/codex/README.md](adapters/codex/README.md).
+folder and the canonical store for the Engramory protocol. Full Codex notes,
+including explicit sync versus optional lifecycle-hook assistance, are in
+[adapters/codex/README.md](adapters/codex/README.md).
 
 ### Read-only readers (recall another agent's memory)
 
@@ -274,9 +307,11 @@ This discipline is **unenforced** (no hook scans memory content — see
 Engramory is a **single-project, single-writer, personal-scale** protocol. It does
 *not* yet have:
 
-- **Versioning / migration** — no `schema_version`; no defined upgrade path if the
-  frontmatter format changes. (For onboarding a *pre-existing* store, PORTING.md's
-  "Adopting an existing store" has a triage recipe + a date-backfill snippet.)
+- **Versioning / migration** — the semantic memory store has no
+  `schema_version`; there is no defined upgrade path if the frontmatter format
+  changes. (The optional Codex hook's bookkeeping file is versioned, but it
+  contains no memory.) For onboarding a *pre-existing* store, PORTING.md's
+  "Adopting an existing store" has a triage recipe + a date-backfill snippet.
 - **Provenance / trust** — no `source`, `confidence`, `last_verified`, expiry, or
   `superseded-by` fields. Recalled memory is advisory and attacker-influenceable
   (see [SKILL.md](SKILL.md) §4); there is no authentication of memory content.
@@ -284,7 +319,9 @@ Engramory is a **single-project, single-writer, personal-scale** protocol. It do
   a store shared across projects/agents would hit slug collisions and project bleed.
   A store-level manifest (protocol version + scope + host config) is the planned
   first step — not built yet.
-- **Concurrency** — single writer / serialized writes assumed (no locking).
+- **Concurrency** — semantic note/index writes assume one serialized writer and
+  have no store-level lock. The optional Codex hook locks only its bookkeeping
+  state; it does not make memory writes concurrent-safe.
 - **Scale** — the always-loaded flat index bounds the *active* set to what fits the
   cap (~200 pointers). It is a personal / curated-scale tool, not a large corpus;
   above that, a retrieval-based system (basic-memory, mem0) is the right tool.

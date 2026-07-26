@@ -10,10 +10,12 @@
 <!-- who the user is: identity, role, durable preferences -->
 
 ## feedback
-<!-- how the agent should behave (procedural). Each file carries Why: / How to apply: -->
+<!-- reusable corrections/workflows only (not task-local state). Why: / How to apply: -->
 
 ## project
-<!-- current work state not in code/git. Absolute dates. Why: / How to apply: -->
+<!-- goals/status/decisions/constraints/blockers/next step needed to resume.
+     Re-verify code/git/test pointers; retire completed transient state.
+     Absolute dates. Why: / How to apply: -->
 
 ## reference
 <!-- pointers to external resources: URLs, dashboards, tickets, log paths -->

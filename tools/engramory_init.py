@@ -5,6 +5,7 @@ engramory_init - bootstrap Engramory for an agent host.
 Usage:
 
     python tools/engramory_init.py codex          --project-root <repo> --install-skill
+    python tools/engramory_init.py codex          --project-root <repo> --install-hooks --mode explicit
     python tools/engramory_init.py openclaw                              --install-skill
     python tools/engramory_init.py <host>-reader   --project-root <cfg>  --memory-root <existing store>
 
@@ -12,6 +13,12 @@ For a WRITE host (codex, openclaw) the command creates a local memory store, add
 Engramory block to the host's always-loaded AGENTS.md, optionally installs the Engramory skill
 under .agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
 store to .gitignore when the store lives inside the project/workspace.
+
+For the Codex writer, `--install-hooks` also installs project-scoped
+SessionStart/UserPromptSubmit/PreCompact assistance under `.codex/`. The hooks
+track only synchronization bookkeeping; the agent still performs the semantic
+Engramory sync. `--mode explicit` is the default; `assisted` adds proactive
+milestone guidance.
 
 A READ-ONLY reader host `<host>-reader` (codex-reader, claude-reader, cursor-reader, kiro-reader,
 cline-reader, windsurf-reader, openclaw-reader, hermes-reader) instead wires that host to *recall*
@@ -26,9 +33,13 @@ rules-file format but printed with an "unverified" note. See adapters/reader/REA
 Defaults: --project-root '.', except openclaw (~/.openclaw/workspace).
 """
 import argparse
+import base64
+import json
 import os
+import shlex
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -46,6 +57,29 @@ def _write_text(path, text):
     # kwarg only exists on Python 3.10+, and the project floor is 3.9.
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
+
+
+def _write_text_atomic(path, text):
+    """Atomically replace a managed file without following a final symlink/hardlink."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = None
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".engramory-install-", suffix=".tmp", dir=str(path.parent))
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+        temp_name = None
+    except OSError as exc:
+        raise SystemExit(f"cannot atomically write managed file {path}: {exc}")
+    finally:
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
 
 
 def _same_or_inside(child, parent):
@@ -154,18 +188,44 @@ def _copy_skill(source_root, project_root, force):
     return "installed .agents/skills/engramory"
 
 
-def _codex_note(index_display, check_display, protocol_display):
+def _codex_note(
+        index_display,
+        check_display,
+        protocol_display,
+        mode="explicit",
+        hooks_installed=False,
+        **_kwargs):
+    hook_lines = ""
+    if hooks_installed:
+        hook_lines = f"""
+- Project lifecycle hooks are installed in `.codex/hooks.json`. Inspect and trust
+  them with `/hooks`; untrusted project hooks do not run.
+- `SessionStart` points Codex back to the index, and `PreCompact` stops a dirty
+  *manual* compact. Automatic compaction warns and marks reconciliation pending
+  instead of hard-blocking at an already-full context window.
+- After the Engramory sync workflow is genuinely complete, run the exact
+  `mark-synced` command supplied by the hook. It includes the current session
+  identifier and only records the completed sync; it does not create or
+  summarize memory for you."""
+    else:
+        hook_lines = """
+- Codex lifecycle hooks were not installed. Before compact, clear, or a fresh
+  thread, explicitly run the Engramory sync workflow from the protocol."""
+
     return f"""Codex-specific wiring:
 
 - Keep this Engramory store separate from Codex native Memories; Codex native
   Memories are generated state, while Engramory is a user-auditable plain folder.
+- Capture mode is `{mode}`: `explicit` syncs on request or at a continuity
+  boundary; `assisted` also asks Codex to sync proactively at meaningful
+  milestones. Neither mode silently invents a semantic summary.
 - If you edit `{index_display}` and no pre-write hook is installed, run
   `python {check_display} {index_display}` after the write; compact immediately
-  if it reports `OVER`.
+  if it reports `OVER`.{hook_lines}
 - Full protocol reference: `{protocol_display}`."""
 
 
-def _openclaw_note(index_display, check_display, protocol_display):
+def _openclaw_note(index_display, check_display, protocol_display, **_kwargs):
     return f"""OpenClaw-specific wiring:
 
 - Keep this Engramory store separate from OpenClaw's own memory; OpenClaw auto-writes
@@ -179,7 +239,7 @@ def _openclaw_note(index_display, check_display, protocol_display):
 - Full protocol reference: `{protocol_display}`."""
 
 
-def _reader_note(index_display, check_display, protocol_display):
+def _reader_note(index_display, check_display, protocol_display, **_kwargs):
     # Read-only reader (host-agnostic): it never writes, so there is no engramory_check
     # step and check_display is intentionally unused (signature kept uniform for _render_block).
     return f"""Read-only wiring:
@@ -259,7 +319,14 @@ def _reader_config(host, spec):
 HOST_CONFIG.update({f"{h}-reader": _reader_config(h, s) for h, s in READER_HOSTS.items()})
 
 
-def _render_block(cfg, source_root, project_root, memory_root, install_skill):
+def _render_block(
+        cfg,
+        source_root,
+        project_root,
+        memory_root,
+        install_skill,
+        mode="explicit",
+        install_hooks=False):
     snippet = _read_text(source_root / cfg.get("snippet", "rules-snippet.md")).strip()
     memory_display = _display_path(memory_root, project_root)
     index_display = (Path(memory_display) / "MEMORY.md").as_posix()
@@ -272,7 +339,13 @@ def _render_block(cfg, source_root, project_root, memory_root, install_skill):
         protocol_display = _display_path(source_root / "SKILL.md", project_root)
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
 
-    note = cfg["note"](index_display, check_display, protocol_display)
+    note = cfg["note"](
+        index_display,
+        check_display,
+        protocol_display,
+        mode=mode,
+        hooks_installed=install_hooks,
+    )
     body = snippet + "\n\n" + note
     fm = cfg.get("frontmatter")
     if fm:
@@ -282,7 +355,11 @@ def _render_block(cfg, source_root, project_root, memory_root, install_skill):
     return cfg["begin"] + "\n" + body + "\n" + cfg["end"]
 
 
-def _require_sources(source_root, install_skill, snippet_rel="rules-snippet.md"):
+def _require_sources(
+        source_root,
+        install_skill,
+        snippet_rel="rules-snippet.md",
+        install_hooks=False):
     # Fail fast with a clear message (before any side effects) if the repo this tool
     # ships in is incomplete, instead of a raw FileNotFoundError mid-copy. `snippet_rel`
     # is the host's rules snippet (default rules-snippet.md; a read-only host uses its own).
@@ -290,6 +367,11 @@ def _require_sources(source_root, install_skill, snippet_rel="rules-snippet.md")
                 "tools/engramory_check.py", "tools/engramory_doctor.py", snippet_rel]
     if install_skill:
         required += ["PORTING.md", "LICENSE"]
+    if install_hooks:
+        required += [
+            "hooks/codex/engramory_codex_hook.py",
+            "tools/engramory_sync.py",
+        ]
     required = list(dict.fromkeys(required))  # dedup (snippet_rel may be rules-snippet.md)
     missing = [r for r in required if not (source_root / r).exists()]
     if missing:
@@ -297,10 +379,308 @@ def _require_sources(source_root, install_skill, snippet_rel="rules-snippet.md")
                          + ", ".join(missing))
 
 
+_CODEX_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreCompact")
+_CODEX_HOOK_STATUSES = {
+    "SessionStart": "Engramory: load continuity context (managed v1)",
+    "UserPromptSubmit": "Engramory: track sync state (managed v1)",
+    "PreCompact": "Engramory: check continuity before compaction (managed v1)",
+}
+_CODEX_LEGACY_HOOK_STATUSES = {
+    "SessionStart": "Loading Engramory continuity context",
+    "UserPromptSubmit": "Tracking Engramory sync state",
+    "PreCompact": "Checking Engramory before compaction",
+}
+
+
+def _load_codex_hooks(path):
+    """Load an existing project hooks file without mutating it on malformed input."""
+    if not path.exists():
+        return {}
+    if not path.is_file():
+        raise SystemExit(f"cannot install Codex hooks: {path} is not a file")
+    try:
+        data = json.loads(_read_text(path))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"cannot install Codex hooks: existing {path} is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        raise SystemExit(
+            f"cannot install Codex hooks: existing {path} must contain a JSON object")
+    hooks = data.get("hooks")
+    if hooks is None:
+        data["hooks"] = {}
+    elif not isinstance(hooks, dict):
+        raise SystemExit(
+            f"cannot install Codex hooks: 'hooks' in {path} must be a JSON object")
+    else:
+        # Validate every event this installer will merge before any store/rules
+        # side effect. The merge helper performs the same checks and returns a
+        # copy; calling it here is deliberately read-only.
+        for event in _CODEX_HOOK_EVENTS:
+            _remove_managed_hook_handlers(hooks.get(event, []), path, event)
+    return data
+
+
+def _powershell_literal(value):
+    """Return one PowerShell single-quoted literal."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _hook_command(argv, windows=False):
+    if not windows:
+        return shlex.join([str(value) for value in argv])
+
+    # Codex 0.144.1 executes commandWindows through `cmd.exe /C`, not directly
+    # through CreateProcess. C-runtime quoting (subprocess.list2cmdline) leaves
+    # cmd metacharacters such as `&` and `%NAME%` active. Keep every dynamic path
+    # inside a UTF-16LE PowerShell EncodedCommand; its base64 alphabet is inert to
+    # cmd, while PowerShell single-quoted literals safely carry the real argv.
+    invocation = "& " + " ".join(_powershell_literal(value) for value in argv)
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$env:PYTHONUTF8 = '1'\n"
+        "$env:PYTHONIOENCODING = 'utf-8'\n"
+        "$utf8 = [System.Text.UTF8Encoding]::new($false)\n"
+        "[Console]::InputEncoding = $utf8\n"
+        "[Console]::OutputEncoding = $utf8\n"
+        "$OutputEncoding = $utf8\n"
+        + invocation
+        + "\nexit $LASTEXITCODE\n"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    return (
+        "powershell.exe -NoLogo -NoProfile -NonInteractive "
+        "-EncodedCommand " + encoded
+    )
+
+
+def _engramory_hook_handler(command, command_windows, status):
+    handler = {
+        "type": "command",
+        "command": command,
+        "timeout": 10,
+        "statusMessage": status,
+    }
+    if command_windows:
+        handler["commandWindows"] = command_windows
+    return handler
+
+
+def _remove_managed_hook_handlers(groups, path, event):
+    if not isinstance(groups, list):
+        raise SystemExit(
+            f"cannot install Codex hooks: hooks.{event} in {path} must be a JSON array")
+    kept_groups = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks", []), list):
+            raise SystemExit(
+                f"cannot install Codex hooks: every hooks.{event} entry in {path} "
+                "must be an object with a 'hooks' array")
+        kept_handlers = []
+        for handler in group.get("hooks", []):
+            if not isinstance(handler, dict):
+                raise SystemExit(
+                    f"cannot install Codex hooks: every hooks.{event} handler in "
+                    f"{path} must be a JSON object")
+            managed_statuses = (
+                _CODEX_HOOK_STATUSES[event],
+                _CODEX_LEGACY_HOOK_STATUSES[event],
+            )
+            is_managed = (
+                handler.get("type") == "command"
+                and handler.get("statusMessage") in managed_statuses
+            )
+            if not is_managed:
+                kept_handlers.append(handler)
+        if kept_handlers:
+            updated = dict(group)
+            updated["hooks"] = kept_handlers
+            kept_groups.append(updated)
+    return kept_groups
+
+
+def _merge_codex_hooks(
+        existing, path, hook_path, sync_path, memory_root, mode, hook_python=None):
+    data = dict(existing)
+    hooks = dict(data.get("hooks", {}))
+    argv = [
+        hook_python or sys.executable,
+        hook_path,
+        "--memory-root",
+        memory_root,
+        "--sync-tool",
+        sync_path,
+        "--mode",
+        mode,
+    ]
+    command = _hook_command(argv)
+    command_windows = _hook_command(argv, windows=True) if os.name == "nt" else None
+
+    matchers = {
+        "SessionStart": "startup|resume|clear|compact",
+        "UserPromptSubmit": None,
+        # Do not filter PreCompact here: the runtime must see future/unknown
+        # trigger values so it can fail open visibly instead of silently
+        # bypassing reconciliation bookkeeping.
+        "PreCompact": None,
+    }
+    for event in _CODEX_HOOK_EVENTS:
+        groups = _remove_managed_hook_handlers(hooks.get(event, []), path, event)
+        group = {
+            "hooks": [
+                _engramory_hook_handler(
+                    command, command_windows, _CODEX_HOOK_STATUSES[event])
+            ]
+        }
+        if matchers[event]:
+            group["matcher"] = matchers[event]
+        groups.append(group)
+        hooks[event] = groups
+
+    data["hooks"] = hooks
+    if "description" not in data:
+        data["description"] = (
+            "Project lifecycle hooks, including Engramory continuity checks.")
+    return data
+
+
+def _copy_managed_file(source, target, force):
+    if target.is_symlink():
+        raise SystemExit(
+            f"cannot install Codex hooks: managed target {target} is a symlink")
+    if target.exists():
+        if not target.is_file():
+            raise SystemExit(
+                f"cannot install Codex hooks: managed target {target} is not a file")
+        if target.read_bytes() == source.read_bytes():
+            return "already current"
+        if not force:
+            return "kept existing (use --force to replace)"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = None
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".engramory-install-", suffix=".tmp", dir=str(target.parent))
+        os.close(fd)
+        shutil.copy2(source, temp_name)
+        # Replaces a target directory entry rather than following a symlink or
+        # hardlink that may have appeared after preflight.
+        os.replace(temp_name, target)
+        temp_name = None
+    except OSError as exc:
+        raise SystemExit(
+            f"cannot install managed Codex hook file {target}: {exc}")
+    finally:
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+    return "installed"
+
+
+def _codex_hooks_are_machine_local(data):
+    """True when only Engramory owns this file, so gitignoring it is safe.
+
+    `.codex/hooks.json` is a normal Codex project-configuration surface a team may
+    legitimately share. The generated Engramory entries can never be shared —
+    Codex 0.144.1 has no project-dir variable for hook commands, so the
+    interpreter, hook script, sync tool, and memory root are all baked in as
+    absolute machine-local paths. Ignoring the file is therefore right when it
+    holds nothing else, and wrong the moment a teammate's handler lives there.
+    """
+    for groups in (data.get("hooks") or {}).values():
+        for group in groups if isinstance(groups, list) else []:
+            for handler in (group or {}).get("hooks", []) or []:
+                status = (handler or {}).get("statusMessage")
+                if status not in set(_CODEX_HOOK_STATUSES.values()) | set(
+                        _CODEX_LEGACY_HOOK_STATUSES.values()):
+                    return False
+    return True
+
+
+def _ensure_codex_hooks_gitignored(project_root, hooks_path, merged):
+    entry = "/.codex/hooks.json"
+    if not _codex_hooks_are_machine_local(merged):
+        return (
+            "NOT gitignored: this file also holds non-Engramory handlers, so it "
+            "looks shared; the Engramory entries in it are machine-local and will "
+            "not work on another machine")
+    gitignore = project_root / ".gitignore"
+    old = _read_text(gitignore) if gitignore.exists() else ""
+    if entry in old.splitlines():
+        return "already gitignored"
+    prefix = old.rstrip() + "\n\n" if old.strip() else ""
+    _write_text(
+        gitignore,
+        prefix
+        + "# Engramory Codex hooks (absolute machine-local paths, not portable)\n"
+        + entry
+        + "\n",
+    )
+    return "gitignored {0}".format(entry)
+
+
+def _install_codex_hooks(
+        source_root,
+        project_root,
+        memory_root,
+        mode,
+        force,
+        existing,
+        hook_python=None):
+    managed_root = project_root / ".codex" / "engramory"
+    hook_path = managed_root / "engramory_codex_hook.py"
+    sync_path = managed_root / "engramory_sync.py"
+    hook_status = _copy_managed_file(
+        source_root / "hooks" / "codex" / "engramory_codex_hook.py",
+        hook_path,
+        force,
+    )
+    sync_status = _copy_managed_file(
+        source_root / "tools" / "engramory_sync.py",
+        sync_path,
+        force,
+    )
+
+    hooks_path = project_root / ".codex" / "hooks.json"
+    merged = _merge_codex_hooks(
+        existing,
+        hooks_path,
+        hook_path.resolve(),
+        sync_path.resolve(),
+        memory_root,
+        mode,
+        hook_python=hook_python,
+    )
+    _write_text_atomic(
+        hooks_path,
+        json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
+    )
+    ignore_status = _ensure_codex_hooks_gitignored(project_root, hooks_path, merged)
+    interpreter = hook_python or sys.executable
+    return (
+        f"configured .codex/hooks.json; hook script {hook_status}; "
+        f"sync helper {sync_status}; {ignore_status}; "
+        f"interpreter baked in: {interpreter}; "
+        f"NOT active until you trust it in Codex's /hooks")
+
+
 def init_host(args, host):
     cfg = HOST_CONFIG[host]
     source_root = _repo_root()
-    _require_sources(source_root, args.install_skill, cfg.get("snippet", "rules-snippet.md"))
+    if args.install_hooks and host != "codex":
+        raise SystemExit(
+            "--install-hooks is supported only for the Codex write host")
+    if args.mode != "explicit" and host != "codex":
+        raise SystemExit(
+            "--mode assisted is supported only for the Codex write host")
+    _require_sources(
+        source_root,
+        args.install_skill,
+        cfg.get("snippet", "rules-snippet.md"),
+        install_hooks=args.install_hooks,
+    )
     root_arg = args.project_root if args.project_root is not None else cfg["default_root"]
     project_root = Path(root_arg).expanduser().resolve()
     memory_root = Path(args.memory_root).expanduser()
@@ -323,6 +703,13 @@ def init_host(args, host):
                 f"({skill_root}); --install-skill (re)creates that directory and with "
                 f"--force would delete the memory store inside it. Put the store "
                 f"somewhere else (default: .engramory-memory).")
+    if args.install_hooks:
+        hook_root = project_root / ".codex" / "engramory"
+        if (_same_or_inside(memory_root, hook_root)
+                or _same_or_inside(hook_root, memory_root)):
+            raise SystemExit(
+                f"--memory-root ({memory_root}) overlaps the managed Codex hook dir "
+                f"({hook_root}); keep executable hook code separate from memory data.")
 
     # A read-only host (creates_store=False) never creates or touches the store — it only
     # wires the host to RECALL from a store another agent owns and writes. Enforce that up
@@ -366,6 +753,30 @@ def init_host(args, host):
     if args.install_skill:
         _refuse_symlink_escape(project_root / ".agents" / "skills" / "engramory",
                                project_root, "the skill install dir")
+    existing_hooks = None
+    if args.install_hooks:
+        hook_root = project_root / ".codex" / "engramory"
+        hooks_path = project_root / ".codex" / "hooks.json"
+        _refuse_symlink_escape(hook_root, project_root, "the Codex hook install dir")
+        _refuse_symlink_escape(hooks_path, project_root, ".codex/hooks.json")
+        if hooks_path.is_symlink():
+            raise SystemExit(
+                f"cannot install Codex hooks: {hooks_path} is a symlink")
+        for managed_name in ("engramory_codex_hook.py", "engramory_sync.py"):
+            managed_target = hook_root / managed_name
+            _refuse_symlink_escape(
+                managed_target, project_root, f"managed Codex hook file {managed_name}")
+            if managed_target.is_symlink():
+                raise SystemExit(
+                    f"cannot install Codex hooks: managed target "
+                    f"{managed_target} is a symlink")
+            if managed_target.exists() and not managed_target.is_file():
+                raise SystemExit(
+                    f"cannot install Codex hooks: managed target "
+                    f"{managed_target} is not a file")
+        # Parse and validate the file before creating the store, gitignore, skill, or
+        # AGENTS block. A malformed user hooks file must never leave a partial init.
+        existing_hooks = _load_codex_hooks(hooks_path)
 
     project_root.mkdir(parents=True, exist_ok=True)
 
@@ -382,7 +793,28 @@ def init_host(args, host):
         skill_result = _copy_skill(source_root, project_root, args.force)
     results.append(("skill", skill_result))
 
-    block = _render_block(cfg, source_root, project_root, memory_root, args.install_skill)
+    hook_result = "not requested"
+    if args.install_hooks:
+        hook_result = _install_codex_hooks(
+            source_root,
+            project_root,
+            memory_root,
+            args.mode,
+            args.force,
+            existing_hooks,
+            hook_python=args.hook_python,
+        )
+    results.append(("hooks", hook_result))
+
+    block = _render_block(
+        cfg,
+        source_root,
+        project_root,
+        memory_root,
+        args.install_skill,
+        mode=args.mode,
+        install_hooks=args.install_hooks,
+    )
     if cfg.get("frontmatter"):
         # A dedicated rule file we own (Cursor/Kiro): write it whole (idempotent overwrite).
         _write_text(target, block)
@@ -423,8 +855,29 @@ def build_parser():
              "e.g. Claude Code's memory dir ~/.claude/projects/<project>/memory",
     )
     parser.add_argument("--install-skill", action="store_true", help="copy Engramory into .agents/skills/engramory")
+    parser.add_argument(
+        "--install-hooks",
+        action="store_true",
+        help="install Codex SessionStart/UserPromptSubmit/PreCompact project hooks "
+             "under .codex (Codex write host only)",
+    )
+    parser.add_argument(
+        "--hook-python",
+        default=None,
+        help="interpreter baked into the generated hook command (default: the "
+             "Python running this installer). Pass an explicit path when that "
+             "default is a throwaway/project-local virtualenv — if it is deleted "
+             "or renamed later, every hook silently stops working.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("explicit", "assisted"),
+        default="explicit",
+        help="Codex capture policy: explicit syncs on request/boundaries; assisted also "
+             "asks Codex to sync at meaningful milestones (default: explicit)",
+    )
     parser.add_argument("--force", action="store_true",
-                        help="remove and recreate the entire .agents/skills/engramory directory")
+                        help="replace the installed skill and managed Codex hook scripts")
     return parser
 
 

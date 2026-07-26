@@ -138,3 +138,56 @@ Reader hosts: `codex-reader` (dogfooded) plus `claude-reader`, `cursor-reader`, 
 `cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired from documented
 formats, printed with an "unverified" note). See
 [adapters/reader/README.md](../adapters/reader/README.md).
+
+## 6. Optional Codex lifecycle assistance
+
+This is separate from the Claude Code index-size hook above. Install the managed
+Codex project hooks with:
+
+```sh
+python tools/engramory_init.py codex --project-root <repo> \
+  --install-skill --install-hooks --mode explicit
+```
+
+`explicit` is the default. `--mode assisted` additionally asks the agent to sync
+at meaningful milestones; it still does not write a semantic summary in the
+background. The installed hook contract is:
+
+| Codex event | Lifecycle-hook behavior |
+|---|---|
+| `SessionStart` | Remind the agent to recall from the canonical `MEMORY.md`; surface `needs_reconcile` if an earlier automatic transition could not be synced. |
+| `UserPromptSubmit` | Conservatively mark continuity `dirty`. Do not infer, classify, or write a memory from the prompt alone. |
+| `PreCompact` (manual) | If dirty/unreconciled, gate manual compaction until the explicit unified sync and `mark-synced` complete, then retry. |
+| `PreCompact` (automatic, missing, or unknown trigger) | **Fail open** with a visible warning; when dirty, keep/set `needs_reconcile`. Never loop-deny a non-manual compact. |
+
+The explicit sync — scan, dedup/update, project, reusable feedback, references,
+retirement, check+doctor, and cold-start sufficiency — is performed by the agent.
+A hook can schedule or apply back-pressure to that work; it cannot truthfully
+claim that it generated a complete semantic summary.
+
+Once that semantic sync and its checks genuinely finish, run the exact
+`mark-synced` command emitted by the hook. It checks that `MEMORY.md` exists,
+stays inside the store, is not a symlink, and is within the hard line/byte caps,
+then records the clean generation/index hash. It does not run semantic curation,
+edit a note, or summarize memory.
+
+Project-scoped hooks run project-controlled code. Inspect them before trusting
+the checkout, trust only projects whose hook code you accept, and use `/hooks` in
+Codex to verify the registered event, source, and enabled state. Re-check
+`/hooks` after configuration changes. If the expected entry is absent or reports
+an error, fall back to explicit sync and the commands documented in the Codex
+adapter.
+
+The installer manages `.codex/hooks.json` plus scripts under
+`.codex/engramory/`, while preserving unrelated handlers. Review both before
+granting project trust.
+
+The shim was implemented against and source-checked against the **Codex CLI
+0.144.1** command-hook schema and behavior. The Python lifecycle runtime and the
+generated `cmd.exe`/PowerShell launch path have black-box coverage; project hook
+discovery, trust, and execution inside a real Codex host still need to be
+confirmed with `/hooks`. This is an implementation target, **not** a claimed
+minimum version or end-to-end host certification. For another version, compare
+the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
+and use `/hooks` to verify the installed entries; if they are missing or
+incompatible, degrade to explicit sync.

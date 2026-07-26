@@ -8,7 +8,8 @@ focused and well-tested.
 
 - No build step, no dependencies beyond the Python standard library.
 - The load-bearing code is `hooks/engramory_index_guard.py` (the Claude Code
-  PreToolUse cap) plus the two portable scripts in `tools/`.
+  PreToolUse cap), `hooks/codex/engramory_codex_hook.py` (Codex lifecycle
+  assistance), and the portable scripts in `tools/`.
 - `SKILL.md` is the full protocol; `README.md` / `README.zh-CN.md` are the front
   door; `PORTING.md` covers non-Claude-Code hosts.
 
@@ -17,20 +18,24 @@ focused and well-tested.
 Requires **Python 3.9+**. From the repo root:
 
 ```sh
-python tests/test_index_guard.py   # the hook
-python tests/test_tools.py         # engramory_check + engramory_doctor
+python -m pytest tests -q
 ```
 
-Both print `ALL PASS` on success (they also run under `pytest -q` if you prefer).
-Every behavioral change to the hook or the tools should come with a test.
+The two original standalone suites still work with
+`python tests/test_index_guard.py` and `python tests/test_tools.py`; each prints
+`ALL PASS`. Every behavioral change to a hook, installer, or tool should come
+with a test.
 
 ## Guidelines
 
-- **Keep the hook fail-safe.** It must never emit `allow` (that auto-approves a
-  tool call) and must never crash a user's edit — on any unexpected error it
-  fails open silently. Preserve those invariants.
-- **Don't oversell reliability.** Only the Claude Code hook is deterministic; the
-  discipline is best-effort. Keep docs honest (see `SKILL.md` §8).
+- **Preserve each hook's failure contract.** The Claude Code index guard must
+  never emit `allow` or crash a user's edit; it fails open silently. The Codex
+  lifecycle hook may block only an explicit manual compaction with unsynchronized
+  state. Automatic, missing, or unknown compaction triggers fail open visibly.
+- **Don't oversell reliability.** Hooks enforce bounded mechanical gates, not
+  semantic memory quality. Codex project discovery, trust, and real-host
+  execution must be verified with `/hooks`; the discipline remains
+  best-effort. Keep docs honest (see `SKILL.md` §8).
 - **Keep both READMEs in sync.** A change to `README.md` should be mirrored in
   `README.zh-CN.md` (and vice versa).
 - **No secrets or machine-local detail** in examples, templates, or memory: the

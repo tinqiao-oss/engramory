@@ -11,7 +11,7 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
-> **状态:0.5.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.6.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -23,7 +23,7 @@ Engramory **不是一种新的记忆架构**。"markdown 文件 + 一个常驻�
 - **[basic-memory](https://github.com/basicmachines-co/basic-memory)** —— markdown 为真值源、YAML frontmatter 的 `type`、`[[wikilink]]` 图、本地优先。
 - **[obsidian-second-brain](https://github.com/eugeniughelbur/obsidian-second-brain)**、**[claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler)**(明确主张"个人规模下,加载一个结构化索引胜过向量检索"),以及一整个 markdown 记忆 skill 家族。
 
-Engramory 贡献的是**有主见的组合 + 纪律**,不是这些底层原语。别去宣称 markdown、frontmatter、wikilink、加载索引、原子笔记、策展卫生是新东西——全是 prior art(前人已做)。
+Engramory 贡献的是**有主见的组合 + 纪律**,不是这些底层原语。别去宣称 markdown、frontmatter、wikilink、加载索引、单文件单事实笔记、策展卫生是新东西——全是 prior art(前人已做)。
 
 ## 真正的差异点
 
@@ -52,9 +52,31 @@ Engramory 的赛道:**极简 + 可执行的角色类型 + 策展纪律,零基础
 
 ## 它的位置 —— 以及目标
 
-Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据库、不是框架、不是按相关性加载的 skill,也不是只能用在 Claude Code 的插件。它所依赖的底层管道(markdown 索引 + 原子笔记、`user | feedback | project | reference` 四类型、有界加载索引)正越来越多地被宿主**原生**内置——Claude Code 自带的 auto-memory 就已经做到了。所以 Engramory 的价值在于宿主**不**提供的那部分:显式的策展契约(写前查重、发现错就删、git/代码里已有的别记)、带强制 Why/How 的程序性 `feedback` 笔记,以及一条可移植的尺寸上限强制方式。
+Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据库、不是框架、不是按相关性加载的 skill,也不是只能用在 Claude Code 的插件。它所依赖的底层管道(markdown 索引 + 单文件单事实笔记、`user | feedback | project | reference` 四类型、有界加载索引)正越来越多地被宿主**原生**内置——Claude Code 自带的 auto-memory 就已经做到了。所以 Engramory 的价值在于宿主**不**提供的那部分:显式的策展契约(写前查重、发现错就删、git/代码里已有的别记)、带强制 Why/How 的程序性 `feedback` 笔记,以及一条可移植的尺寸上限强制方式。
 
 **目标是让*任何* agent 都能用上同一套纪律——靠骑在真正的跨 agent 轨道上,而不是另造一个标准。** 把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的常驻规则,纪律就每个任务都生效;再配一个**(规划中的)Engramory MCP server**,任何支持 MCP 的 agent(Claude Code、Cursor、Cline、Codex、Windsurf……)就能共享同一个记忆库、同一套工具,以及一个 **server 端强制的 cap**——让那个唯一的确定性保证从"逐宿主"变成"跨 agent"。对只给你一个扁平规则文件或裸文件存储的宿主,这是实打实的升级;对已经自带结构化记忆的宿主,Engramory 就是叠在上面的一层薄纪律——并且坦白承认这一点。
+
+---
+
+## 不另建 handoff 库的任务续接
+
+Engramory 只有**一个 canonical store(规范真值库)**。它不新增 `handoff`
+类型,也不并行维护第二个交接文件夹。未完成任务需要续接时,一条活跃的
+`project` 笔记可以保存当前目标、状态、决策、约束、阻塞和下一项具体动作。
+`feedback` 更窄:只保存能跨任务复用的纠错或工作流,不保存当前任务的局部状态。
+
+在主动 compact、clear 或切换到新线程之前,agent 执行一次统一 sync:
+扫描当前任务 → 查重并更新已有笔记 → 刷新 project → 只晋升可复用的
+feedback → 保存持久 reference 指针 → 归档/删除过时或已完成的瞬时状态 →
+运行尺寸检查与 doctor → 确认一个冷启动 agent 只靠仓库和记忆就能安全继续。
+续接绝不复述代码或 git 已有的内容:只保存**稳定**指针(分支名、issue/PR
+编号、文件路径)并在 recall 时复核,**绝不**保存易变值(commit 哈希、版本号、
+测试结果)——只记「去哪里读」,不记数值本身。
+
+每次写入后,agent 必须汇报 added、updated、archived、skipped(含理由;删除项
+在 archived 类别中明确标成 deleted),以及索引行数/字节数和检查结果。宿主
+生命周期 hook 可以提醒、标记 dirty 或拦住一次手动转换,但**不会**自动完成
+或保证这次语义 sync。
 
 ---
 
@@ -76,7 +98,18 @@ Engramory 是**一套可移植的记忆*纪律*,不是产品**——不是数据
 python tools/engramory_init.py codex --project-root /path/to/project --install-skill
 ```
 
-默认创建 `<project>/.engramory-memory/`。如果你已有记忆目录,传 `--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹。Codex 细节见 [adapters/codex/README.md](adapters/codex/README.md)。
+也可以追加 `--install-hooks --mode explicit`(默认)安装 Codex 生命周期辅助;
+`--mode assisted` 会在有意义的里程碑主动建议执行同一套、仍由 agent 完成的
+sync。两种模式都不会静默生成语义摘要;启用前审查/信任项目 hook,并用
+`/hooks` 确认实际加载状态。hook 的有界
+`.engramory-codex-state.json` 只保存同步 bookkeeping,绝不保存 prompt、
+transcript 或笔记正文。
+
+默认创建 `<project>/.engramory-memory/`。如果你已有记忆目录,传
+`--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex
+Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹,
+也是 Engramory 协议的 canonical store。显式 sync 与可选生命周期 hook 辅助的
+区别见 [adapters/codex/README.md](adapters/codex/README.md)。
 
 ### 只读读取器(召回另一个 agent 的记忆)
 
@@ -141,10 +174,10 @@ Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记
 
 Engramory 是一套**单项目、单写者、个人规模**的协议。它**还没有**:
 
-- **版本 / 迁移** —— 没有 `schema_version`;frontmatter 格式若变化,没有定义好的升级路径。(已有存量库的接入,见 [PORTING.md](PORTING.md) 的「Adopting an existing store」:分诊 recipe + 日期回填片段。)
+- **版本 / 迁移** —— 语义记忆库没有 `schema_version`;frontmatter 格式若变化,没有定义好的升级路径。(可选 Codex hook 的纯 bookkeeping 状态文件有版本号,但其中不含记忆。)已有存量库的接入,见 [PORTING.md](PORTING.md) 的「Adopting an existing store」:分诊 recipe + 日期回填片段。
 - **来源 / 可信度** —— 没有 `source`、`confidence`、`last_verified`、过期、`superseded-by` 等字段。召回的记忆是建议性的、且可被攻击者影响(见 [SKILL.md](SKILL.md) §4);记忆内容没有任何鉴权。
 - **作用域 / 多项目** —— 没有 `scope` / `project_id`;单一扁平 slug 命名空间,跨项目 / 跨 agent 共用一个库会撞 slug、串项目。一个库级 manifest(协议版本 + 作用域 + 宿主配置)是规划中的第一步——**还没做**。
-- **并发** —— 假设单写者 / 串行写入(无锁)。
+- **并发** —— 语义笔记/索引仍假设单写者、串行写入,没有库级锁。可选 Codex hook 只锁自己的 bookkeeping 状态,不会让记忆写入变成并发安全。
 - **规模** —— 常驻加载的扁平索引把**活跃集**限制在卡上限装得下的量(约 200 条指针)。它是个人 / 精选规模的工具,不是大语料;超过这个量,检索式系统(basic-memory、mem0)才是对的工具。
 
 ## 前人工作与致谢

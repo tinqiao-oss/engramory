@@ -1,12 +1,12 @@
 # Porting Engramory to other hosts
 
 Engramory is a **discipline, not a storage engine.** It ships no database or
-memory store of its own — it imposes structure (atomic, typed notes + a
+memory store of its own — it imposes structure (one-file-per-fact typed notes + a
 pointer-only index) and curation discipline on whatever memory + instruction
 mechanism your agent host already has. So "porting" is mostly wiring, not code.
 
 The model doesn't matter (DeepSeek, GPT, Llama, Claude all work). The host needs
-two things: a way to keep rules in context, and file read/write. Three steps:
+two things: a way to keep rules in context, and file read/write. Four steps:
 
 ## 1. Make the discipline always-on (not just a by-relevance skill)
 
@@ -30,9 +30,10 @@ host also supports skills, additionally import [`SKILL.md`](SKILL.md) for the fu
 protocol — the always-loaded snippet guarantees the behaviour fires; the skill
 carries the detail.
 
-## 2. Point `<MEMORY_ROOT>` at the host's own store — and make Engramory its authority
+## 2. Choose one canonical `<MEMORY_ROOT>` — and make Engramory its authority
 
-Don't create a second store. Reuse the memory directory the host already loads:
+Don't create a second handoff store or another Engramory writer. Reuse the memory
+directory the host already loads when it is editable and suitable:
 - Claude Code → its auto-memory dir (the `MEMORY.md` it injects each session).
 
 ⚠️ Hosts that **auto-write** their memory (Claude, Hermes) have their own house
@@ -47,7 +48,7 @@ of two writers fighting in the same file.
 built-in `memory` tool writes a *frozen-snapshot* `MEMORY.md` + `USER.md`
 (`~/.hermes/memories/`) that are **already hard-capped in code** (2,200 / 1,375 chars
 ≈ 1,300 tokens total) with error back-pressure + exact-duplicate rejection — so
-Engramory's index cap is redundant there, and its atomic-files-plus-index *recall*
+Engramory's index cap is redundant there, and its files-plus-index *recall*
 model doesn't fit a single always-injected file. What that native store *lacks* — the
 typed ontology, required **Why:** / **How to apply:**, and the negative-scope rule — is
 exactly Engramory's value-add. So on Hermes, run Engramory as a **separate plain-file
@@ -76,7 +77,43 @@ demand. `.gitignore` the store but commit the steering pointer; do NOT add the s
 `.kiroignore` (that would stop the agent reading its own memory). Full wiring +
 ready-to-copy template: [adapters/kiro/README.md](adapters/kiro/README.md).
 
-## 3. Enforce the size cap — the degradation ladder (no PreToolUse hook)
+## 3. Wire continuity sync — explicit first, hooks optional
+
+Task continuity stays in an ordinary `project` note in the canonical store:
+current goal, status, decisions, constraints, blockers, and next concrete step.
+`feedback` is only for a correction or workflow reusable beyond the task. A
+resumed agent must re-check any branch, file, commit, command, or test-result
+pointer against the live environment.
+
+Every host with rules plus file access can support **explicit sync** before a
+deliberate compact, clear, or new thread:
+
+1. scan the task;
+2. dedup/update existing notes;
+3. refresh project state;
+4. promote only reusable feedback and durable reference pointers;
+5. archive/delete stale or completed transient state;
+6. run `engramory_check.py` plus `engramory_doctor.py`;
+7. confirm a cold-started agent could continue from the repo and store alone;
+8. report added/updated/archived/skipped (with reasons), index size, and verdict.
+
+Lifecycle hooks are only an assisted trigger layer. For Codex, the intended
+contract is: `SessionStart` reminds recall; `UserPromptSubmit` marks continuity
+dirty; a manual `PreCompact` gates while dirty until explicit sync; an automatic
+`PreCompact` must fail open with a warning and retain `needs_reconcile` so it
+cannot deadlock compaction. A missing/unknown trigger also fails open with a
+visible warning and marks `needs_reconcile` when dirty.
+Hooks do not understand the conversation or generate a guaranteed semantic
+summary. Install the Codex shim with `engramory_init.py codex --install-hooks`;
+`--mode explicit` is the default, while `--mode assisted` adds proactive
+milestone reminders but still depends on an agent-run semantic sync.
+
+Project hooks execute project-controlled code: review and trust the checkout,
+then use Codex `/hooks` to verify event/source/enabled state. On another host,
+map the same semantics only to lifecycle events whose payload and blocking
+behavior you have verified; otherwise use explicit sync alone.
+
+## 4. Enforce the size cap — the degradation ladder (no PreToolUse hook)
 
 The cap stops the index growing past the host's load window. Strongest → softest:
 
@@ -173,7 +210,8 @@ hand-fix hundreds of issues blind — triage:
 
 - [ ] `rules-snippet.md` pasted into the host's always-loaded instructions
 - [ ] `SKILL.md` imported as a skill too (if supported)
-- [ ] `<MEMORY_ROOT>` set to the host's own memory dir; Engramory made its authority
+- [ ] one canonical `<MEMORY_ROOT>` selected; no second handoff store or writer
+- [ ] explicit continuity sync wired; lifecycle hooks, if any, documented as assistance only
 - [ ] store git-ignored if inside a repo (it holds machine-local detail)
 - [ ] size cap wired at the strongest rung the host supports (hook → check → discipline)
 - [ ] `engramory_doctor.py` runnable as an occasional backstop
@@ -182,6 +220,7 @@ Init helpers (Codex, OpenClaw) — wire `AGENTS.md` + the skill + a separate sto
 
 ```sh
 python tools/engramory_init.py codex    --project-root <repo> --install-skill
+python tools/engramory_init.py codex    --project-root <repo> --install-skill --install-hooks --mode explicit
 python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
 ```
 

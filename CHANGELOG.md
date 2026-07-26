@@ -4,6 +4,96 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.6.0 — 2026-07-26
+
+Protocol/docs
+- **One canonical store for memory and task continuity.** Engramory does not add
+  a `handoff` type or parallel handoff folder. A live `project` note may carry an
+  unfinished task's goal, status, decisions, constraints, blockers, and next
+  step; `feedback` remains limited to corrections/workflows reusable across
+  tasks.
+- **Unified continuity sync before deliberate compact/clear/new-thread
+  transitions.** The documented pass is scan → dedup/update → project → reusable
+  feedback → durable references → retire stale/completed transient state →
+  check+doctor → cold-start sufficiency.
+- **The anti-drift negative scope stays hard.** Continuity does NOT loosen the
+  rule that memory never restates code/git. A `project` note may keep only
+  *stable* pointers (branch name, issue/PR number, file path), always re-verified
+  on recall; *volatile* values (commit hashes, version numbers, test results,
+  timings) are never stored — the note records where to read them instead.
+- **Write reporting is explicit.** After a memory write/sync, the agent reports
+  added, updated, archived, and skipped items (with reasons; deletions are named
+  under archived), plus index line/byte size and the check result.
+- **Codex lifecycle-hook contract documented without overstating automation.**
+  `SessionStart` may remind recall, `UserPromptSubmit` may mark dirty, and a
+  manual `PreCompact` may gate for explicit sync. Automatic compaction must fail
+  open with a warning/`needs_reconcile` to avoid a deadlock. Hooks assist timing;
+  they do not classify notes or generate a guaranteed semantic summary.
+  Project-scoped hooks must be reviewed/trusted and verified with `/hooks`.
+  The optional installer path is `--install-hooks --mode explicit|assisted`;
+  assisted adds proactive milestone reminders but still requires the agent-run
+  semantic sync and explicit `mark-synced`.
+
+Codex adapter
+- **Optional lifecycle runtime shipped.**
+  `hooks/codex/engramory_codex_hook.py` implements bounded `SessionStart`
+  navigation, prompt-free dirty bookkeeping on `UserPromptSubmit`, and a
+  `PreCompact` gate that blocks only a known manual trigger. Automatic, missing,
+  and future/unknown triggers fail open visibly and retain `needs_reconcile`.
+- **Auditable sync acknowledgement shipped.** `tools/engramory_sync.py` keeps
+  bounded per-session bookkeeping in `.engramory-codex-state.json`.
+  `mark-synced` is idempotent, checks the index path and hard caps, and never
+  generates or edits semantic memory.
+- **Installer support.** `engramory_init.py codex` now accepts
+  `--install-hooks` and `--mode explicit|assisted`, conservatively merges
+  unrelated `.codex/hooks.json` handlers, installs managed scripts under
+  `.codex/engramory/`, preserves existing memory stores, and tells the user to
+  inspect/trust the project hooks with `/hooks`.
+- **Fixed: the session cap could strand the current session.** Once every slot
+  held unsynced work, bookkeeping raised instead of pruning, so an arriving
+  session was never recorded. The hook then blocked manual compaction while
+  naming that unrecorded id, and the `mark-synced` command it printed could only
+  answer `unknown session id` — the emitted recovery was impossible to follow.
+  The cap now evicts the OLDEST unsynced records, keeps the current session, and
+  carries a `dropped_unsynced_sessions` count (surfaced by `status`) so dropped
+  unsynced work is never silently forgotten.
+- **Fixed: an unprovable state record could open the manual gate.** A session
+  record with a missing/non-boolean `dirty`, or generations contradicting a clean
+  flag (`synced_generation` behind `dirty_generation`), was read as clean and let
+  a manual compaction through. Such a record is now treated as unsynced —
+  fail-closed — while an honest, self-consistent clean record still passes.
+- **Fixed: unreadable state produced a dead-end instruction.** When state or the
+  sync runtime cannot be loaded, the blocked-compaction message now points at
+  `status` (which lists real session ids) or at the broken runtime path, instead
+  of a `mark-synced` command that cannot resolve.
+- **Honest limits documented, not papered over.** Two structural limits are now
+  stated in `adapters/codex/README.md` instead of being discovered in use:
+  installing a project hook does **not** enable it (Codex disables project hooks
+  until the project is trusted, and the per-handler trust is content-hashed, so
+  re-running the installer invalidates it); and non-interactive `codex exec` does
+  **not** fire these lifecycle hooks — measured on 0.144.1 with a valid,
+  successfully-parsed config. The per-prompt cost (~1.2–1.4 s, synchronous
+  because Codex has no async hooks) is documented too, along with why the
+  PowerShell `-EncodedCommand` layer must not be "optimised" away: `cmd.exe /C`
+  strips the outer quotes of a command line beginning with a quote, and a
+  space-bearing interpreter path must be quoted.
+- **Machine-local config is treated as such.** Codex 0.144.1 has no project-dir
+  variable for hook commands, so every generated path is absolute and
+  unshareable. The installer now gitignores `.codex/hooks.json` when Engramory is
+  its only owner — and deliberately does not when the file also carries someone
+  else's handler, since that file is a normal shared Codex surface. New
+  `--hook-python` picks the interpreter that gets baked in; the default is
+  whatever Python ran the installer, which silently breaks every hook if it was a
+  throwaway virtualenv. The install summary now names the interpreter and states
+  that the hooks are inactive until trusted.
+- **P0 regression coverage.** Script-level black-box and installer tests cover
+  fresh-session navigation, dirty manual compact → sync → retry, fail-open
+  auto/unknown compaction, prompt non-persistence, idempotent acknowledgement,
+  hard-cap/symlink validation, mode guidance, hook failure visibility,
+  conservative install and upgrade behavior, generated Windows launch commands,
+  and the continuity protocol contract. Real-host discovery and trust remain a
+  `/hooks` verification step.
+
 ## 0.5.1 — 2026-07-24
 
 Hardening + honesty pass from a two-model deep audit (Claude × Codex at max reasoning

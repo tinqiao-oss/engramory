@@ -9,7 +9,9 @@ the engramory `SKILL.md`.
 
 ## Memory (Engramory)
 
-You have a curated, file-based memory at `<MEMORY_ROOT>/` (index: `MEMORY.md`).
+You have one canonical, curated, file-based memory at `<MEMORY_ROOT>/` (index:
+`MEMORY.md`). Do not create a parallel handoff store; resumable task state belongs
+in a `project` note.
 
 - **At the start of a task**, read `MEMORY.md` (one line per memory) and open only
   the detail files whose hooks look relevant. (On a host with native auto-memory —
@@ -25,6 +27,22 @@ You have a curated, file-based memory at `<MEMORY_ROOT>/` (index: `MEMORY.md`).
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line in the body. Add one pointer line to `MEMORY.md`.
   **Delete** memories that turn out wrong.
+- `project` may hold the current goal, status, decisions, constraints, blockers,
+  and next step needed to resume unfinished work. `feedback` is only for a
+  reusable correction/workflow. Never restate what code/git already says: store
+  only **stable** pointers (branch name, issue/PR number, file path), never
+  volatile values (commit hashes, version numbers, test results) — record where
+  to read those. Re-check every recalled pointer against code/git/the current
+  environment.
+- **Before a deliberate compact, clear, or new thread**, sync once: scan the task;
+  dedup/update; refresh `project`; promote only reusable `feedback`; save durable
+  `reference` pointers; archive/delete stale or completed transient state; run
+  `engramory_check.py` and `engramory_doctor.py`; then confirm a cold-started
+  agent could continue from the repo plus memory alone.
+- After writing/syncing, report `added`, `updated`, `archived`, and `skipped`
+  (with reasons; identify any deletion under `archived`), plus index lines/bytes
+  and the check result. Hooks may remind or gate; they do not perform this
+  semantic sync automatically.
 - **Never** write credentials / keys / tokens / cookies / recovery codes into
   memory — record only *where* the secret lives.
 - Keep `MEMORY.md` small. Soft warning at **150 lines / 20 KB** (offer a compaction
