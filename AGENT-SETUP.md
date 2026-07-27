@@ -44,8 +44,13 @@ call. The reasoning behind each is in the step that introduces it.
    authorizing edits to their own history. If everything resolves and nothing is broken,
    the answer is "it works" — with the legacy notes mentioned once, as an optional
    tidy-up they can ignore indefinitely.
-4. **Never echo note bodies.** You cannot avoid *reading* bytes — counting index lines
-   requires it — but nothing from a note's body goes into your report.
+4. **Never echo note bodies — and read as little of them as the question needs.**
+   Counting, structure and cap checks are answered by the index and by frontmatter;
+   opening every note in full to establish "there are five of them" reads a person's
+   private notes for no gain. Some reading is unavoidable and that is fine. Reading more
+   than the question requires is not, because everything you read enters your context —
+   for a hosted model, that is egress. And nothing from a body reaches your report either
+   way.
 5. **Do not scan the home directory by default.** Ask about candidate paths instead. If
    a broad scan is genuinely needed, get separate approval and bound it.
 6. **Present ≠ configured ≠ active ≠ verified.** Never collapse these into "installed".

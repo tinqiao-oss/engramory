@@ -4,6 +4,15 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## Unreleased
+
+- `AGENT-SETUP.md` Hard rule 4 now bounds *reading*, not just repeating. It forbade
+  echoing note bodies but said nothing about how much to open, so a run that behaved
+  correctly still `cat`-ed every note to establish how many there were — private notes
+  read for no gain. Counting, structure and cap questions are answered by the index and
+  by frontmatter. (Found by a Claude Code agent walking the runbook, which flagged its
+  own excess.)
+
 ## 0.7.0 — 2026-07-27
 
 `AGENT-SETUP.md`: a runbook for the agent being asked to install this.
