@@ -4,6 +4,53 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.7.0 — 2026-07-27
+
+`AGENT-SETUP.md`: a runbook for the agent being asked to install this.
+
+Every existing document assumes a human reader, or an agent that is already set up —
+`SKILL.md` is the protocol you follow *after* installation. But the common case is a
+user telling an agent "install this for me", and that agent then has to work out, on its
+own, which host it is on, what that host can actually enforce, whether a store already
+exists, and what may not be touched. Nothing carried that procedure, so it was improvised
+every time — and the improvisation went wrong in consistent, predictable ways.
+
+The content is drawn from watching a non-Claude agent actually attempt it, repeatedly.
+Each rule below is there because a real run got it wrong first:
+
+- **Two gates, deliberately asymmetric.** Gate 1 (survey) is a *disclosure*: state the
+  scope and proceed. Gate 2 (write) is a hard stop. Making both blocking looked safer and
+  was strictly worse — whenever nobody answers, a batch run, a CI job, a user who walked
+  away, the entire procedure returned **nothing**. An agent cannot detect that case
+  either: from the inside, an unattended run is indistinguishable from a conversation.
+- **Do not edit existing notes — "not in bulk" was not enough.** Told only that, agents
+  reasoned that one note was not a bulk edit and offered to fix it. The rule now covers a
+  single note, and forbids the framing too: a store with legacy notes is *working*, and
+  calling it "unhealthy" or "90% correct" pressures a non-technical user into authorizing
+  edits to their own history — which the agent cannot do correctly anyway, because file
+  mtime is not when the fact was last true.
+- **The doctor's `fix …:` hints are advice for a human, not a task list.** Agents read
+  them as a backlog and offered to burn it down.
+- **Find an existing store before proposing a new one.** Offered as equal options, an
+  agent suggests whatever directory it happens to be running in — and a user who already
+  has a store ends up with two, the old one orphaned. Quiet, and worse than not
+  installing.
+- **Report to a human, not a diagnostic dump.** Rungs, four-state tables and
+  `97 lines / 19.6 KB` mean nothing to the person who asked. Lead with the verdict, use
+  their units, and only raise what changes what they do. Also: answer what you can answer
+  — a cheap non-destructive check belongs in your report, not in a list of open questions
+  for them to resolve.
+- **Verify before reporting.** "Configured" and "fires" are different claims; only the
+  second is worth anything.
+- **Say when you cannot see their machine.** From a sandbox, every "not installed" is a
+  false negative that sends the user to reinstall what they already have.
+
+Also
+- The runbook ships with `--install-skill`, and each host's standing-rules block now
+  points at it — an agent asked to check or repair an install needs it exactly then, when
+  the original checkout is usually long gone. Without that pointer it was read in 1 of 3
+  runs, purely by chance.
+
 ## 0.6.4 — 2026-07-27
 
 The deferred P2 tier from the 0.6.1–0.6.3 audits, cleared. A cross-model review of

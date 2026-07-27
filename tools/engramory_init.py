@@ -233,7 +233,10 @@ def _copy_skill(source_root, project_root, force):
         shutil.rmtree(skill_root)
 
     skill_root.mkdir(parents=True, exist_ok=True)
-    for name in ("SKILL.md", "rules-snippet.md", "PORTING.md", "LICENSE"):
+    # AGENT-SETUP.md travels with the install so the runbook is still reachable
+    # afterwards — an agent asked to check, repair, or upgrade an existing setup needs
+    # it exactly then, and the source checkout is often long gone.
+    for name in ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md", "LICENSE"):
         shutil.copy2(source_root / name, skill_root / name)
     for dirname in ("templates", "tools"):
         shutil.copytree(
@@ -250,6 +253,7 @@ def _codex_note(
         protocol_display,
         mode="explicit",
         hooks_installed=False,
+        setup_display="AGENT-SETUP.md",
         **_kwargs):
     hook_lines = ""
     if hooks_installed:
@@ -278,10 +282,14 @@ def _codex_note(
 - If you edit `{index_display}` and no pre-write hook is installed, run
   `python {check_display} {index_display}` after the write; compact immediately
   if it reports `OVER`.{hook_lines}
-- Full protocol reference: `{protocol_display}`."""
+- Full protocol reference: `{protocol_display}`.
+- Asked to check, repair, or upgrade this Engramory install itself? Follow
+  `{setup_display}` — it is the procedure for that, and it is not optional
+  guidance: it exists because agents reliably get this wrong unprompted."""
 
 
-def _openclaw_note(index_display, check_display, protocol_display, **_kwargs):
+def _openclaw_note(index_display, check_display, protocol_display,
+                   setup_display="AGENT-SETUP.md", **_kwargs):
     return f"""OpenClaw-specific wiring:
 
 - Keep this Engramory store separate from OpenClaw's own memory; OpenClaw auto-writes
@@ -292,10 +300,14 @@ def _openclaw_note(index_display, check_display, protocol_display, **_kwargs):
   `before_tool_call` *plugin* hook (TypeScript), NOT Engramory's Python shell hook — so
   the cap here is rules + this check unless you write that plugin (see
   adapters/openclaw/README.md).
-- Full protocol reference: `{protocol_display}`."""
+- Full protocol reference: `{protocol_display}`.
+- Asked to check, repair, or upgrade this Engramory install itself? Follow
+  `{setup_display}` — it is the procedure for that, and it is not optional
+  guidance: it exists because agents reliably get this wrong unprompted."""
 
 
-def _reader_note(index_display, check_display, protocol_display, **_kwargs):
+def _reader_note(index_display, check_display, protocol_display,
+                 setup_display="AGENT-SETUP.md", **_kwargs):
     # Read-only reader (host-agnostic): it never writes, so there is no engramory_check
     # step and check_display is intentionally unused (signature kept uniform for _render_block).
     return f"""Read-only wiring:
@@ -304,7 +316,9 @@ def _reader_note(index_display, check_display, protocol_display, **_kwargs):
   Claude Code's native auto-memory) owns and writes. You have READ access only.
 - NEVER create, edit, move, or delete anything in this store (no new notes, no edits to
   `MEMORY.md`). If you learn something durable, surface it to the user instead of writing it.
-- Full protocol reference (recall + the write side you do NOT use): `{protocol_display}`."""
+- Full protocol reference (recall + the write side you do NOT use): `{protocol_display}`.
+- Asked to check or change this wiring itself? Follow `{setup_display}`. You are a
+  READER here: it will tell you to confirm ownership before anything else."""
 
 
 # Per-host wiring. Both Codex and OpenClaw use an always-loaded AGENTS.md and auto-discover
@@ -391,9 +405,11 @@ def _render_block(
     if install_skill:
         protocol_display = ".agents/skills/engramory/SKILL.md"
         check_display = ".agents/skills/engramory/tools/engramory_check.py"
+        setup_display = ".agents/skills/engramory/AGENT-SETUP.md"
     else:
         protocol_display = _display_path(source_root / "SKILL.md", project_root)
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
+        setup_display = _display_path(source_root / "AGENT-SETUP.md", project_root)
 
     note = cfg["note"](
         index_display,
@@ -401,6 +417,7 @@ def _render_block(
         protocol_display,
         mode=mode,
         hooks_installed=install_hooks,
+        setup_display=setup_display,
     )
     body = snippet + "\n\n" + note
     fm = cfg.get("frontmatter")

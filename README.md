@@ -18,7 +18,13 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
-> **Status: 0.6.4 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> 🤖 **Are you an AI agent, asked to install or check this?** Start at
+> **[AGENT-SETUP.md](AGENT-SETUP.md)**, not at the install steps below. It is the
+> procedure for working out what your host can actually enforce, whether a store
+> already exists, what you must not touch, and what to tell the user — the parts
+> agents reliably get wrong when improvising.
+
+> **Status: 0.7.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
