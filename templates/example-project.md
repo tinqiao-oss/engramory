@@ -2,6 +2,7 @@
 name: api-gateway-v2-status
 description: API gateway v2 migration shipped — release 2.0
 type: project
+scope: repo
 created: 2026-01-15
 updated: 2026-01-15
 ---

@@ -86,6 +86,7 @@ prose survives intact):
 name: <kebab-case-slug>          # matches the filename, used as the [[link]] target
 description: <one line>          # used to judge relevance during recall — write it well
 type: user | feedback | project | reference
+scope: global | repo             # optional — does this still hold in another repo? (§2.1)
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 ---
@@ -184,6 +185,33 @@ apply") don't satisfy it — keep the full, colon-terminated label.
 tasks); `project` is *what we're working on* (a fact about this specific effort).
 "Reply in Chinese" = feedback. "Resume the migration by fixing the blocked
 serializer test" = project.
+
+### 2.1 `scope` — how far a memory reaches
+
+`type` says *what kind* of memory this is; `scope` says *how far it reaches*. The
+two are orthogonal, and the second one is what keeps a memory from being recalled
+somewhere it was never true.
+
+- `global` — holds in every repo: facts about the person, and methods you would
+  apply on any project.
+- `repo` — holds only inside this repository: its constraints, decisions, and
+  conventions.
+
+`scope` is optional. A note without it stays valid, and a note whose reach is
+genuinely unclear is better left unlabelled than guessed. Label the ones you *are*
+sure about — `feedback` and `project` benefit most, being the pair that gets
+misfiled (see the confusable pair above).
+
+**The two failure modes are not symmetric**, which is what makes the label worth
+its line:
+- A repo-only rule left `global` leaks into other projects, where it is simply
+  wrong — and it keeps applying until someone notices.
+- A genuinely global rule filed as repo-local state is archived when that project
+  wraps, and is then **lost for good** — no later session will recall it.
+
+`user` notes are global by nature (a person does not change per project), so the
+label adds nothing there. Keep `scope` out of `MEMORY.md`: it governs curation,
+not recall, and index lines are under a hard budget (§3).
 
 ---
 

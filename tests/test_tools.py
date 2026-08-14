@@ -984,6 +984,60 @@ def test_doctor_duplicate_frontmatter_key_is_issue(tmp_path):
     assert rc == 1 and "duplicate frontmatter key 'type'" in out
 
 
+def test_doctor_valid_scope_is_clean(tmp_path):
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: d\ntype: reference\nscope: repo\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_invalid_scope_is_issue(tmp_path):
+    # a misspelled reach must not pass as if the note were simply unlabelled: an
+    # unlabelled note is honestly silent, a typo'd one claims a reach nothing enforces.
+    (tmp_path / "a-note.md").write_text(
+        "---\nname: a-note\ndescription: d\ntype: reference\nscope: machine\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "invalid scope" in out
+
+
+def test_doctor_absent_scope_is_valid_and_nudges_only_the_misfiled_pair(tmp_path):
+    # BACKWARD COMPAT: `scope` postdates existing stores, so its absence is never an
+    # ISSUE. feedback/project get an INFO nudge (they are the pair that gets misfiled);
+    # reference/user get nothing, or every pre-existing store would drown in noise.
+    (tmp_path / "f-note.md").write_text(
+        "---\nname: f-note\ndescription: d\ntype: feedback\n"
+        "created: 2026-01-01\nupdated: 2026-01-01\n---\n"
+        "**Why:** r\n\n**How to apply:** a\n", encoding="utf-8")
+    _note(tmp_path / "r-note.md", "r-note")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [F](f-note.md) — hook\n- [R](r-note.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0
+    assert "1 feedback/project note(s) carry no 'scope'" in out and "f-note.md" in out
+    assert "r-note.md" not in out
+
+
+def test_doctor_scope_nudge_is_one_summary_line_not_one_per_note(tmp_path):
+    # a per-note nudge printed 108 identical lines on a real store and buried every
+    # real finding — the nudge stays ONE line however many notes are unlabelled.
+    idx = ["# Index"]
+    for i in range(5):
+        (tmp_path / f"f{i}.md").write_text(
+            f"---\nname: f{i}\ndescription: d\ntype: feedback\n"
+            "created: 2026-01-01\nupdated: 2026-01-01\n---\n"
+            "**Why:** r\n\n**How to apply:** a\n", encoding="utf-8")
+        idx.append(f"- [F{i}](f{i}.md) — hook")
+    (tmp_path / "MEMORY.md").write_text("\n".join(idx) + "\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0
+    assert len([ln for ln in out.splitlines() if "carry no 'scope'" in ln]) == 1
+    assert "5 feedback/project note(s) carry no 'scope'" in out and "+2 more" in out
+
+
 def test_check_custom_byte_cap_display_not_zero_kb(tmp_path):
     # a sub-1024 custom cap used to render as a contradictory "cap ... / 0 KB"
     idx = tmp_path / "MEMORY.md"

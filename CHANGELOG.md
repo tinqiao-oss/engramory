@@ -6,6 +6,19 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **`scope: global | repo`, optional.** `type` said what kind of memory a note is;
+  nothing said how far it reaches. The two are orthogonal, and conflating them is what
+  makes `feedback`/`project` the most misfiled pair in the protocol — with asymmetric
+  costs: a repo-only rule left global leaks into other projects, where it is simply
+  wrong and keeps applying until someone notices; a genuinely global rule filed as
+  repo-local state is archived when that project wraps and is then lost for good.
+  Absence is never an ISSUE — the field postdates existing stores, and an unlabelled
+  reach beats a guessed one — but an invalid value is, because a typo claims a reach
+  nothing enforces. `feedback`/`project` with no scope get an INFO nudge; `user` and
+  `reference` get none, or every pre-existing store drowns in noise. Deliberately kept
+  out of `MEMORY.md`: it governs curation, not recall, and index lines are under a hard
+  budget. (SKILL.md §2.1)
+
 - `AGENT-SETUP.md` Hard rule 4 now bounds *reading*, not just repeating. It forbade
   echoing note bodies but said nothing about how much to open, so a run that behaved
   correctly still `cat`-ed every note to establish how many there were — private notes

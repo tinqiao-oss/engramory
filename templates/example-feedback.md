@@ -2,6 +2,7 @@
 name: verify-before-done
 description: Grep to confirm a change before reporting it done
 type: feedback
+scope: global
 created: 2026-06-13
 updated: 2026-06-13
 ---

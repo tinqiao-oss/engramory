@@ -38,10 +38,12 @@ note must have well-formed frontmatter (no malformed lines, unclosed or malforme
 quotes, or a missing closing fence) carrying a non-empty `name`, `description`, a
 valid `type`
 (user|feedback|project|reference), and real-calendar `created` + `updated` dates;
-feedback/project notes must carry `Why:` + `How to apply:`. Soft hygiene is INFO
-(exit 0): a `name` not matching the filename slug (tolerating `-`/`_`/case), and a
-note reachable only via a `[[wikilink]]` (not in the index, so it won't load at
-session start). Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
+feedback/project notes must carry `Why:` + `How to apply:`; an optional `scope`
+must be `global` or `repo` when present. Soft hygiene is INFO (exit 0): a `name`
+not matching the filename slug (tolerating `-`/`_`/case), a feedback/project note
+with no `scope` (its reach is then a guess — SKILL.md §2.1), and a note reachable
+only via a `[[wikilink]]` (not in the index, so it won't load at session start).
+Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
 
 Note: indentation is ignored, so fields nested under a host's `metadata:` block
 (e.g. Claude Code's) are read; the name<->filename check ignores `-`/`_`/case so
@@ -65,6 +67,11 @@ import re
 import sys
 
 VALID_TYPES = {"user", "feedback", "project", "reference"}
+# `scope` (optional) answers "does this still hold in another repo?" — orthogonal to
+# `type`. Absent stays VALID: the field postdates existing stores, and an unlabelled
+# reach beats a guessed one. feedback/project get an INFO nudge, nothing harder,
+# because only the author knows the real reach. See SKILL.md §2.1.
+VALID_SCOPES = {"global", "repo"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Why / How-to-apply labels (feedback & project MUST carry them). Match a line whose
 # content — after an optional Markdown prefix (#, >, *, -, whitespace) and optional **
@@ -518,6 +525,11 @@ def main(argv):
             info.append(f"index points to '{b}' {n} times (one pointer per note is the norm)")
 
     # one pass per note: wikilink graph + frontmatter/protocol validation.
+    # `scopeless` is collected here and reported as ONE summary line after the loop,
+    # never per-note: an existing store has hundreds of feedback/project notes, and a
+    # per-note nudge printed 108 identical lines on the author's own store — burying
+    # every real finding this tool exists to surface.
+    scopeless = []
     for base, p in sorted(notes.items()):
         if base == "MEMORY.md":
             continue
@@ -571,6 +583,12 @@ def main(argv):
             t = fm.get("type", "")
             if t and t not in VALID_TYPES:
                 issues.append(f"{base}: invalid type {_short(t)} (must be one of {'|'.join(sorted(VALID_TYPES))})")
+            sc = fm.get("scope", "")
+            if sc and sc not in VALID_SCOPES:
+                issues.append(f"{base}: invalid scope {_short(sc)} "
+                              f"(must be one of {'|'.join(sorted(VALID_SCOPES))})")
+            elif not sc and t in ("feedback", "project"):
+                scopeless.append(base)
             name = fm.get("name", "")
             if name:
                 # tolerate the host convention of '-' in names vs '_' in filenames
@@ -605,6 +623,13 @@ def main(argv):
                     if _HOW_NEAR.search(body):
                         msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
                     issues.append(msg)
+
+    if scopeless:
+        shown = ", ".join(scopeless[:3])
+        more = f", +{len(scopeless) - 3} more" if len(scopeless) > 3 else ""
+        info.append(f"{len(scopeless)} feedback/project note(s) carry no 'scope' "
+                    f"({shown}{more}) — label each global or repo so a rule isn't "
+                    f"recalled where it was never true (SKILL.md §2.1)")
 
     # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
     for base in sorted(notes):
