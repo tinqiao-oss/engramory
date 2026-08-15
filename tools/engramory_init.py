@@ -447,6 +447,24 @@ def _reader_config(host, spec):
 HOST_CONFIG.update({f"{h}-reader": _reader_config(h, s) for h, s in READER_HOSTS.items()})
 
 
+def _snippet_body(text):
+    """Drop the human-facing install header above the snippet's first `---` rule.
+
+    Each snippet opens with instructions for the PERSON deciding where to paste it
+    ("Paste this into your host's **always-loaded** rules (Claude Code: `CLAUDE.md` …)").
+    That header used to be rendered verbatim into the block the AGENT reads at the start
+    of every session: wasted tokens, and on a non-Claude host it actively misdirects —
+    telling the agent to go paste something into a file its host never reads. A captured
+    dsh request confirmed it was reaching the model. Only what follows the rule is
+    protocol; a snippet without one is used whole.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if i and line.strip() == "---":  # `if i`: a first-line rule would be frontmatter
+            return "\n".join(lines[i + 1:]).strip()
+    return text.strip()
+
+
 def _render_block(
         cfg,
         source_root,
@@ -455,7 +473,7 @@ def _render_block(
         install_skill,
         mode="explicit",
         install_hooks=False):
-    snippet = _read_text(source_root / cfg.get("snippet", "rules-snippet.md")).strip()
+    snippet = _snippet_body(_read_text(source_root / cfg.get("snippet", "rules-snippet.md")))
     memory_display = _display_path(memory_root, project_root)
     index_display = (Path(memory_display) / "MEMORY.md").as_posix()
     snippet = snippet.replace("<MEMORY_ROOT>", memory_display)

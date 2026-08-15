@@ -984,6 +984,19 @@ def test_doctor_duplicate_frontmatter_key_is_issue(tmp_path):
     assert rc == 1 and "duplicate frontmatter key 'type'" in out
 
 
+def test_init_block_drops_the_human_install_header(tmp_path):
+    # The snippet opens with instructions for the PERSON pasting it ("Paste this into your
+    # host's always-loaded rules (Claude Code: `CLAUDE.md`)"). Rendering that into the block
+    # the AGENT reads burns tokens every session and, on a non-Claude host, points it at a
+    # file that host never reads — a captured dsh request confirmed it reached the model.
+    rc, out = _run(INIT, "dsh", "--project-root", str(tmp_path))
+    assert rc == 0, out
+    block = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Paste this into" not in block
+    assert "always-on pointer" not in block  # the header's title line goes too
+    assert "## Memory (Engramory)" in block  # ...but the protocol itself survives
+
+
 def test_doctor_valid_scope_is_clean(tmp_path):
     (tmp_path / "a-note.md").write_text(
         "---\nname: a-note\ndescription: d\ntype: reference\nscope: repo\n"
