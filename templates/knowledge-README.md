@@ -18,6 +18,19 @@ can be looked up. Read only when someone opens it.
 
 Memories are raw material, but this is **not a stockpile for some downstream purpose**.
 
+### Why this does not live next to the store
+
+Keeping the two together looks tidier and is a trap:
+
+- This wants **version control** — articles get revised and the history matters. A memory
+  store usually wants the opposite: personal detail, churning every session, git-ignored.
+- Obsidian **does not index paths beginning with a dot**. If the store lives at
+  `.something/`, articles placed beside it drop out of search, links and the graph.
+- Placing them *inside* the store is worse: the doctor validates every note it finds, and
+  articles have no frontmatter, so each one raises issues that bury the real ones.
+
+A tracked directory in the repository root satisfies all three.
+
 ## Writing standard
 
 - **Open with the fact or the mechanism, not a story.** State what a thing is and why it

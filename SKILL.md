@@ -439,9 +439,25 @@ redo the work, it is worth an article.
 **Do not propose** when: it only holds for this project right now (that is a memory);
 the official documentation answers it directly; or the knowledge base already covers it.
 
+**Where to put it — not beside the store, and not inside it.** The instinct is to keep the
+two together; three constraints rule that out:
+
+- The knowledge base wants to be **version-controlled** (articles get revised, history is
+  worth having, they may eventually be published). A memory store usually wants the
+  opposite — it holds personal detail, churns every session, and is commonly git-ignored.
+  One directory tree cannot satisfy both.
+- Obsidian — the obvious reader for these articles — **does not index any path beginning
+  with a dot**. Content there is invisible to search, links and the graph without an extra
+  plugin. So a store living at `.something/` makes that a bad neighbourhood for articles
+  meant to be read.
+- Inside the store is worse still: the doctor validates every note it finds. Articles have
+  no frontmatter, so they would each raise issues and bury the real ones.
+
+A directory in the repository root, tracked by git, satisfies all three.
+
 Setting one up is a convention, not a feature: create the directory, put a README in it
-stating the writing standard and listing the topics, and add one pointer line at the top
-of `MEMORY.md` — host-agnostic, so it survives a move to any other host. `templates/knowledge-README.md`
+stating the writing standard, and add one pointer line at the top of `MEMORY.md` —
+host-agnostic, so it survives a move to any other host. `templates/knowledge-README.md`
 is a starting point. Engramory ships no tooling for this on purpose: no search, no
 compiler, no UI. It is a place and a standard, and that is the whole of it.
 
