@@ -41,4 +41,22 @@ def test_dsh_plugin_declares_the_discovery_keyword():
     assert "dsh-plugin" in pkg["keywords"]
     assert pkg["name"] == "dsh-engramory"
     # The published tarball must carry the code and nothing stray.
-    assert set(pkg["files"]) == {"index.js", "README.md", "LICENSE"}
+    assert set(pkg["files"]) == {"index.js", "cordis.patch.yml", "README.md", "LICENSE"}
+
+
+def test_dsh_plugin_ships_a_bundle_manifest():
+    """Without `dsh.bundle.patch`, dsh has no idea how to mount an installed plugin.
+
+    Every real plugin in the ecosystem declares it (checked against dsh-mnemon and
+    dsh-memory). Ours shipped 0.1.0 without one — installable, and then inert until the
+    user hand-edited their profile. The manifest and the file it points at must travel
+    together, so both are asserted here.
+    """
+    import json
+
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        pkg = json.load(fh)
+    patch = pkg["dsh"]["bundle"]["patch"]
+    assert patch == "./cordis.patch.yml"
+    assert patch.lstrip("./") in pkg["files"]
+    assert os.path.isfile(os.path.join(PLUGIN, patch.lstrip("./")))

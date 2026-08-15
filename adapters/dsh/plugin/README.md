@@ -28,14 +28,21 @@ a path that is easy to get subtly wrong and fails silently when you do.
 dsh plugin --profile <name> add dsh-engramory
 ```
 
-Then mount it in that profile's `cordis.patch.yml`:
+That is the whole install. The package ships a `dsh.bundle` manifest pointing at its own
+`cordis.patch.yml`, so the row is inserted into the profile's plugin tree for you — no
+hand-editing. To change a default, restate the row in your profile's own patch layer:
 
 ```yaml
-- id: engramory
-  name: dsh-engramory
-  config:
-    indexName: MEMORY.md   # optional
+- insert:
+    - id: engramory
+      name: dsh-engramory
+      config:
+        indexName: MEMORY.md
+        maxLines: 200
+        maxBytes: 25600
 ```
+
+A patch replaces the targeted row's whole `config`, so list every key you mean to keep.
 
 For the store itself and the always-on block, use the installer in the Engramory repo
 (`python tools/engramory_init.py dsh --install-skill`). This plugin enforces the cap and
