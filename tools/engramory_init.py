@@ -7,12 +7,14 @@ Usage:
     python tools/engramory_init.py codex          --project-root <repo> --install-skill
     python tools/engramory_init.py codex          --project-root <repo> --install-hooks --mode explicit
     python tools/engramory_init.py openclaw                              --install-skill
+    python tools/engramory_init.py dsh                                   --install-skill
     python tools/engramory_init.py <host>-reader   --project-root <cfg>  --memory-root <existing store>
 
-For a WRITE host (codex, openclaw) the command creates a local memory store, adds a marked
+For a WRITE host (codex, openclaw, dsh) the command creates a local memory store, adds a marked
 Engramory block to the host's always-loaded AGENTS.md, optionally installs the Engramory skill
-under .agents/skills/engramory (both hosts auto-discover skills there), and adds the memory
-store to .gitignore when the store lives inside the project/workspace.
+where that host's loader actually scans (`.agents/skills/engramory` for Codex and OpenClaw,
+`<DSH_HOME>/skills/engramory` for dsh), and adds the memory store to .gitignore when the store
+lives inside the project/workspace.
 
 For the Codex writer, `--install-hooks` also installs project-scoped
 SessionStart/UserPromptSubmit/PreCompact assistance under `.codex/`. The hooks
@@ -21,7 +23,7 @@ Engramory sync. `--mode explicit` is the default; `assisted` adds proactive
 milestone guidance.
 
 A READ-ONLY reader host `<host>-reader` (codex-reader, claude-reader, cursor-reader, kiro-reader,
-cline-reader, windsurf-reader, openclaw-reader, hermes-reader) instead wires that host to *recall*
+cline-reader, windsurf-reader, openclaw-reader, hermes-reader, dsh-reader) instead wires that host to *recall*
 from a store ANOTHER agent (typically Claude Code) owns and writes — one writer, N readers. It
 creates no store, touches no .gitignore, installs no write tools, and uses a recall-only snippet
 (no write protocol). `--memory-root` MUST point at an existing store (e.g. Claude Code's memory
@@ -30,7 +32,7 @@ dir). It injects into the host's own always-loaded rules file (AGENTS.md / CLAUD
 codex-reader wiring is dogfooded here — the others are built from each host's documented
 rules-file format but printed with an "unverified" note. See adapters/reader/README.md.
 
-Defaults: --project-root '.', except openclaw (~/.openclaw/workspace).
+Defaults: --project-root '.', except openclaw (~/.openclaw/workspace) and dsh (~/.dsh).
 """
 import argparse
 import base64
@@ -220,8 +222,26 @@ def _ensure_memory_store(source_root, memory_root):
     return "created MEMORY.md from template"
 
 
-def _copy_skill(source_root, project_root, force):
-    skill_root = project_root / ".agents" / "skills" / "engramory"
+# Where each host's skill loader actually looks. Codex and OpenClaw follow the Agent
+# Skills convention (`.agents/skills`); dsh's filesystem provider scans `<root>/skills`
+# instead — project `.dsh/skills`, project `.agents/skills`, then user `<DSH_HOME>/skills`
+# and `<AGENTS_HOME>/skills`. Getting this wrong fails SILENTLY: the copy lands and the
+# host simply never lists the skill, which is exactly what a dsh dogfood run showed
+# before this was parameterised.
+DEFAULT_SKILL_DIR = ".agents/skills"
+
+
+def _skill_dir(cfg):
+    return cfg.get("skill_dir", DEFAULT_SKILL_DIR)
+
+
+def _skill_root(project_root, cfg):
+    return project_root.joinpath(*_skill_dir(cfg).split("/"), "engramory")
+
+
+def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
+    rel = f"{skill_dir}/engramory"
+    skill_root = project_root.joinpath(*skill_dir.split("/"), "engramory")
     # Re-check containment immediately before the rmtree/copytree, not just in the
     # run's preflight: with --force this DELETES a tree, and a parent swapped for a
     # symlink in between would aim that delete outside the project. Best-effort
@@ -229,7 +249,7 @@ def _copy_skill(source_root, project_root, force):
     _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
     if skill_root.exists():
         if not force:
-            return "kept existing .agents/skills/engramory (use --force to replace)"
+            return f"kept existing {rel} (use --force to replace)"
         shutil.rmtree(skill_root)
 
     skill_root.mkdir(parents=True, exist_ok=True)
@@ -244,7 +264,7 @@ def _copy_skill(source_root, project_root, force):
             skill_root / dirname,
             ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
         )
-    return "installed .agents/skills/engramory"
+    return f"installed {rel}"
 
 
 def _codex_note(
@@ -306,6 +326,32 @@ def _openclaw_note(index_display, check_display, protocol_display,
   guidance: it exists because agents reliably get this wrong unprompted."""
 
 
+def _dsh_note(index_display, check_display, protocol_display,
+              setup_display="AGENT-SETUP.md", **_kwargs):
+    return f"""DeepSeek Harness (dsh) specifics:
+
+- This block lives in `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`), which dsh's
+  `agent-instructions` plugin loads at the start of every session — its candidate list is
+  the hardcoded `["AGENTS.md", "CLAUDE.md"]`, so nothing needs registering.
+- Do NOT copy this block into a sibling `CLAUDE.md`. dsh collapses same-directory
+  candidates only while they stay byte-identical after trimming; once the two drift, BOTH
+  load and the discipline is injected twice.
+- The loader enforces a `maxBytes` prompt budget (65536 in the shipped web profile), and
+  over budget it drops broader files first, then truncates the most specific one — an
+  oversized project `AGENTS.md` can silently cut this block. Keep the memory index inside
+  its own cap and this block short.
+- After editing `{index_display}`, run `python {check_display} {index_display}` and compact
+  immediately if it reports `OVER`. dsh's deterministic deny path is `ctx.tools.guard()`
+  inside a *TypeScript* plugin, NOT Engramory's Python shell hook — so the cap here is
+  rules + this check unless that plugin is written (see adapters/dsh/README.md).
+- Full protocol reference: `{protocol_display}`. dsh's filesystem skill provider scans
+  `$DSH_HOME/skills` among its roots, so an install there is discovered and offered by
+  relevance; you can also just open that path when you want the protocol in full.
+- Asked to check, repair, or upgrade this Engramory install itself? Follow
+  `{setup_display}` — it is the procedure for that, and it is not optional
+  guidance: it exists because agents reliably get this wrong unprompted."""
+
+
 def _reader_note(index_display, check_display, protocol_display,
                  setup_display="AGENT-SETUP.md", **_kwargs):
     # Read-only reader (host-agnostic): it never writes, so there is no engramory_check
@@ -321,9 +367,10 @@ def _reader_note(index_display, check_display, protocol_display,
   READER here: it will tell you to confirm ownership before anything else."""
 
 
-# Per-host wiring. Both Codex and OpenClaw use an always-loaded AGENTS.md and auto-discover
-# Agent Skills from .agents/skills, so the only differences are the block markers, the
-# default root, and the host-specific note appended under the shared rules snippet.
+# Per-host wiring. All three writers use an always-loaded AGENTS.md, so the only differences
+# are the block markers, the default root, and the host-specific note appended under the
+# shared rules snippet — plus `skill_dir` where the host scans somewhere other than the
+# Agent Skills default (see DEFAULT_SKILL_DIR).
 HOST_CONFIG = {
     "codex": {
         "label": "Codex",
@@ -338,6 +385,16 @@ HOST_CONFIG = {
         "end": "<!-- END ENGRAMORY OPENCLAW -->",
         "default_root": "~/.openclaw/workspace",
         "note": _openclaw_note,
+    },
+    "dsh": {
+        "label": "DeepSeek Harness",
+        "begin": "<!-- BEGIN ENGRAMORY DSH -->",
+        "end": "<!-- END ENGRAMORY DSH -->",
+        # $DSH_HOME: both the user-global instruction scope dsh reads every session
+        # (AGENTS.md) and, under `skills/`, its rank-400 user skill root.
+        "default_root": "~/.dsh",
+        "skill_dir": "skills",
+        "note": _dsh_note,
     },
 }
 
@@ -357,6 +414,7 @@ READER_HOSTS = {
     "claude":   {"label": "Claude Code", "rules_file": "CLAUDE.md",      "tested": False},
     "openclaw": {"label": "OpenClaw",    "rules_file": "AGENTS.md",      "tested": False},
     "hermes":   {"label": "Hermes",      "rules_file": "AGENTS.md",      "tested": False},
+    "dsh":      {"label": "DeepSeek Harness", "rules_file": "AGENTS.md", "tested": True},
     "cline":    {"label": "Cline",       "rules_file": ".clinerules",    "tested": False},
     "windsurf": {"label": "Windsurf",    "rules_file": ".windsurfrules", "tested": False},
     "cursor":   {"label": "Cursor",      "rules_file": ".cursor/rules/engramory-recall.mdc",
@@ -403,9 +461,10 @@ def _render_block(
     snippet = snippet.replace("<MEMORY_ROOT>", memory_display)
 
     if install_skill:
-        protocol_display = ".agents/skills/engramory/SKILL.md"
-        check_display = ".agents/skills/engramory/tools/engramory_check.py"
-        setup_display = ".agents/skills/engramory/AGENT-SETUP.md"
+        skill_rel = f"{_skill_dir(cfg)}/engramory"
+        protocol_display = f"{skill_rel}/SKILL.md"
+        check_display = f"{skill_rel}/tools/engramory_check.py"
+        setup_display = f"{skill_rel}/AGENT-SETUP.md"
     else:
         protocol_display = _display_path(source_root / "SKILL.md", project_root)
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
@@ -818,7 +877,7 @@ def init_host(args, host):
     # DELETE the store (--force), or mistake a store-only dir for an installed skill
     # (without it). Refuse the overlap up front, before any side effect.
     if args.install_skill:
-        skill_root = project_root / ".agents" / "skills" / "engramory"
+        skill_root = _skill_root(project_root, cfg)
         if _same_or_inside(memory_root, skill_root) or _same_or_inside(skill_root, memory_root):
             raise SystemExit(
                 f"--memory-root ({memory_root}) overlaps the skill install dir "
@@ -873,7 +932,7 @@ def init_host(args, host):
     if creates_store and _same_or_inside(memory_root, project_root):
         _refuse_symlink_escape(project_root / ".gitignore", project_root, ".gitignore")
     if args.install_skill:
-        _refuse_symlink_escape(project_root / ".agents" / "skills" / "engramory",
+        _refuse_symlink_escape(_skill_root(project_root, cfg),
                                project_root, "the skill install dir")
     existing_hooks = None
     if args.install_hooks:
@@ -913,7 +972,7 @@ def init_host(args, host):
         # Nothing is rolled back: several targets are user-owned files that this
         # installer must not delete on the way out. Say exactly what did land, so the
         # user is never left guessing which half of an install they have.
-        _report_partial(results, args)
+        _report_partial(results, args, _skill_dir(cfg))
         raise
 
     print(f"Engramory {cfg['label']} init complete")
@@ -930,7 +989,7 @@ def init_host(args, host):
     return 0
 
 
-def _report_partial(results, args):
+def _report_partial(results, args, skill_dir=DEFAULT_SKILL_DIR):
     """Report a half-finished install honestly. Re-running is NOT unconditionally safe.
 
     Each step is individually recoverable, but two of them keep whatever a failed
@@ -953,7 +1012,7 @@ def _report_partial(results, args):
     print("  - MEMORY.md: a truncated index is KEPT ('kept existing MEMORY.md') on the "
           "next run — open it, and delete it if it is incomplete", file=out)
     if args.install_skill:
-        print("  - .agents/skills/engramory: a half-copied dir is KEPT without --force "
+        print(f"  - {skill_dir}/engramory: a half-copied dir is KEPT without --force "
               "— re-run with --force to replace it", file=out)
 
 
@@ -969,7 +1028,7 @@ def _run_install_steps(args, cfg, source_root, project_root, memory_root,
 
     skill_result = "not requested"
     if args.install_skill:
-        skill_result = _copy_skill(source_root, project_root, args.force)
+        skill_result = _copy_skill(source_root, project_root, args.force, _skill_dir(cfg))
     results.append(("skill", skill_result))
 
     hook_result = "not requested"
@@ -1009,11 +1068,12 @@ def _run_install_steps(args, cfg, source_root, project_root, memory_root,
 def build_parser():
     parser = argparse.ArgumentParser(description="Bootstrap Engramory for an agent host.")
     parser.add_argument("host", nargs="?", default="codex", choices=tuple(HOST_CONFIG),
-                        help="host to initialize: write hosts (codex, openclaw) or a read-only "
+                        help="host to initialize: write hosts (codex, openclaw, dsh) or a read-only "
                              "reader host '<host>-reader' (codex-reader, claude-reader, "
                              "cursor-reader, kiro-reader, cline-reader, etc.)")
     parser.add_argument("--project-root", default=None,
-                        help="project/workspace root (default: '.'; openclaw defaults to ~/.openclaw/workspace)")
+                        help="project/workspace root (default: '.'; openclaw defaults to "
+                             "~/.openclaw/workspace, dsh to ~/.dsh)")
     parser.add_argument(
         "--memory-root",
         default=".engramory-memory",
@@ -1021,7 +1081,9 @@ def build_parser():
              "read-only '<host>-reader' this MUST be an EXISTING store (it is not created), "
              "e.g. Claude Code's memory dir ~/.claude/projects/<project>/memory",
     )
-    parser.add_argument("--install-skill", action="store_true", help="copy Engramory into .agents/skills/engramory")
+    parser.add_argument("--install-skill", action="store_true",
+                        help="copy Engramory into the host's skill root (.agents/skills/engramory; "
+                             "dsh: <DSH_HOME>/skills/engramory)")
     parser.add_argument(
         "--install-hooks",
         action="store_true",

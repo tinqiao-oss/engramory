@@ -6,6 +6,26 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **DeepSeek Harness (dsh) adapter.** dsh opened as a developer preview on 2026-08-13 with
+  the two rails this protocol needs and no memory system of its own: `agent-instructions`
+  loads a hardcoded `["AGENTS.md", "CLAUDE.md"]` candidate list every session, and
+  `dsh-skill-filesystem` scans five skill roots. `engramory_init.py dsh` wires both, and
+  `dsh-reader` joins the read-only hosts.
+
+  Dogfooding it turned up what reading alone had missed: dsh's *user* skill root is
+  `<DSH_HOME>/skills`, not `.agents/skills` beneath it — and installing into the wrong one
+  fails **silently**, because the copy lands and the host simply never lists the skill. The
+  installer's skill path is no longer hardcoded (`skill_dir`, per host). An earlier claim
+  that dsh "cannot auto-discover skills" came from a package-name search that missed
+  `dsh-skill-filesystem`; it was wrong, and it is gone.
+
+  Verified against `@deepseek-ai/dsh@0.1.0-rc.6` by pointing `DEEPSEEK_BASE_URL` at a local
+  recording endpoint and reading the payload dsh actually sent — no provider key involved:
+  the block arrives as a `<system-reminder>` sourced `Instructions from: $DSH_HOME/AGENTS.md`,
+  a project-level `AGENTS.md` loads after it, and `engramory` appears in the session's
+  advertised skill catalog. Whether a given DeepSeek model *follows* the discipline is a
+  separate question and is not claimed here. (adapters/dsh/README.md)
+
 - **`scope: global | repo`, optional.** `type` said what kind of memory a note is;
   nothing said how far it reaches. The two are orthogonal, and conflating them is what
   makes `feedback`/`project` the most misfiled pair in the protocol — with asymmetric
