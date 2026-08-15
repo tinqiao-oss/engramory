@@ -31,6 +31,9 @@ Memories are raw material, but this is **not a stockpile for some downstream pur
   an article has to fill in the surrounding shape. If one kind of file cannot be renamed,
   say which kind can, and why.
 - **Cite the source memories at the end** so a claim can be traced back.
+- **The filename must name the subject.** There is no index here — the directory listing
+  is how both you and the agent find things, so `packaging/windows-packaging-and-delivery.md`
+  works and `notes-3.md` does not.
 
 ## When to write
 
@@ -44,8 +47,13 @@ agent needs; they do not belong here.
 ## For the agent: when to propose an article
 
 Propose — **never write unasked**. Angle and depth are opinionated choices and they belong
-to the user. Check the topic list below first: something already covered should be
-extended, not duplicated.
+to the user.
+
+**First, list this directory.** There is deliberately no topic list to consult: a
+hand-maintained one drifts, and a stale list is worse than none because it makes you
+propose things that already exist. The filesystem is the record. If a filename looks
+adjacent to your subject, open that article's headings before deciding — extending it is
+usually the right move.
 
 **Test:** three months from now, facing the same class of problem, would someone have to
 work it out again from scratch, or would a quick look be enough? If they would have to
@@ -61,12 +69,11 @@ redo the work, it is worth an article.
 **Do not propose** when: it only holds for this project right now (that is a memory); the
 official documentation answers it directly; or the list below already covers it.
 
-## Topics
+## Finding things
 
-<!-- One line per article. Keep it current: a stale list makes the agent propose
-     duplicates. -->
-
-- [[example-topic]] — one line on what it covers
+There is no index. Browse the directory, or use search — filenames name their subjects,
+which is the whole reason that rule exists. Obsidian's file tree, backlinks and graph give
+you more than a list would, and none of it can go stale.
 
 ## If you open this in Obsidian
 

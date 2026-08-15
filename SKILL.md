@@ -414,9 +414,14 @@ them, you do not need to know their titles.
 | indexed in `MEMORY.md` | yes, one line each | **no — a single pointer to the directory** |
 
 **Your role is to propose, never to write unasked.** Choosing the angle and the depth is
-an opinionated act that belongs to the user. Before proposing, check the knowledge base's
-own README for what it already covers — an existing article should be extended, not
-duplicated.
+an opinionated act that belongs to the user.
+
+**Before proposing, list the knowledge directory.** The filesystem is the only current
+record of what exists; a hand-maintained topic list drifts the moment someone forgets to
+update it, and a stale list makes you propose duplicates. If a filename looks adjacent to
+your subject, open that article's headings before deciding — extending an existing article
+is usually right, and a second article on the same subject is the failure mode. (This is
+also why filenames have to name their subject: they are what you navigate by.)
 
 **Test:** *three months from now, facing the same class of problem, would someone have to
 work it out again from scratch, or would a quick look be enough?* If they would have to
