@@ -1,7 +1,7 @@
 {
   "name": "dsh-engramory",
-  "version": "0.1.1",
-  "description": "Curated file-based long-term memory for DeepSeek Harness — human-readable markdown notes, one git-versioned store shared across hosts, and a deterministic index cap enforced by ctx.tools.guard()",
+  "version": "0.2.0",
+  "description": "Curated file-based long-term memory for DeepSeek Harness — human-readable markdown notes, one plain-file store shared across hosts (git-ignored when it lives inside a project repo), and a deterministic index cap enforced by ctx.tools.guard()",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

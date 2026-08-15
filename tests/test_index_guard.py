@@ -325,6 +325,59 @@ def test_deny_reason_names_only_growing_dimension(tmp_path):
     assert "KB >" in r and "lines > 200" not in r
 
 
+def _run_raw_utf8(payload_obj, env=None):
+    # Feed the hook RAW UTF-8 bytes, exactly how Claude Code pipes the payload.
+    # The text-mode helper above would have the PARENT encode with the locale
+    # codepage, hiding the regression this exists to pin. PYTHONUTF8/PYTHONIOENCODING
+    # are stripped so the child really runs in legacy-locale mode on Windows.
+    e = dict(os.environ)
+    e.pop("PYTHONUTF8", None)
+    e.pop("PYTHONIOENCODING", None)
+    if env:
+        e.update(env)
+    p = subprocess.run(
+        [sys.executable, HOOK],
+        input=json.dumps(payload_obj, ensure_ascii=False).encode("utf-8"),
+        capture_output=True, env=e)
+    out = None
+    if p.stdout.strip():
+        try:
+            out = json.loads(p.stdout.decode("utf-8"))["hookSpecificOutput"]
+        except Exception:
+            out = {"_unparseable": p.stdout.decode("utf-8", "replace")}
+    return p.returncode, out
+
+
+def test_utf8_stdin_cjk_write_sizes_by_true_bytes(tmp_path):
+    # 150 lines of CJK, ~22.6 KB real UTF-8: over the 20 KB warn line, under the
+    # 25 KB hard cap -> must be a context-only nudge. Before the raw-bytes fix the
+    # locale decode of this payload either CRASHED the guard (cp936: silent, cap
+    # off) or inflated the predicted size past the hard cap (cp1252: false deny).
+    idx = tmp_path / "MEMORY.md"
+    _write(idx, lines=100)
+    content = "\n".join("- " + "记忆索引指针条目" * 6 + f" {i:03d}" for i in range(150))
+    real = len(content.encode("utf-8"))
+    assert 20480 < real <= 25600, f"test premise broke: {real} bytes"
+    rc, out = _run_raw_utf8(
+        {"tool_name": "Write", "tool_input": {"file_path": str(idx), "content": content}})
+    assert rc == 0
+    assert _decision(out) != "deny", f"false deny of a compliant CJK write: {out}"
+    assert _nudges(out), f"expected the warn nudge, got: {out}"
+
+
+def test_utf8_stdin_cjk_write_over_cap_denies(tmp_path):
+    # 170 lines of CJK, ~27 KB real UTF-8, growing a small index: must DENY.
+    # Before the fix, on cp936 the decode crash fell open and this sailed through.
+    idx = tmp_path / "MEMORY.md"
+    _write(idx, lines=100)
+    content = "\n".join("- " + "记忆索引指针条目压缩策展" * 4 + f" {i:03d}" for i in range(170))
+    assert len(content.encode("utf-8")) > 25600
+    rc, out = _run_raw_utf8(
+        {"tool_name": "Write", "tool_input": {"file_path": str(idx), "content": content}})
+    assert rc == 0
+    assert _decision(out) == "deny", f"CJK payload bypassed the hard cap: {out}"
+
+
 # --- direct runner (no pytest) ---
 
 def _main():

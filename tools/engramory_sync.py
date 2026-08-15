@@ -209,9 +209,24 @@ def _load_state(root):
 
 
 def _dropped_count(state):
-    """Sessions evicted by the cap while still unsynced. Never silently reset."""
+    """Sessions evicted by the cap while still unsynced. Never silently reset:
+    a lossily-typed but recoverable value (an int-valued string or float, from a
+    hand edit or a foreign JSON writer) is coerced back, not zeroed — zeroing hid
+    exactly the drops this counter exists to report, and the next mutation then
+    persisted the zero. Only unrecoverable garbage falls back to 0."""
     value = state.get("dropped_unsynced_sessions")
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if isinstance(value, bool):
+        return 0
+    # Floats past 2**53 are no longer exact integers (1e308 "is_integer()" but
+    # round-trips to a 309-digit approximation) — recoverable means EXACT.
+    if isinstance(value, float) and value.is_integer() and 0 <= value <= 2 ** 53:
+        value = int(value)
+    elif isinstance(value, str):
+        try:
+            value = int(value.strip())
+        except ValueError:
+            return 0
+    if not isinstance(value, int) or value < 0:
         return 0
     return value
 

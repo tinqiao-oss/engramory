@@ -984,6 +984,82 @@ def test_doctor_duplicate_frontmatter_key_is_issue(tmp_path):
     assert rc == 1 and "duplicate frontmatter key 'type'" in out
 
 
+def test_init_dsh_honours_dsh_home_env(tmp_path):
+    # $DSH_HOME is dsh's own relocation contract. Hardcoding ~/.dsh wrote the
+    # config to a directory dsh never reads — installed and silently inert.
+    home = tmp_path / "custom-dsh-home"
+    rc, out = _run(INIT, "dsh", env={"DSH_HOME": str(home)})
+    assert rc == 0, out
+    assert (home / "AGENTS.md").is_file(), out
+    assert (home / ".engramory-memory" / "MEMORY.md").is_file()
+
+
+def test_init_dsh_project_install_uses_scanned_skill_root(tmp_path):
+    # A project's skill roots are `<project>/.dsh/skills` (and `.agents/skills`),
+    # NOT `<project>/skills` — installing there succeeded and was never discovered.
+    rc, out = _run(INIT, "dsh", "--project-root", str(tmp_path), "--install-skill",
+                   env={"DSH_HOME": str(tmp_path / "not-here")})
+    assert rc == 0, out
+    assert (tmp_path / ".dsh" / "skills" / "engramory" / "SKILL.md").is_file(), out
+    assert not (tmp_path / "skills").exists()
+    # The rendered block must point at the scanned location, not the old one.
+    block = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert ".dsh/skills/engramory" in block
+
+
+def test_init_dsh_global_install_renders_absolute_paths(tmp_path):
+    # dsh file tools resolve relative paths against the SESSION cwd; the user-global
+    # AGENTS.md is loaded from any cwd, so a relative store path pointed into
+    # whatever repo the session ran in. The global block must carry absolute paths.
+    home = tmp_path / "dsh-home"
+    rc, out = _run(INIT, "dsh", env={"DSH_HOME": str(home)})
+    assert rc == 0, out
+    block = (home / "AGENTS.md").read_text(encoding="utf-8")
+    expect = (home / ".engramory-memory").resolve().as_posix()
+    assert expect in block, f"expected absolute store path {expect} in block"
+    assert "`.engramory-memory/MEMORY.md`" not in block
+
+
+def test_doctor_reports_unenumerable_directory(tmp_path):
+    # os.walk swallows listing errors by default: a directory the doctor cannot list
+    # silently vanished from the note graph — every note inside it invisible to every
+    # check — and the store reported CLEAN. POSIX-only: chmod 0 on a directory is a
+    # no-op on Windows (the check runs on Linux/macOS CI).
+    if os.name == "nt":
+        return
+    store = tmp_path / "store"
+    locked = store / "locked"
+    locked.mkdir(parents=True)
+    _note(locked / "hidden.md", "hidden")
+    (store / "MEMORY.md").write_text("# Index\n", encoding="utf-8")
+    os.chmod(locked, 0o000)
+    try:
+        rc, out = _run(DOCTOR, str(store))
+    finally:
+        os.chmod(locked, 0o700)
+    assert rc == 1 and "cannot enumerate directory" in out
+
+
+def test_reader_refuses_symlinked_index_escaping_store(tmp_path):
+    # `is_file()` follows symlinks, so MEMORY.md -> /outside/file passed the
+    # existence check and the generated read-only rules then directed every session
+    # to read an arbitrary external file. Symlink creation needs privilege on
+    # Windows — skip there (the check runs on Linux/macOS CI).
+    outside = tmp_path / "outside.md"
+    outside.write_text("# secret\n", encoding="utf-8")
+    store = tmp_path / "store"
+    store.mkdir()
+    try:
+        os.symlink(str(outside), str(store / "MEMORY.md"))
+    except (OSError, NotImplementedError, AttributeError):
+        return
+    host = tmp_path / "host"
+    rc, out = _run(INIT, "codex-reader", "--project-root", str(host),
+                   "--memory-root", str(store))
+    assert rc != 0 and "resolves outside" in out
+    assert not (host / "AGENTS.md").exists()
+
+
 def test_init_block_drops_the_human_install_header(tmp_path):
     # The snippet opens with instructions for the PERSON pasting it ("Paste this into your
     # host's always-loaded rules (Claude Code: `CLAUDE.md`)"). Rendering that into the block

@@ -19,6 +19,7 @@ the host's **always-loaded** instructions:
 | Claude Code | `CLAUDE.md` / `~/.claude/CLAUDE.md` | yes (Agent Skills) |
 | Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
 | OpenClaw | `AGENTS.md` (in `~/.openclaw/workspace`) | yes (auto-discovers `.agents/skills`) |
+| DeepSeek Harness (dsh) | `AGENTS.md` (`$DSH_HOME/AGENTS.md` or project `AGENTS.md`) | yes (skill roots: `$DSH_HOME/skills`, project `.dsh/skills` / `.agents/skills`) |
 | Kiro | `.kiro/steering/*.md` with `inclusion: always` (or `AGENTS.md`) | yes (`SKILL.md` as an `inclusion: manual`/`auto` steering file, or a Kiro skill) |
 | Hermes (Nous) | `AGENTS.md` / `.hermes.md` (rules) — **not** `SOUL.md` (persona slot) | yes (skills system) |
 | Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
@@ -226,18 +227,21 @@ hand-fix hundreds of issues blind — triage:
 - [ ] size cap wired at the strongest rung the host supports (hook → check → discipline)
 - [ ] `engramory_doctor.py` runnable as an occasional backstop
 
-Init helpers (Codex, OpenClaw) — wire `AGENTS.md` + the skill + a separate store in one go:
+Init helpers (Codex, OpenClaw, dsh) — wire `AGENTS.md` + the skill + a separate store in one go:
 
 ```sh
 python tools/engramory_init.py codex    --project-root <repo> --install-skill
 python tools/engramory_init.py codex    --project-root <repo> --install-skill --install-hooks --mode explicit
 python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
+python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
 ```
 
-See [adapters/codex/README.md](adapters/codex/README.md) and
-[adapters/openclaw/README.md](adapters/openclaw/README.md) for the exact behavior and
-limitations (both enforce the cap by rules + `engramory_check.py`, not a deterministic
-hook).
+See [adapters/codex/README.md](adapters/codex/README.md),
+[adapters/openclaw/README.md](adapters/openclaw/README.md) and
+[adapters/dsh/README.md](adapters/dsh/README.md) for the exact behavior and
+limitations (all three enforce the cap by rules + `engramory_check.py`, not a
+deterministic hook; dsh additionally has a guard plugin, `dsh-engramory`, that is not
+yet installable upstream).
 
 Kiro has no init helper yet — wire it manually (one always-on steering file + a
 non-steering `.engramory-memory/` store) per

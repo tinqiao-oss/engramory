@@ -402,3 +402,38 @@ def test_install_output_states_hooks_are_inactive_until_trusted(tmp_path):
     assert rc == 0, out
     assert "/hooks" in out
     assert "NOT active" in out
+
+
+# --- direct runner (no pytest) ---
+# CI runs the suites as plain zero-dependency scripts; without this block the file
+# exits 0 silently having run NOTHING (that near-miss shipped: the suite existed
+# for two releases while CI never executed a single test in it).
+
+def _main():
+    import pathlib
+    import shutil
+    import tempfile
+
+    tests = [v for k, v in sorted(globals().items())
+             if k.startswith("test_") and callable(v)]
+    print(f"init: {INIT}\nrunning {len(tests)} tests\n")
+    failed = 0
+    for fn in tests:
+        d = pathlib.Path(tempfile.mkdtemp(prefix="engramory-ci-"))
+        try:
+            fn(d)
+            print(f"  PASS  {fn.__name__}")
+        except AssertionError as ex:
+            failed += 1
+            print(f"  FAIL  {fn.__name__}: {ex}")
+        except Exception as ex:  # noqa
+            failed += 1
+            print(f"  ERROR {fn.__name__}: {type(ex).__name__}: {ex}")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    print("\n" + ("ALL PASS" if failed == 0 else f"{failed} FAILED"))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main())

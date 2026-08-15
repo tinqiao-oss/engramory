@@ -804,6 +804,29 @@ class CodexHookContractTests(unittest.TestCase):
             state["sessions"]["session-known"].get("last_session_start_source"),
             "resume")
 
+    def test_corrupted_dropped_counter_is_recovered_not_zeroed(self):
+        # `_dropped_count` is documented "Never silently reset" — but an int-valued
+        # STRING (a hand edit, or a foreign JSON writer) was sanitized to 0 and the
+        # zero then persisted, hiding exactly the dropped-session count the field
+        # exists to report.
+        self._run(
+            [HOOK, "--memory-root", self.memory_root, "--sync-tool", SYNC,
+             "--mode", "explicit"],
+            input_text=json.dumps(self._base_event(
+                "SessionStart", "session-a", self.project, source="startup")),
+        )
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        state["dropped_unsynced_sessions"] = "7"
+        self.state_path.write_text(json.dumps(state), encoding="utf-8")
+        self._run(
+            [HOOK, "--memory-root", self.memory_root, "--sync-tool", SYNC,
+             "--mode", "explicit"],
+            input_text=json.dumps(self._base_event(
+                "SessionStart", "session-b", self.project, source="startup")),
+        )
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(state.get("dropped_unsynced_sessions"), 7)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -84,17 +84,101 @@ test('a custom index name is honoured', () => {
   assert.equal(guard(write(`/s/${INDEX}`, big(300))), undefined)
 })
 
-test('a partial write is refused only when the index is ALREADY over', () => {
+test('a shrinking whole-file write passes even while the index is still over', () => {
+  // The documented compaction path is incremental: 210 -> 205 -> 198. Refusing the
+  // 205 rewrite because "205 > 200" wedged an over-cap store completely.
   const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
   const path = join(dir, INDEX)
-  const edit = { name: 'edit', arguments: { file_path: path, old_str: 'a', new_str: 'b' } }
   const { guard } = mount()
+  writeFileSync(path, big(210), 'utf8')
+  assert.equal(guard(write(path, big(205))), undefined, 'shrinking must pass')
+  assert.match(guard(write(path, big(215))), /215 lines > 200/, 'growing must be refused')
+})
 
-  writeFileSync(path, big(10), 'utf8')
-  assert.equal(guard(edit), undefined, 'a healthy index must stay editable')
-
+test('reading an over-cap index is never refused', () => {
+  // Gating every tool that named the index refused `read` the moment the index went
+  // over — recall died exactly when compaction was needed.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
+  const path = join(dir, INDEX)
   writeFileSync(path, big(300), 'utf8')
-  assert.match(guard(edit), /already over/, 'growing an over-cap index must be refused')
+  const { guard } = mount()
+  assert.equal(guard({ name: 'read', arguments: { file_path: path } }), undefined)
+  assert.equal(guard({ name: 'str_replace_editor', arguments: { command: 'view', path } }), undefined)
+})
+
+test('a simulable edit is judged by its RESULT: shrink passes, growth is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  writeFileSync(path, `HEAD\n${big(220)}`, 'utf8')
+  const shrink = {
+    name: 'edit',
+    arguments: { file_path: path, old_str: `HEAD\n${big(220)}`, new_str: big(150) },
+  }
+  assert.equal(guard(shrink), undefined, 'a compacting edit must pass while over')
+  const grow = {
+    name: 'edit',
+    arguments: { file_path: path, old_str: 'HEAD', new_str: big(30) },
+  }
+  assert.match(guard(grow), /lines > 200/, 'an edit growing an over-cap index must be refused')
+})
+
+test('an unsimulable partial on an over-cap index is refused, naming the open door', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  writeFileSync(path, big(10), 'utf8')
+  const insert = {
+    name: 'str_replace_editor',
+    arguments: { command: 'insert', path, insert_line: 1, new_str: 'x' },
+  }
+  assert.equal(guard(insert), undefined, 'a healthy index must stay editable')
+  writeFileSync(path, big(300), 'utf8')
+  const reason = guard(insert)
+  assert.match(reason, /already over/)
+  assert.match(reason, /whole-file write/, 'the refusal must say how to compact')
+})
+
+test('str_replace_editor create is measured like a whole-file write', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  const create = (text) => ({
+    name: 'str_replace_editor',
+    arguments: { command: 'create', path, file_text: text },
+  })
+  assert.match(guard(create(big(300))), /300 lines > 200/)
+  writeFileSync(path, big(300), 'utf8')
+  assert.equal(guard(create(big(150))), undefined, 'a shrinking create must pass')
+})
+
+test('the index name matches case-insensitively', () => {
+  // On the case-insensitive filesystems most stores live on (Windows/macOS),
+  // `memory.md` IS MEMORY.md; an exact compare let that spelling through.
+  const { guard } = mount()
+  assert.match(guard(write('/s/memory.md', big(300))), /300 lines/)
+  assert.match(guard(write('/s/Memory.MD', big(300))), /300 lines/)
+})
+
+test('an empty or non-string indexName falls back instead of disabling the guard', () => {
+  assert.match(mount({ indexName: '' }).guard(write(`/s/${INDEX}`, big(300))), /300 lines/)
+  assert.match(mount({ indexName: 42 }).guard(write(`/s/${INDEX}`, big(300))), /300 lines/)
+})
+
+test('a sub-1 positive cap falls back rather than flooring to zero', () => {
+  const { guard } = mount({ maxLines: 0.5 })
+  assert.equal(guard(write(`/s/${INDEX}`, big(199))), undefined)
+})
+
+test('a non-UTF-8 current file cannot fake a shrink', () => {
+  // Current size must come from RAW bytes: decoding first turned every bad byte
+  // into a 3-byte U+FFFD, inflating the current size ~3x — a genuinely growing
+  // over-cap write then compared as a "shrink" and passed.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dsh-'))
+  const path = join(dir, INDEX)
+  writeFileSync(path, Buffer.alloc(20_000, 0xff))
+  const { guard } = mount()
+  assert.match(guard(write(path, 'x'.repeat(26_000))), /bytes > 25600/)
 })
 
 test('an unreadable or missing index never blocks work', () => {

@@ -26,7 +26,9 @@ in a `project` note.
   isn't a secret *value*; search the index and **update an existing note** rather
   than duplicate; otherwise write one atomic markdown file (one fact) with frontmatter
   `name` / `description` (a sharp one-line hook) / `type`
-  (`user | feedback | project | reference`) / `created` + `updated` (`YYYY-MM-DD`). A
+  (`user | feedback | project | reference`) / `created` + `updated` (`YYYY-MM-DD`) /
+  optional `scope` (`global | repo` — how far the fact reaches; label it only when
+  you know). A
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line in the body. Add one pointer line to `MEMORY.md`.
   **Delete** memories that turn out wrong.

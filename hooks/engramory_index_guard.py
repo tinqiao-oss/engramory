@@ -28,7 +28,11 @@ of the current text (honouring uniqueness / replace_all, skipping sub-edits whos
 old_string is absent or non-unique), because Claude Code applies MultiEdit
 sub-edits in order, each on the previous result.
 
-Fail-SAFE, not fail-open, for the things that matter. A NON-UTF-8 index is decoded
+Fail-SAFE, not fail-open, for the things that matter. The stdin payload is read as
+raw bytes and decoded as UTF-8 (the encoding Claude Code actually writes), never via
+the locale text stream — on a cp936/cp1252 Windows console the locale decode of a
+real CJK payload either crashed (guard silently off) or inflated the predicted byte
+size ~1.5x (false denies). A NON-UTF-8 index is decoded
 lossily for the line/edit math while its size is taken from the raw on-disk bytes, so
 a growing write still counts as growth and stays gated. A malformed numeric env var
 falls back to its default.
@@ -162,7 +166,18 @@ def _apply_edits(current, edits):
 
 
 def main():
-    data = json.loads(sys.stdin.read())
+    # Claude Code writes the hook payload as UTF-8 JSON. Reading it via the TEXT
+    # stream decoded with the locale codepage on Windows (cp936/cp1252/...): a real
+    # CJK payload either raised UnicodeDecodeError — falling open through the
+    # blanket handler, hard cap silently OFF — or "decoded" as mojibake whose
+    # re-encoded byte count ran ~1.5x the truth (false denies of compliant writes).
+    # Read the raw bytes and decode UTF-8 explicitly; on genuinely invalid UTF-8
+    # degrade lossily instead of falling open — JSON structure is ASCII, so the
+    # line/edit math survives. (Same pitfall, same fix as the Codex hook's
+    # _configure_console.)
+    buf = getattr(sys.stdin, "buffer", None)
+    raw_in = buf.read() if buf is not None else sys.stdin.read().encode("utf-8", "replace")
+    data = json.loads(raw_in.decode("utf-8", "replace"))
 
     tool = data.get("tool_name", "")
     ti = data.get("tool_input", {}) or {}

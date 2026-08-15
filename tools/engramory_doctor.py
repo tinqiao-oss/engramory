@@ -41,7 +41,8 @@ valid `type`
 feedback/project notes must carry `Why:` + `How to apply:`; an optional `scope`
 must be `global` or `repo` when present. Soft hygiene is INFO (exit 0): a `name`
 not matching the filename slug (tolerating `-`/`_`/case), a feedback/project note
-with no `scope` (its reach is then a guess — SKILL.md §2.1), and a note reachable
+with no `scope` (its reach is then unstated; unlabelled beats guessed — SKILL.md
+§2.1), and a note reachable
 only via a `[[wikilink]]` (not in the index, so it won't load at session start).
 Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
 
@@ -418,7 +419,12 @@ def main(argv):
     # nested "sub/templates/" is not wrongly skipped.
     notes = {}
     seen_ci = {}  # lower-cased slug -> first on-disk name, to catch case-only collisions
-    for dp, _, fs in os.walk(root):
+    # os.walk swallows enumeration errors by default: a directory the doctor cannot
+    # list (permissions, ACLs) silently vanished from the note graph, and every note
+    # inside it became invisible to every check — the store then reported CLEAN.
+    # Collect the errors and report each as an ISSUE instead.
+    walk_errors = []
+    for dp, _, fs in os.walk(root, onerror=walk_errors.append):
         rel = os.path.relpath(dp, root).replace("\\", "/")
         parts = rel.split("/")
         # `.lower()` to stay in lockstep with _excluded_dir — see the note there on why
@@ -455,6 +461,19 @@ def main(argv):
                 issues.append(f"duplicate note slug '{f}' in multiple dirs: "
                               f"{notes[f]} and {full} — slugs must be unique")
             notes[f] = full
+    for err in walk_errors:
+        where = getattr(err, "filename", None)
+        if where:
+            try:
+                # archive/ and templates/ sit outside the note graph on purpose —
+                # failing to descend into one is not a finding, and reporting it
+                # would turn a deliberately-ignored directory into a false ISSUE.
+                if _excluded_dir(os.path.realpath(where), root_abs):
+                    continue
+            except OSError:
+                pass
+        issues.append(f"cannot enumerate directory (its notes are invisible to every "
+                      f"check): {where or err}")
 
     referenced, indexed = set(), set()
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
@@ -628,8 +647,8 @@ def main(argv):
         shown = ", ".join(scopeless[:3])
         more = f", +{len(scopeless) - 3} more" if len(scopeless) > 3 else ""
         info.append(f"{len(scopeless)} feedback/project note(s) carry no 'scope' "
-                    f"({shown}{more}) — label each global or repo so a rule isn't "
-                    f"recalled where it was never true (SKILL.md §2.1)")
+                    f"({shown}{more}) — label the ones whose reach you KNOW (global "
+                    f"or repo); an unlabelled reach beats a guessed one (SKILL.md §2.1)")
 
     # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
     for base in sorted(notes):

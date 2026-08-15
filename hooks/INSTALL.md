@@ -117,11 +117,12 @@ body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The
 the hook to the host's pre-write deny hook or run `tools/engramory_check.py` after
 each index write. Full per-host wiring is in [PORTING.md](../PORTING.md).
 
-For **Codex** and **OpenClaw**, prefer the init helper instead of manually pasting:
+For **Codex**, **OpenClaw** and **dsh**, prefer the init helper instead of manually pasting:
 
 ```sh
 python tools/engramory_init.py codex    --project-root <repo> --install-skill
 python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
+python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
 ```
 
 Each creates the memory template, adds a marked block to `AGENTS.md`, optionally
@@ -139,9 +140,9 @@ python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
 ```
 
-Reader hosts: `codex-reader` (dogfooded) plus `claude-reader`, `cursor-reader`, `kiro-reader`,
-`cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired from documented
-formats, printed with an "unverified" note). See
+Reader hosts: `codex-reader` and `dsh-reader` (dogfooded) plus `claude-reader`, `cursor-reader`,
+`kiro-reader`, `cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired
+from documented formats, printed with an "unverified" note). See
 [adapters/reader/README.md](../adapters/reader/README.md).
 
 ## 6. Optional Codex lifecycle assistance

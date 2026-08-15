@@ -80,7 +80,8 @@ redo the work, it is worth an article.
 - You wrote a **long explanation in conversation**. That is already the draft
 
 **Do not propose** when: it only holds for this project right now (that is a memory); the
-official documentation answers it directly; or the list below already covers it.
+official documentation answers it directly; or the directory you just listed already
+covers the topic.
 
 ## Finding things
 

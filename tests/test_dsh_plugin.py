@@ -1,24 +1,42 @@
-"""Run the dsh plugin's own node:test suite from pytest.
+"""Run the dsh plugin's own node:test suite from pytest — or as a plain script.
 
 The plugin is JavaScript, so nothing else in this suite would exercise it — and its
 guard is the one place where Engramory's index cap is a hard refusal rather than a
-request. Wiring it in here means CI cannot quietly stop checking it.
+request. CI runs the suites as zero-dependency scripts, so pytest is optional here:
+importing it unconditionally kept this file OUT of CI entirely, which made the
+"pinned by node --test in CI" claim in the dsh READMEs false.
 """
 import os
 import shutil
 import subprocess
+import sys
 
-import pytest
+try:
+    import pytest
+except ImportError:  # script mode (CI) runs with zero dependencies
+    pytest = None
 
 PLUGIN = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "adapters", "dsh", "plugin")
 )
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+_SCRIPT_MODE = False  # set by _main(); pytest.skip() raises a BaseException the
+# script runner would misread as a crash, so script mode prints instead.
+
+
+def _skip(reason):
+    if pytest is not None and not _SCRIPT_MODE:
+        pytest.skip(reason)
+    print(f"  skip: {reason}")
+
+
 def test_dsh_plugin_guard_suite_passes():
+    node = shutil.which("node")
+    if node is None:
+        return _skip("node is not installed")
     proc = subprocess.run(
-        [shutil.which("node"), "--test"],
+        [node, "--test"],
         cwd=PLUGIN,
         capture_output=True,
         text=True,
@@ -60,3 +78,30 @@ def test_dsh_plugin_ships_a_bundle_manifest():
     assert patch == "./cordis.patch.yml"
     assert patch.lstrip("./") in pkg["files"]
     assert os.path.isfile(os.path.join(PLUGIN, patch.lstrip("./")))
+
+
+# --- direct runner (no pytest) ---
+
+def _main():
+    global _SCRIPT_MODE
+    _SCRIPT_MODE = True
+    tests = [v for k, v in sorted(globals().items())
+             if k.startswith("test_") and callable(v)]
+    print(f"plugin: {PLUGIN}\nrunning {len(tests)} tests\n")
+    failed = 0
+    for fn in tests:
+        try:
+            fn()
+            print(f"  PASS  {fn.__name__}")
+        except AssertionError as ex:
+            failed += 1
+            print(f"  FAIL  {fn.__name__}: {ex}")
+        except Exception as ex:  # noqa
+            failed += 1
+            print(f"  ERROR {fn.__name__}: {type(ex).__name__}: {ex}")
+    print("\n" + ("ALL PASS" if failed == 0 else f"{failed} FAILED"))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main())

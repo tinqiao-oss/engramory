@@ -29,7 +29,8 @@ creates no store, touches no .gitignore, installs no write tools, and uses a rec
 (no write protocol). `--memory-root` MUST point at an existing store (e.g. Claude Code's memory
 dir). It injects into the host's own always-loaded rules file (AGENTS.md / CLAUDE.md / .clinerules
 / Cursor .mdc / Kiro steering …); a marked block coexists with other Engramory blocks. Only the
-codex-reader wiring is dogfooded here — the others are built from each host's documented
+codex-reader and dsh-reader wirings are verified against their real hosts — the others are
+built from each host's documented
 rules-file format but printed with an "unverified" note. See adapters/reader/README.md.
 
 Defaults: --project-root '.', except openclaw (~/.openclaw/workspace) and dsh (~/.dsh).
@@ -231,12 +232,33 @@ def _ensure_memory_store(source_root, memory_root):
 DEFAULT_SKILL_DIR = ".agents/skills"
 
 
-def _skill_dir(cfg):
+def _host_home(cfg):
+    # The host's user-global root: the root_env override when set, else default_root.
+    env_var = cfg.get("root_env")
+    home = (os.environ.get(env_var, "").strip() if env_var else "") or cfg.get("default_root", ".")
+    return Path(home).expanduser()
+
+
+def _at_host_home(cfg, project_root):
+    # Is this install targeting the host's user-global home (vs a single project)?
+    try:
+        return Path(project_root).resolve() == _host_home(cfg).resolve()
+    except OSError:
+        return False
+
+
+def _skill_dir(cfg, project_root=None):
+    # Some hosts (dsh) scan DIFFERENT skill roots for the user-global home vs a
+    # project: `$DSH_HOME/skills` globally but `<project>/.dsh/skills` in a project.
+    # One fixed dir put a project install where the host never looks.
+    psd = cfg.get("project_skill_dir")
+    if psd and project_root is not None and not _at_host_home(cfg, project_root):
+        return psd
     return cfg.get("skill_dir", DEFAULT_SKILL_DIR)
 
 
 def _skill_root(project_root, cfg):
-    return project_root.joinpath(*_skill_dir(cfg).split("/"), "engramory")
+    return project_root.joinpath(*_skill_dir(cfg, project_root).split("/"), "engramory")
 
 
 def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
@@ -342,11 +364,13 @@ def _dsh_note(index_display, check_display, protocol_display,
   its own cap and this block short.
 - After editing `{index_display}`, run `python {check_display} {index_display}` and compact
   immediately if it reports `OVER`. dsh's deterministic deny path is `ctx.tools.guard()`
-  inside a *TypeScript* plugin, NOT Engramory's Python shell hook — so the cap here is
-  rules + this check unless that plugin is written (see adapters/dsh/README.md).
+  inside a *TypeScript* plugin — `dsh-engramory` ships exactly that, but until it is
+  installed AND running in your profile (upstream `dsh plugin` cannot mount third-party
+  plugins yet), the cap here is rules + this check (see adapters/dsh/README.md).
 - Full protocol reference: `{protocol_display}`. dsh's filesystem skill provider scans
-  `$DSH_HOME/skills` among its roots, so an install there is discovered and offered by
-  relevance; you can also just open that path when you want the protocol in full.
+  `$DSH_HOME/skills` (user-global) and `<project>/.dsh/skills` (project) among its
+  roots, so an install there is discovered and offered by relevance; you can also just
+  open that path when you want the protocol in full.
 - Asked to check, repair, or upgrade this Engramory install itself? Follow
   `{setup_display}` — it is the procedure for that, and it is not optional
   guidance: it exists because agents reliably get this wrong unprompted."""
@@ -391,9 +415,22 @@ HOST_CONFIG = {
         "begin": "<!-- BEGIN ENGRAMORY DSH -->",
         "end": "<!-- END ENGRAMORY DSH -->",
         # $DSH_HOME: both the user-global instruction scope dsh reads every session
-        # (AGENTS.md) and, under `skills/`, its rank-400 user skill root.
+        # (AGENTS.md) and, under `skills/`, its rank-400 user skill root. The env var
+        # is dsh's own contract for relocating that home, so honour it (root_env);
+        # hardcoding `~/.dsh` wrote a config dsh would then never read.
         "default_root": "~/.dsh",
+        "root_env": "DSH_HOME",
         "skill_dir": "skills",
+        # A PROJECT's skill roots are `<project>/.dsh/skills` / `<project>/.agents/skills`
+        # — NOT `<project>/skills`. Installing there succeeded and was never discovered:
+        # installable-but-inert, the same failure class as the missing bundle manifest.
+        "project_skill_dir": ".dsh/skills",
+        # dsh's file tools resolve relative paths against the SESSION cwd, and the
+        # user-global AGENTS.md is read from any cwd — a relative store path in that
+        # block pointed at `<whatever-repo>/.engramory-memory`. Global installs render
+        # absolute paths; a project block stays relative (its session cwd IS the
+        # project) so the repo can move without the wiring going stale.
+        "absolute_paths": True,
         "note": _dsh_note,
     },
 }
@@ -474,15 +511,33 @@ def _render_block(
         mode="explicit",
         install_hooks=False):
     snippet = _snippet_body(_read_text(source_root / cfg.get("snippet", "rules-snippet.md")))
-    memory_display = _display_path(memory_root, project_root)
+    # absolute_paths (dsh): the host resolves relative paths against the SESSION cwd,
+    # not against the file carrying this block — a relative path in a USER-GLOBAL
+    # block silently points into whatever repo the session happens to run in. Only
+    # the global install goes absolute: a project block keeps relative paths (its
+    # session cwd IS the project), so the repo can move or be cloned without the
+    # wiring going stale.
+    absolute = bool(cfg.get("absolute_paths")) and _at_host_home(cfg, project_root)
+    if absolute:
+        memory_display = Path(memory_root).expanduser().resolve().as_posix()
+    else:
+        memory_display = _display_path(memory_root, project_root)
     index_display = (Path(memory_display) / "MEMORY.md").as_posix()
     snippet = snippet.replace("<MEMORY_ROOT>", memory_display)
 
     if install_skill:
-        skill_rel = f"{_skill_dir(cfg)}/engramory"
+        skill_dir = _skill_dir(cfg, project_root)
+        if absolute:
+            skill_rel = (Path(project_root) / skill_dir / "engramory").resolve().as_posix()
+        else:
+            skill_rel = f"{skill_dir}/engramory"
         protocol_display = f"{skill_rel}/SKILL.md"
         check_display = f"{skill_rel}/tools/engramory_check.py"
         setup_display = f"{skill_rel}/AGENT-SETUP.md"
+    elif absolute:
+        protocol_display = (source_root / "SKILL.md").resolve().as_posix()
+        check_display = (source_root / "tools" / "engramory_check.py").resolve().as_posix()
+        setup_display = (source_root / "AGENT-SETUP.md").resolve().as_posix()
     else:
         protocol_display = _display_path(source_root / "SKILL.md", project_root)
         check_display = _display_path(source_root / "tools" / "engramory_check.py", project_root)
@@ -880,7 +935,12 @@ def init_host(args, host):
         cfg.get("snippet", "rules-snippet.md"),
         install_hooks=args.install_hooks,
     )
-    root_arg = args.project_root if args.project_root is not None else cfg["default_root"]
+    root_arg = args.project_root
+    if root_arg is None:
+        # No explicit root: the host's own relocation env var (e.g. $DSH_HOME) wins
+        # over the baked-in default — otherwise the config lands where the host
+        # never reads it.
+        root_arg = str(_host_home(cfg))
     project_root = Path(root_arg).expanduser().resolve()
     memory_root = Path(args.memory_root).expanduser()
     if not memory_root.is_absolute():
@@ -941,6 +1001,16 @@ def init_host(args, host):
                 f"read-only host '{host}': no MEMORY.md at {memory_root} — pass --memory-root "
                 f"pointing at an EXISTING memory store (e.g. Claude Code's memory directory, "
                 f"~/.claude/projects/<project>/memory). This host never creates a store.")
+        # …and its index must actually RESOLVE inside the store. `is_file()` follows
+        # symlinks, so a planted MEMORY.md -> /outside/file passed, and the generated
+        # read-only rules then directed every session to read an arbitrary external
+        # file — the exact read primitive root confinement exists to stop (the doctor
+        # and the writer paths already enforce this same boundary).
+        if not _same_or_inside(memory_root / "MEMORY.md", memory_root):
+            raise SystemExit(
+                f"read-only host '{host}': MEMORY.md at {memory_root} resolves outside "
+                f"the memory store (symlink escape) — refusing to wire recall to it. "
+                f"Point --memory-root at a store whose index is a regular file inside it.")
 
     # Preflight EVERY path this run will write — BEFORE any side effect (mkdir, store,
     # gitignore, skill, rules file) — so a symlink-escape refusal can never leave a
@@ -990,7 +1060,7 @@ def init_host(args, host):
         # Nothing is rolled back: several targets are user-owned files that this
         # installer must not delete on the way out. Say exactly what did land, so the
         # user is never left guessing which half of an install they have.
-        _report_partial(results, args, _skill_dir(cfg))
+        _report_partial(results, args, _skill_dir(cfg, project_root))
         raise
 
     print(f"Engramory {cfg['label']} init complete")
@@ -1046,7 +1116,8 @@ def _run_install_steps(args, cfg, source_root, project_root, memory_root,
 
     skill_result = "not requested"
     if args.install_skill:
-        skill_result = _copy_skill(source_root, project_root, args.force, _skill_dir(cfg))
+        skill_result = _copy_skill(source_root, project_root, args.force,
+                                   _skill_dir(cfg, project_root))
     results.append(("skill", skill_result))
 
     hook_result = "not requested"

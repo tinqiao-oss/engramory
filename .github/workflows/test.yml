@@ -27,3 +27,13 @@ jobs:
       # so this one earns its place in the matrix rather than a local run.
       - name: state-lock tests
         run: python tests/test_state_lock.py
+      - name: codex hook tests
+        run: python tests/test_codex_hooks.py
+      - name: codex installer tests
+        run: python tests/test_codex_init.py
+      - name: protocol-text tests
+        run: python tests/test_protocol_sync.py
+      # Runs the plugin's own `node --test` decision table (node ships on all three
+      # runner images); skips gracefully where node is absent.
+      - name: dsh plugin tests
+        run: python tests/test_dsh_plugin.py

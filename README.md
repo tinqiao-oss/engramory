@@ -355,10 +355,11 @@ Engramory is a **single-project, single-writer, personal-scale** protocol. It do
 - **Provenance / trust** — no `source`, `confidence`, `last_verified`, expiry, or
   `superseded-by` fields. Recalled memory is advisory and attacker-influenceable
   (see [SKILL.md](SKILL.md) §4); there is no authentication of memory content.
-- **Scope / multi-project** — no `scope` / `project_id`; one flat slug namespace, so
-  a store shared across projects/agents would hit slug collisions and project bleed.
-  A store-level manifest (protocol version + scope + host config) is the planned
-  first step — not built yet.
+- **Scope / multi-project** — a note CAN carry an optional `scope: global | repo`
+  (SKILL.md §2.1, doctor-validated), but there is still no `project_id`, and one flat
+  slug namespace means a store shared across projects/agents would hit slug
+  collisions and project bleed. A store-level manifest (protocol version + scope +
+  host config) is the planned first step — not built yet.
 - **Concurrency** — semantic note/index writes assume one serialized writer and
   have no store-level lock. The optional Codex hook locks only its bookkeeping
   state; it does not make memory writes concurrent-safe.

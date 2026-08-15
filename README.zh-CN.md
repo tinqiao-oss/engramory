@@ -130,7 +130,7 @@ python tools/engramory_init.py codex-reader   --project-root ~/.codex \
 python tools/engramory_init.py cursor-reader  --project-root /path/to/repo --memory-root <store>
 ```
 
-读取器宿主:`codex-reader`(已真机验)外加 `claude-reader`、`cursor-reader`、`kiro-reader`、`cline-reader`、`windsurf-reader`、`openclaw-reader`、`hermes-reader`(照各宿主**文档化**的规则文件格式接线,并打印"未验证"提示)。它不建库、绝不写入;`--memory-root` 必须是一个已存在的库。细节见 [adapters/reader/README.md](adapters/reader/README.md)(含已测宿主表 + 数据出境提示)。
+读取器宿主:`codex-reader` 与 `dsh-reader`(已真机验)外加 `claude-reader`、`cursor-reader`、`kiro-reader`、`cline-reader`、`windsurf-reader`、`openclaw-reader`、`hermes-reader`(照各宿主**文档化**的规则文件格式接线,并打印"未验证"提示)。它不建库、绝不写入;`--memory-root` 必须是一个已存在的库。细节见 [adapters/reader/README.md](adapters/reader/README.md)(含已测宿主表 + 数据出境提示)。
 
 ### OpenClaw
 
@@ -156,6 +156,16 @@ markdown 的智能体,还有真正的写前 deny hook。目前手动接线(还�
 > Kiro 安装的头号错误。只有索引该进常驻 steering;笔记留在 `.engramory-memory/` 里按需打开。
 > 上限暂时靠规则 + `engramory_check.py`(确定性的 Kiro `PreToolUse` hook 可行,但这里还没
 > 落地/实测)。完整说明:[adapters/kiro/README.md](adapters/kiro/README.md)。
+
+### DeepSeek Harness(dsh)
+
+用 dsh init helper(默认装到 `$DSH_HOME`,环境变量优先,否则 `~/.dsh`):
+
+```sh
+python tools/engramory_init.py dsh --install-skill
+```
+
+它把带标记的 Engramory 块写进 `$DSH_HOME/AGENTS.md`(dsh 的 `agent-instructions` 插件每会话加载硬编码的 `["AGENTS.md", "CLAUDE.md"]` 候选);把协议装到 `$DSH_HOME/skills/engramory`(dsh 的用户 skill 根;项目模式 `--project-root` 则装 `<项目>/.dsh/skills/engramory` —— 那才是 dsh 扫描的项目根,装错位置就是「装上了但永远不被发现」);另建独立的 `.engramory-memory/` 库。全局块内一律渲染**绝对路径**(dsh 的文件工具按 session cwd 解析相对路径)。这些步骤给到的上限是规则 + `engramory_check.py`,**不是**确定性 deny hook —— [`adapters/dsh/plugin/`](adapters/dsh/plugin/)(`dsh-engramory`)已用 `ctx.tools.guard()` 实现了确定性 cap(单调拒绝),但上游预览版的插件安装链还装不上第三方插件:装上并跑通之前,不宣称 dsh 有确定性保障。接线与模型行为已对着 `deepseek-v4-flash` 真机 dogfood(块以 `<system-reminder>` 到达;只能靠库内笔记回答的问题,模型会主动打开对应笔记)。详见 [adapters/dsh/README.md](adapters/dsh/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Windsurf……)
 Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录(**仅当那是你自己掌控的普通文件目录**;对自带记忆管理器的宿主——Codex、OpenClaw、Hermes——请另用一个独立目录,别去接管它),并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里只有 Claude Code 的写好并实测过;部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
@@ -184,7 +194,7 @@ Engramory 是一套**单项目、单写者、个人规模**的协议。它**还�
 
 - **版本 / 迁移** —— 语义记忆库没有 `schema_version`;frontmatter 格式若变化,没有定义好的升级路径。(可选 Codex hook 的纯 bookkeeping 状态文件有版本号,但其中不含记忆。)已有存量库的接入,见 [PORTING.md](PORTING.md) 的「Adopting an existing store」:分诊 recipe + 日期回填片段。
 - **来源 / 可信度** —— 没有 `source`、`confidence`、`last_verified`、过期、`superseded-by` 等字段。召回的记忆是建议性的、且可被攻击者影响(见 [SKILL.md](SKILL.md) §4);记忆内容没有任何鉴权。
-- **作用域 / 多项目** —— 没有 `scope` / `project_id`;单一扁平 slug 命名空间,跨项目 / 跨 agent 共用一个库会撞 slug、串项目。一个库级 manifest(协议版本 + 作用域 + 宿主配置)是规划中的第一步——**还没做**。
+- **作用域 / 多项目** —— 笔记已可携带可选的 `scope: global | repo`(SKILL.md §2.1,doctor 会校验),但仍没有 `project_id`,且是单一扁平 slug 命名空间:跨项目 / 跨 agent 共用一个库会撞 slug、串项目。一个库级 manifest(协议版本 + 作用域 + 宿主配置)是规划中的第一步——**还没做**。
 - **并发** —— 语义笔记/索引仍假设单写者、串行写入,没有库级锁。可选 Codex hook 只锁自己的 bookkeeping 状态,不会让记忆写入变成并发安全。
 - **规模** —— 常驻加载的扁平索引把**活跃集**限制在卡上限装得下的量(约 200 条指针)。它是个人 / 精选规模的工具,不是大语料;超过这个量,检索式系统(basic-memory、mem0)才是对的工具。
 

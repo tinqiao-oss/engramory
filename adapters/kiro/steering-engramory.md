@@ -21,7 +21,9 @@ individual note on demand — never load the whole store into context.**
   *value*; search the index and **update an existing note** rather than duplicate;
   otherwise write one atomic markdown file (one fact) under `.engramory-memory/` with
   frontmatter `name` / `description` (a sharp one-line hook) / `type`
-  (`user | feedback | project | reference`) / `created` + `updated` (`YYYY-MM-DD`). A
+  (`user | feedback | project | reference`) / `created` + `updated` (`YYYY-MM-DD`) /
+  optional `scope` (`global | repo` — how far the fact reaches; label only when you
+  know). A
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line. Add one pointer line to `MEMORY.md`. **Delete** notes that
   turn out wrong.

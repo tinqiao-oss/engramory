@@ -8,9 +8,12 @@ TypeScript to run the discipline here.
 
 ## Quick start
 
-From the Engramory repo. The installer defaults to `~/.dsh` — `$DSH_HOME`, which is both
-the user-global instruction scope dsh reads every session and the parent of its user
-skill root. Pass `--project-root` to wire a single project instead:
+From the Engramory repo. The installer defaults to `$DSH_HOME` (the env var wins when
+set, else `~/.dsh`) — which is both the user-global instruction scope dsh reads every
+session and the parent of its user skill root. The user-global block renders ABSOLUTE
+paths, because dsh's file tools resolve relative paths against the session cwd, not
+against the file carrying the block. Pass `--project-root` to wire a single project
+instead:
 
 ```sh
 python tools/engramory_init.py dsh --install-skill
@@ -26,7 +29,9 @@ This creates or updates, under that root:
 
 - `<root>/.engramory-memory/MEMORY.md` (the curated Engramory store)
 - `<root>/AGENTS.md`, with one marked Engramory block
-- `<root>/skills/engramory/`, when `--install-skill` is passed
+- the skill, when `--install-skill` is passed — `$DSH_HOME/skills/engramory/` for the
+  user-global install, `<project>/.dsh/skills/engramory/` with `--project-root` (the
+  roots dsh actually scans; `<project>/skills/` is not one of them)
 - `<root>/.gitignore`, when the memory folder is inside the root
 
 ## How dsh picks this up

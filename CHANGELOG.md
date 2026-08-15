@@ -6,22 +6,86 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **Index guard: read stdin as raw UTF-8 bytes (P0).** The Claude Code guard read its
+  payload through the locale TEXT stream. On a cp936/cp1252 Windows host a real CJK
+  payload either raised `UnicodeDecodeError` — falling open through the blanket
+  handler, hard cap silently OFF — or "decoded" as mojibake whose re-encoded size ran
+  ~1.5× the truth (false denies of compliant writes). The Codex hook had carried the
+  correct pattern all along (`_configure_console`); the flagship guard never got it,
+  and the suite could not see the hole because `json.dumps` defaults to
+  `ensure_ascii=True` — every test payload was pure ASCII. Now: `sys.stdin.buffer` +
+  explicit UTF-8 decode, plus two raw-bytes CJK regression tests.
+  (hooks/engramory_index_guard.py)
+
+- **dsh-engramory 0.2.0: the guard's decision table now matches the protocol.** All
+  latent (the plugin is not yet installable upstream), all real: a shrinking rewrite
+  of an over-cap index was refused (210 → 205 blocked — incremental compaction, the
+  documented escape, was impossible); every tool naming the index was treated as a
+  partial write, so `read` of an over-cap index was refused — recall died exactly when
+  compaction was needed; `str_replace_editor` (arguments `path`/`file_text`) bypassed
+  the guard entirely; the basename compare was case-sensitive; `indexName: ""`
+  silently disabled the guard; a sub-1 cap floored to zero. The guard now mirrors the
+  Python hook's rule — deny only a result that is over a cap AND grew — simulates
+  `old_str`/`new_str` edits, gates only known mutating tools, and validates its
+  config. 20 `node --test` cases pin the new table. (adapters/dsh/plugin/)
+
+- **dsh installer: three installed-but-inert paths.** `$DSH_HOME` was ignored (config
+  written to a `~/.dsh` dsh never read when the env var was set); a `--project-root`
+  skill install landed in `<project>/skills/`, which dsh does not scan (the scanned
+  project roots are `.dsh/skills` / `.agents/skills`); and the user-global block
+  rendered RELATIVE store/checker paths, which dsh's file tools resolve against the
+  session cwd — pointing into whatever repo the session ran in. Global blocks now
+  render absolute paths. (tools/engramory_init.py)
+
+- **CI now runs all seven suites.** `test_codex_hooks`, `test_codex_init`,
+  `test_protocol_sync` and `test_dsh_plugin` were never wired into the workflow — and
+  the dsh READMEs claimed its suite ran in CI while `python tests/test_dsh_plugin.py`
+  exited 0 having run NOTHING (pytest-only import, no script entry; `test_codex_init`
+  had the same silent-zero shape). Both gained zero-dependency script runners; the dsh
+  suite shells to `node --test` and skips gracefully without node.
+  (.github/workflows/test.yml)
+
+- **Generated blocks stopped carrying the human install header.** Every snippet opens
+  with instructions for the PERSON pasting it; the installer rendered that into the
+  block the AGENT reads each session — on a non-Claude host directing the model at a
+  `CLAUDE.md` its host never reads (a captured dsh request confirmed it reached the
+  model). (Recorded late — the fix shipped as d23de74.)
+
+- **Three tool P1s from the audit.** The doctor now reports a directory it cannot
+  enumerate instead of silently skipping it (a permissions-locked subdir hid its notes
+  from every check and the store reported clean); the reader installer refuses a
+  `MEMORY.md` symlink that resolves outside the store, so root confinement holds on
+  the read-only path too (`is_file()` follows symlinks and accepted it); and the
+  Codex-hook state's dropped-session counter coerces an int-valued string/float back
+  instead of zeroing it — its docstring said "never silently reset" while the code
+  did exactly that on the next persist.
+
+- **Doc sync after the cross-model audit.** Known-limitations in both READMEs no
+  longer claim there is "no `scope`" (the optional field shipped); PORTING.md and
+  hooks/INSTALL.md now list the dsh adapter, helper and dsh-reader; the Chinese README
+  gained the dsh section it was missing; the knowledge-README template no longer
+  references a topic "list below" it deliberately does not keep; the doctor's no-scope
+  INFO now says "label the ones you KNOW" instead of urging a guess; optional `scope`
+  reached the condensed rules-snippet and Kiro steering frontmatter lists.
+
 - **`dsh-engramory` — the cap, as an actual plugin.** The AGENTS.md adapter makes the
   discipline visible inside dsh; what it cannot do is make the index cap *real*.
   `ctx.tools.guard()` can: a synchronous, **monotonic** refusal — once a guard returns a
   reason, no later listener can turn it back into an allow. `adapters/dsh/plugin/` is that
   guard, plus `ctx.skills.register()` so the protocol arrives with the plugin instead of
-  depending on a skill root being spelled right. Zero-dependency ESM, no build step; 13
-  `node --test` cases pin the decision table (including the trailing-newline off-by-one
-  that would refuse a legitimate at-cap index) and run from pytest so CI cannot forget
-  them.
+  depending on a skill root being spelled right. Zero-dependency ESM, no build step; the
+  `node --test` suite pins the decision table (including the trailing-newline off-by-one
+  that would refuse a legitimate at-cap index).
 
-  Outside Claude Code, this is the only host where the 200-line / 25 KB limit is enforced
-  rather than requested. It is **not yet installable**, and that is upstream: `dsh plugin`
+  Outside Claude Code, this is the only host where the 200-line / 25 KB limit CAN be
+  enforced rather than requested — once the plugin is actually installed and running.
+  It is **not yet installable**, and that is upstream: `dsh plugin`
   shells out to a `pnpm` it does not bundle, and a direct `pnpm add` then dies on
   `ERR_PNPM_FETCH_404` for `@deepseek-ai/dsh-type-meta` — a package the published tree
-  depends on but the registry does not carry. Preview packaging, not a plugin defect. Not
-  published to npm yet. (adapters/dsh/plugin/README.md)
+  depends on but the registry does not carry. Preview packaging, not a plugin defect.
+  Published to npm as 0.1.0/0.1.1 (0.1.0 shipped without the `dsh.bundle` manifest and
+  installed inert; 0.1.1 fixed that); the 0.2.0 guard overhaul in this tree is not
+  published yet. (adapters/dsh/plugin/README.md)
 
 - **DeepSeek Harness (dsh) adapter.** dsh opened as a developer preview on 2026-08-13 with
   the two rails this protocol needs and no memory system of its own: `agent-instructions`
