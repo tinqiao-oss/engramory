@@ -394,6 +394,54 @@ judgment are your job either way.
 
 ---
 
+## 6.1 The knowledge base (optional, and NOT part of the store)
+
+Memories are written for you. They are compressed, fragmentary, and conclusion-only,
+because the index is loaded every session and has to stay small. That makes them a poor
+read for a **human**: no mechanism, no context, no reason a rule exists beyond one `Why:`
+line.
+
+A knowledge base is the other half — a `knowledge/` directory of longer articles written
+for the user to read and learn from. It is not part of the memory store, the doctor does
+not validate it, and its articles are **never indexed in `MEMORY.md`**: the user reads
+them, you do not need to know their titles.
+
+|  | memory store | knowledge base |
+|---|---|---|
+| written for | you | the user |
+| shape | one fact per file, terse | one topic per article, explains mechanism |
+| loaded | index every session | only when the user opens it |
+| indexed in `MEMORY.md` | yes, one line each | **no — a single pointer to the directory** |
+
+**Your role is to propose, never to write unasked.** Choosing the angle and the depth is
+an opinionated act that belongs to the user. Before proposing, check the knowledge base's
+own README for what it already covers — an existing article should be extended, not
+duplicated.
+
+**Test:** *three months from now, facing the same class of problem, would someone have to
+work it out again from scratch, or would a quick look be enough?* If they would have to
+redo the work, it is worth an article.
+
+**Signals** (any one is enough to consider it):
+
+- You worked out a **mechanism or a cause**, not just a sequence of steps that happened
+  to work.
+- Finding the answer required **discarding at least one wrong assumption** — that means
+  it is not obvious, and the next person will trip on it too.
+- You wrote a **long explanation in conversation** of why something behaves as it does.
+  That explanation is already the draft.
+
+**Do not propose** when: it only holds for this project right now (that is a memory);
+the official documentation answers it directly; or the knowledge base already covers it.
+
+Setting one up is a convention, not a feature: create the directory, put a README in it
+stating the writing standard and listing the topics, and add one pointer line at the top
+of `MEMORY.md` — host-agnostic, so it survives a move to any other host. `templates/knowledge-README.md`
+is a starting point. Engramory ships no tooling for this on purpose: no search, no
+compiler, no UI. It is a place and a standard, and that is the whole of it.
+
+---
+
 ## 7. Host compatibility notes
 
 - This skill is the complete protocol, so any agent that can be given this file as

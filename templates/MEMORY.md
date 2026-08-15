@@ -5,6 +5,13 @@
 > One line per memory: `- [<title>](<slug>.md) — <one-line hook>`
 > Plain-text & unencrypted: never store secret *values* here (only where they
 > live); keep this store git-ignored and out of cloud-synced / backed-up folders.
+<!-- Optional — delete this line if you keep no knowledge base (SKILL.md §6.1).
+     Point it at yours; articles are for the user to read and are NOT indexed here.
+> 📚 Knowledge base `<path>/` — written for the HUMAN, not memory; its articles are
+> not indexed here. Worked out a mechanism / discarded a wrong assumption to get there /
+> wrote a long explanation → read `<path>/README.md` and decide whether to PROPOSE an
+> article (propose only, never write unasked).
+-->
 
 ## user
 <!-- who the user is: identity, role, expertise, durable preferences ABOUT THEM.
