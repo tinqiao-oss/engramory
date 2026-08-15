@@ -41,6 +41,7 @@ python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
 | Host (`<host>-reader`) | Rules file it writes | Verified here? |
 |---|---|---|
 | `codex-reader` | `AGENTS.md` | ✅ dogfooded end-to-end |
+| `dsh-reader` | `AGENTS.md` | ✅ dogfooded end-to-end |
 | `claude-reader` | `CLAUDE.md` | ⚠️ unverified wiring |
 | `openclaw-reader` | `AGENTS.md` | ⚠️ unverified wiring |
 | `hermes-reader` | `AGENTS.md` | ⚠️ unverified wiring |
@@ -49,8 +50,10 @@ python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
 | `cursor-reader` | `.cursor/rules/engramory-recall.mdc` (`alwaysApply: true`) | ⚠️ unverified wiring |
 | `kiro-reader` | `.kiro/steering/engramory-recall.md` (`inclusion: always`) | ⚠️ unverified wiring |
 
-**"Verified here"** means the wiring was dogfooded on a real machine (a `codex exec -s
-read-only` run read the index, opened the relevant note, and returned the fact). The
+**"Verified here"** means the wiring was dogfooded on a real machine: a `codex exec -s
+read-only` run read the index, opened the relevant note, and returned the fact; for
+`dsh-reader`, a live `deepseek-v4-flash` session did the same, and the request dsh sent was
+captured to confirm the block had actually been injected. The
 "unverified" rows are written from each host's **documented** rules-file format (the same
 per-host facts in [PORTING.md](../../PORTING.md)) but have not been run on that host —
 Engramory does not claim a host works until it is dogfooded. The tool prints this caveat when
@@ -60,7 +63,8 @@ you init one. If you verify one on a real host, please open a PR to flip it.
 > `.windsurfrules`), which current versions still read. Newer versions also support a rules
 > **directory** (`.clinerules/*.md`, `.windsurf/rules/*.md`, the latter with an "always-on"
 > activation mode). If your version doesn't pick up the single file, move the generated block
-> into that directory. (`codex-reader` is the only wiring dogfooded here — see above.)
+> into that directory. (`codex-reader` and `dsh-reader` are the wirings dogfooded here — see
+> above.)
 
 ## What the reader is told
 

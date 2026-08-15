@@ -228,9 +228,10 @@ python tools/engramory_init.py codex-reader   --project-root ~/.codex \
 python tools/engramory_init.py cursor-reader  --project-root /path/to/repo --memory-root <store>
 ```
 
-Reader hosts: `codex-reader` (dogfooded) plus `claude-reader`, `cursor-reader`, `kiro-reader`,
-`cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired from each host's
-documented rules-file format, printed with an "unverified" note). It creates no store and never
+Reader hosts: `codex-reader` and `dsh-reader` (both dogfooded) plus `claude-reader`,
+`cursor-reader`, `kiro-reader`, `cline-reader`, `windsurf-reader`, `openclaw-reader`,
+`hermes-reader` (wired from each host's documented rules-file format, printed with an
+"unverified" note). It creates no store and never
 writes; `--memory-root` must be an existing store. See
 [adapters/reader/README.md](adapters/reader/README.md) (incl. the tested-host table + data-egress note).
 
@@ -266,6 +267,28 @@ that reads/writes workspace markdown, and a real pre-write deny hook. Wiring is 
 > demand. Cap is rules + `engramory_check.py` for now (a deterministic Kiro `PreToolUse`
 > hook is possible but not yet shipped/tested). Full notes:
 > [adapters/kiro/README.md](adapters/kiro/README.md).
+
+### DeepSeek Harness (dsh)
+
+Use the dsh init helper (defaults to `$DSH_HOME`, i.e. `~/.dsh`):
+
+```sh
+python tools/engramory_init.py dsh --install-skill
+```
+
+It writes a marked Engramory block into `$DSH_HOME/AGENTS.md` — dsh's `agent-instructions`
+plugin loads a hardcoded `["AGENTS.md", "CLAUDE.md"]` candidate list at the start of every
+session — installs the protocol under `<DSH_HOME>/skills/engramory` (dsh's **user skill
+root**; *not* `.agents/skills` beneath it, which is not one of the roots it scans there —
+install into the wrong one and the copy lands but is never listed), and keeps a separate
+`.engramory-memory/` store. The index cap here is rules + `engramory_check.py`, **not** a
+deterministic deny hook: dsh's is `ctx.tools.guard()`, a TypeScript seam whose refusal is
+monotonic — a good seam, but not one the Python hook drops into.
+
+Wiring *and* model behavior were dogfooded against `deepseek-v4-flash`: the block arrives
+as a `<system-reminder>`, a question answerable only from a stored note made the model open
+that note unprompted, and one durable fact came back as a conforming note plus index
+pointer. See [adapters/dsh/README.md](adapters/dsh/README.md).
 
 ### Any other agent (Hermes, Cursor, Cline, Windsurf, …)
 Engramory is model-agnostic (DeepSeek, GPT, Llama, …) and rides on the host's own
