@@ -23,8 +23,15 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   recording endpoint and reading the payload dsh actually sent — no provider key involved:
   the block arrives as a `<system-reminder>` sourced `Instructions from: $DSH_HOME/AGENTS.md`,
   a project-level `AGENTS.md` loads after it, and `engramory` appears in the session's
-  advertised skill catalog. Whether a given DeepSeek model *follows* the discipline is a
-  separate question and is not claimed here. (adapters/dsh/README.md)
+  advertised skill catalog.
+
+  Then against the real API (`deepseek-v4-flash`): asked a question answerable only from a
+  stored note — with no mention of memory in the prompt — the model opened that note and
+  answered from it; told one durable fact, it wrote a conforming `feedback` note, added the
+  pointer line, ran the checkers, and reported the sync. `engramory_doctor.py` re-run
+  independently agreed. It even set `scope: global`, which the always-on block never
+  mentions, so it had read the full protocol through the installed skill. Two runs are not
+  a reliability claim, but the protocol is not Claude-only. (adapters/dsh/README.md)
 
 - **`scope: global | repo`, optional.** `type` said what kind of memory a note is;
   nothing said how far it reaches. The two are orthogonal, and conflating them is what

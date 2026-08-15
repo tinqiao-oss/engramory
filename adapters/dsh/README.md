@@ -93,8 +93,23 @@ key involved:
   session's advertised skill catalog. Installed under `.agents/skills` *within* `$DSH_HOME`
   it did **not** — that path is not one of the five roots.
 
-Not verified here: whether a given DeepSeek model *follows* the discipline as reliably as
-Claude does. That is a model-behavior question, not a wiring one, and it needs a real key.
+Model behavior was then checked against the real API (`deepseek-v4-flash`, 2026-08-15),
+two scenarios, one run each:
+
+- **Recall.** Asked a question answerable only from a stored note, with no mention of
+  memory anywhere in the prompt, the model opened that note and answered from it — naming
+  the file it had read.
+- **Write.** Told one durable, reusable fact, it wrote a `feedback` note carrying all five
+  frontmatter fields plus `Why:` and `How to apply:`, added a single pointer line to
+  `MEMORY.md`, ran `engramory_check.py` and `engramory_doctor.py`, and reported
+  added/updated/archived/skipped with the index size. Re-running `engramory_doctor.py`
+  independently agreed: clean, no schema errors.
+
+It also set `scope: global` on that note — a field the always-on block never mentions — so
+it had reached the full protocol through the installed skill, not just the AGENTS.md block.
+
+Two runs are not a reliability claim. This says the discipline lands and is followed on a
+clean store; it says nothing yet about a long session, a crowded index, or a smaller model.
 
 ## Commands the agent can run
 
