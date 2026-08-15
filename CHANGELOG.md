@@ -6,6 +6,23 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **`dsh-engramory` — the cap, as an actual plugin.** The AGENTS.md adapter makes the
+  discipline visible inside dsh; what it cannot do is make the index cap *real*.
+  `ctx.tools.guard()` can: a synchronous, **monotonic** refusal — once a guard returns a
+  reason, no later listener can turn it back into an allow. `adapters/dsh/plugin/` is that
+  guard, plus `ctx.skills.register()` so the protocol arrives with the plugin instead of
+  depending on a skill root being spelled right. Zero-dependency ESM, no build step; 13
+  `node --test` cases pin the decision table (including the trailing-newline off-by-one
+  that would refuse a legitimate at-cap index) and run from pytest so CI cannot forget
+  them.
+
+  Outside Claude Code, this is the only host where the 200-line / 25 KB limit is enforced
+  rather than requested. It is **not yet installable**, and that is upstream: `dsh plugin`
+  shells out to a `pnpm` it does not bundle, and a direct `pnpm add` then dies on
+  `ERR_PNPM_FETCH_404` for `@deepseek-ai/dsh-type-meta` — a package the published tree
+  depends on but the registry does not carry. Preview packaging, not a plugin defect. Not
+  published to npm yet. (adapters/dsh/plugin/README.md)
+
 - **DeepSeek Harness (dsh) adapter.** dsh opened as a developer preview on 2026-08-13 with
   the two rails this protocol needs and no memory system of its own: `agent-instructions`
   loads a hardcoded `["AGENTS.md", "CLAUDE.md"]` candidate list every session, and

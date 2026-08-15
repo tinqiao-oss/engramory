@@ -281,9 +281,10 @@ plugin loads a hardcoded `["AGENTS.md", "CLAUDE.md"]` candidate list at the star
 session — installs the protocol under `<DSH_HOME>/skills/engramory` (dsh's **user skill
 root**; *not* `.agents/skills` beneath it, which is not one of the roots it scans there —
 install into the wrong one and the copy lands but is never listed), and keeps a separate
-`.engramory-memory/` store. The index cap here is rules + `engramory_check.py`, **not** a
-deterministic deny hook: dsh's is `ctx.tools.guard()`, a TypeScript seam whose refusal is
-monotonic — a good seam, but not one the Python hook drops into.
+`.engramory-memory/` store. The index cap from those steps is rules + `engramory_check.py`,
+**not** a deterministic deny hook — though [`adapters/dsh/plugin/`](adapters/dsh/plugin/)
+(`dsh-engramory`) implements one against `ctx.tools.guard()`, whose refusal is monotonic.
+What blocks it today is dsh's own preview packaging, not the plugin.
 
 Wiring *and* model behavior were dogfooded against `deepseek-v4-flash`: the block arrives
 as a `<system-reminder>`, a question answerable only from a stored note made the model open

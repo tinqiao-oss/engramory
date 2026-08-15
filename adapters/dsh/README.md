@@ -68,16 +68,21 @@ The index-size cap here is **rules + an explicit check**, not a deterministic de
    and compact if it reports `OVER`; `engramory_doctor.py` is the occasional full health
    check.
 
-> **Why no deterministic cap here yet.** Engramory's hard cap
-> (`hooks/engramory_index_guard.py`) is a **Claude-Code-format Python shell hook**. dsh's
-> pre-write deny path is `ctx.tools.guard()` — a synchronous **TypeScript** guard whose
-> returned reason is a monotonic refusal (later waterfall listeners cannot turn it back
-> into an allow), alongside the typed `PreToolDecision` of `allow` / `deny` / `ask`. That
-> is a *better* seam than most hosts offer, but it is a different interface, so the Python
-> hook does not drop in. A real deterministic cap on dsh means writing that guard as a
-> plugin. It is **not shipped or verified here** — until it is, treat the dsh cap as
-> best-effort. This matches Engramory's honesty rule: the deterministic guarantee is only
-> claimed where it is actually written and tested (today, Claude Code).
+> **The deterministic cap exists — as a plugin.** Engramory's hard cap
+> (`hooks/engramory_index_guard.py`) is a **Claude-Code-format Python shell hook**, while
+> dsh's pre-write deny path is `ctx.tools.guard()` — a synchronous guard whose returned
+> reason is a *monotonic* refusal (later listeners cannot turn it back into an allow),
+> alongside the typed `PreToolDecision` of `allow` / `deny` / `ask`. A better seam than
+> most hosts offer, but a different interface, so the Python hook does not drop in.
+> [`plugin/`](plugin/) is that guard written for dsh — `dsh-engramory`, zero-dependency
+> ESM, its decision table pinned by `node --test` in CI.
+>
+> It is **not yet installable into a profile**, and that is upstream: `dsh plugin` shells
+> out to a `pnpm` it does not bundle, and a direct `pnpm add` dies on `ERR_PNPM_FETCH_404`
+> for `@deepseek-ai/dsh-type-meta` — a package the published tree depends on but which is
+> not on the registry. Until that resolves, the cap you get from the steps above is rules
+> + `engramory_check.py`. Engramory claims a deterministic guarantee only where it is both
+> written and running (today, Claude Code). See [plugin/README.md](plugin/README.md).
 
 ## What was dogfooded, and how
 
