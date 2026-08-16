@@ -1,0 +1,25 @@
+{
+  "//": [
+    "DISCOVERY MANIFEST ONLY — never published from the repo root (private: true).",
+    "The installable npm package is adapters/dsh/plugin/ (same name, published from there).",
+    "Registry crawlers (e.g. plugin.dshdesk.com) verify a dsh.bundle object in the ROOT",
+    "package.json and that its patch file exists, so this file declares the same bundle",
+    "patch the plugin ships. tests/test_dsh_plugin.py pins name/version/patch in sync",
+    "with the plugin's own package.json — bump both together."
+  ],
+  "name": "dsh-engramory",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Curated file-based long-term memory for DeepSeek Harness — discovery manifest for the installable plugin in adapters/dsh/plugin/",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tinqiao-oss/engramory.git"
+  },
+  "homepage": "https://github.com/tinqiao-oss/engramory/tree/master/adapters/dsh#readme",
+  "dsh": {
+    "bundle": {
+      "patch": "./adapters/dsh/plugin/cordis.patch.yml"
+    }
+  }
+}

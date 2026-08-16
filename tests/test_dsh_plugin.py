@@ -62,6 +62,31 @@ def test_dsh_plugin_declares_the_discovery_keyword():
     assert set(pkg["files"]) == {"index.js", "cordis.patch.yml", "README.md", "LICENSE"}
 
 
+def test_root_discovery_manifest_stays_in_step_with_the_plugin():
+    """The repo-root package.json exists ONLY so registry crawlers that check the
+    ROOT for a `dsh.bundle` (plugin.dshdesk.com and friends) can verify the repo.
+
+    It duplicates the plugin's identity on purpose, which makes it a drift point —
+    so name, version, and the bundle patch are pinned here: bump the plugin
+    without the root manifest (or vice versa) and this fails.
+    """
+    import json
+
+    root_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+    with open(os.path.join(root_dir, "package.json"), encoding="utf-8") as fh:
+        root = json.load(fh)
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        plugin = json.load(fh)
+    assert root["private"] is True, "the root manifest must never be publishable"
+    assert root["name"] == plugin["name"]
+    assert root["version"] == plugin["version"]
+    patch = root["dsh"]["bundle"]["patch"]
+    assert os.path.isfile(os.path.join(root_dir, patch)), patch
+    # Same patch FILE the plugin itself ships, not a diverging copy.
+    assert os.path.normpath(os.path.join(root_dir, patch)) == os.path.normpath(
+        os.path.join(PLUGIN, plugin["dsh"]["bundle"]["patch"]))
+
+
 def test_dsh_plugin_ships_a_bundle_manifest():
     """Without `dsh.bundle.patch`, dsh has no idea how to mount an installed plugin.
 

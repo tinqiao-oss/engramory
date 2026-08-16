@@ -9,6 +9,10 @@ focused and well-tested.
 - No build step, no dependencies beyond the Python standard library — plus Node's
   built-ins for the dsh plugin (`adapters/dsh/plugin/`, plain ESM, Node ≥18, zero
   npm packages).
+- The repo-root `package.json` is a DISCOVERY manifest only (registry crawlers
+  verify `dsh.bundle` at the root); it is `private: true` and never published.
+  When bumping the plugin, bump root and plugin together —
+  `tests/test_dsh_plugin.py` pins them in step.
 - The load-bearing code is `hooks/engramory_index_guard.py` (the Claude Code
   PreToolUse cap), `hooks/codex/engramory_codex_hook.py` (Codex lifecycle
   assistance), `adapters/dsh/plugin/index.js` (the dsh cap guard), and the portable

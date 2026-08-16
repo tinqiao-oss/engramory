@@ -4,6 +4,17 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## Unreleased
+
+- **Root discovery manifest.** Registry crawlers (plugin.dshdesk.com and the
+  `awesome-dsh-plugin` review bar before it) verify a `dsh.bundle` object in the
+  repo-ROOT `package.json` — the ecosystem's de-facto convention, and this repo kept
+  failing it because the real manifest lives in `adapters/dsh/plugin/`. The root now
+  carries a `private: true` manifest pointing at the same bundle patch the plugin
+  ships (never published from the root; npm publishing stays in the plugin dir), and
+  a test pins root and plugin name/version/patch in step so the duplicate cannot
+  drift. Repo also gained the `dsh-plugin` GitHub topic the crawlers key on.
+
 ## 0.8.0 — 2026-08-16
 
 - **Index guard: read stdin as raw UTF-8 bytes (P0).** The Claude Code guard read its
