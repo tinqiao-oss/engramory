@@ -419,7 +419,9 @@ def _main():
     print(f"init: {INIT}\nrunning {len(tests)} tests\n")
     failed = 0
     for fn in tests:
-        d = pathlib.Path(tempfile.mkdtemp(prefix="engramory-ci-"))
+        # resolve(): CI's %TEMP% is a DOS 8.3 alias (RUNNER~1); the tools
+        # canonicalise to the long form, so path assertions need the same spelling.
+        d = pathlib.Path(tempfile.mkdtemp(prefix="engramory-ci-")).resolve()
         try:
             fn(d)
             print(f"  PASS  {fn.__name__}")

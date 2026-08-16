@@ -39,7 +39,11 @@ class CodexHookContractTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.project = Path(self._tmp.name) / "project"
+        # resolve(): on the CI Windows runner %TEMP% is expressed via its DOS 8.3
+        # alias (C:\Users\RUNNER~1\...), while the hook canonicalises paths to the
+        # long form (C:\Users\runneradmin\...) — same file, two spellings, so every
+        # assertIn on an un-canonicalised path fails there and only there.
+        self.project = Path(self._tmp.name).resolve() / "project"
         self.memory_root = self.project / ".engramory-memory"
         self.memory_root.mkdir(parents=True)
         self.state_path = self.memory_root / ".engramory-codex-state.json"
