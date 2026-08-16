@@ -4,7 +4,7 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
-## Unreleased
+## 0.8.0 — 2026-08-16
 
 - **Index guard: read stdin as raw UTF-8 bytes (P0).** The Claude Code guard read its
   payload through the locale TEXT stream. On a cp936/cp1252 Windows host a real CJK
