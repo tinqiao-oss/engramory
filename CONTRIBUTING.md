@@ -6,10 +6,13 @@ focused and well-tested.
 
 ## Project shape
 
-- No build step, no dependencies beyond the Python standard library.
+- No build step, no dependencies beyond the Python standard library — plus Node's
+  built-ins for the dsh plugin (`adapters/dsh/plugin/`, plain ESM, Node ≥18, zero
+  npm packages).
 - The load-bearing code is `hooks/engramory_index_guard.py` (the Claude Code
   PreToolUse cap), `hooks/codex/engramory_codex_hook.py` (Codex lifecycle
-  assistance), and the portable scripts in `tools/`.
+  assistance), `adapters/dsh/plugin/index.js` (the dsh cap guard), and the portable
+  scripts in `tools/`.
 - `SKILL.md` is the full protocol; `README.md` / `README.zh-CN.md` are the front
   door; `PORTING.md` covers non-Claude-Code hosts.
 
@@ -21,10 +24,11 @@ Requires **Python 3.9+**. From the repo root:
 python -m pytest tests -q
 ```
 
-The two original standalone suites still work with
-`python tests/test_index_guard.py` and `python tests/test_tools.py`; each prints
-`ALL PASS`. Every behavioral change to a hook, installer, or tool should come
-with a test.
+Every suite also runs as a plain zero-dependency script
+(`python tests/test_<name>.py`) — that is how CI runs them. The dsh plugin's own
+decision table runs via `node --test adapters/dsh/plugin` (also reachable through
+`python tests/test_dsh_plugin.py`). Every behavioral change to a hook, installer,
+plugin, or tool should come with a test.
 
 ## Guidelines
 

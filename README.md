@@ -270,7 +270,7 @@ that reads/writes workspace markdown, and a real pre-write deny hook. Wiring is 
 
 ### DeepSeek Harness (dsh)
 
-Use the dsh init helper (defaults to `$DSH_HOME`, i.e. `~/.dsh`):
+Use the dsh init helper (defaults to `$DSH_HOME` — the env var wins when set, else `~/.dsh`):
 
 ```sh
 python tools/engramory_init.py dsh --install-skill
@@ -279,9 +279,12 @@ python tools/engramory_init.py dsh --install-skill
 It writes a marked Engramory block into `$DSH_HOME/AGENTS.md` — dsh's `agent-instructions`
 plugin loads a hardcoded `["AGENTS.md", "CLAUDE.md"]` candidate list at the start of every
 session — installs the protocol under `<DSH_HOME>/skills/engramory` (dsh's **user skill
-root**; *not* `.agents/skills` beneath it, which is not one of the roots it scans there —
-install into the wrong one and the copy lands but is never listed), and keeps a separate
-`.engramory-memory/` store. The index cap from those steps is rules + `engramory_check.py`,
+root**; with `--project-root` it goes to `<project>/.dsh/skills/engramory` instead, the
+root dsh scans there — *not* `.agents/skills`, which dsh does not scan in either place;
+install into an unscanned root and the copy lands but is never listed), and keeps a
+separate `.engramory-memory/` store. The user-global block renders ABSOLUTE paths (dsh's
+file tools resolve relative paths against the session cwd); a project block stays
+relative so the repo can move. The index cap from those steps is rules + `engramory_check.py`,
 **not** a deterministic deny hook — though [`adapters/dsh/plugin/`](adapters/dsh/plugin/)
 (`dsh-engramory`) implements one against `ctx.tools.guard()`, whose refusal is monotonic.
 What blocks it today is dsh's own preview packaging, not the plugin.
@@ -302,8 +305,10 @@ Codex, OpenClaw, Hermes — use a separate folder instead), and
 wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
-pre-write *deny* hook. Only Claude Code's is written and tested here; some other hosts
-expose one too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
+pre-write *deny* hook. Claude Code's is written, tested, and RUNNING here; dsh's shim
+(`adapters/dsh/plugin/`) is written and decision-table-tested but blocked from running
+by the preview's plugin installer; some other hosts
+expose an equivalent seam too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
 a per-host I/O shim you write and verify yourself — while OpenClaw can only block via a
 `before_tool_call` plugin and some hosts have none. See [PORTING.md](PORTING.md) for the
 per-host picture. Where no such hook exists (or plain chat), the cap degrades to

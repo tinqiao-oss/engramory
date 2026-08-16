@@ -126,10 +126,13 @@ python tools/engramory_init.py dsh                            --install-skill   
 ```
 
 Each creates the memory template, adds a marked block to `AGENTS.md`, optionally
-copies the skill into `.agents/skills/engramory`, and keeps the Engramory store
+copies the skill into the root that host actually scans (Codex/OpenClaw:
+`.agents/skills/engramory`; dsh: `$DSH_HOME/skills/engramory` globally,
+`<project>/.dsh/skills/engramory` in a project), and keeps the Engramory store
 separate from the host's own memory. See
-[adapters/codex/README.md](../adapters/codex/README.md) and
-[adapters/openclaw/README.md](../adapters/openclaw/README.md).
+[adapters/codex/README.md](../adapters/codex/README.md),
+[adapters/openclaw/README.md](../adapters/openclaw/README.md) and
+[adapters/dsh/README.md](../adapters/dsh/README.md).
 
 To let a host **recall** (read-only) from a store another agent owns and writes — e.g.
 Claude Code's native memory — use a `<host>-reader` host (it creates no store and never

@@ -73,6 +73,9 @@ The index-size cap here is **rules + an explicit check**, not a deterministic de
    and compact if it reports `OVER`; `engramory_doctor.py` is the occasional full health
    check.
 
+Paths above are for the user-global install. A `--project-root` install puts the skill at
+`<project>/.dsh/skills/engramory` instead — substitute that prefix in both commands.
+
 > **The deterministic cap exists — as a plugin.** Engramory's hard cap
 > (`hooks/engramory_index_guard.py`) is a **Claude-Code-format Python shell hook**, while
 > dsh's pre-write deny path is `ctx.tools.guard()` — a synchronous guard whose returned
@@ -134,6 +137,9 @@ Occasional full health check:
 ```sh
 python <DSH_HOME>/skills/engramory/tools/engramory_doctor.py <store>
 ```
+
+(Project-root installs: the skill lives at `<project>/.dsh/skills/engramory` — substitute
+that prefix.)
 
 If you did not install the skill copy, run the same tools from wherever the Engramory repo
 lives.

@@ -12,8 +12,9 @@ Usage:
 
 For a WRITE host (codex, openclaw, dsh) the command creates a local memory store, adds a marked
 Engramory block to the host's always-loaded AGENTS.md, optionally installs the Engramory skill
-where that host's loader actually scans (`.agents/skills/engramory` for Codex and OpenClaw,
-`<DSH_HOME>/skills/engramory` for dsh), and adds the memory store to .gitignore when the store
+where that host's loader actually scans (`.agents/skills/engramory` for Codex and OpenClaw;
+for dsh, `<DSH_HOME>/skills/engramory` globally and `<project>/.dsh/skills/engramory` with
+--project-root), and adds the memory store to .gitignore when the store
 lives inside the project/workspace.
 
 For the Codex writer, `--install-hooks` also installs project-scoped
@@ -33,7 +34,9 @@ codex-reader and dsh-reader wirings are verified against their real hosts — th
 built from each host's documented
 rules-file format but printed with an "unverified" note. See adapters/reader/README.md.
 
-Defaults: --project-root '.', except openclaw (~/.openclaw/workspace) and dsh (~/.dsh).
+Defaults: --project-root '.', except openclaw (~/.openclaw/workspace) and dsh
+($DSH_HOME when set, else ~/.dsh). dsh's user-global block renders absolute paths;
+project blocks stay relative.
 """
 import argparse
 import base64

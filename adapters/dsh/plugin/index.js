@@ -7,8 +7,9 @@
  *      monotonic refusal — once a guard returns a reason, no later waterfall
  *      listener can turn it back into an allow. That makes it a stronger seam than
  *      most hosts expose, and it is why the 200-line / 25 KB limit can be enforced
- *      here rather than merely asked for. Everywhere except Claude Code, Engramory's
- *      cap degrades to "rules plus a checker the agent has to remember to run".
+ *      here rather than merely asked for. Without a shim like this one, everywhere
+ *      except Claude Code the cap degrades to "rules plus a checker the agent has to
+ *      remember to run".
  *   2. Skill delivery that does not depend on install paths. Registering at runtime
  *      sidesteps the five-root scan entirely, so the protocol is present because the
  *      plugin is loaded, not because a directory happened to be right.

@@ -150,7 +150,9 @@ The cap stops the index growing past the host's load window. Strongest → softe
      can't be deterministic there; use rung 2.
 
    So the cap is portable *in principle* on hosts with a real pre-write deny — but
-   **only the Claude Code hook here is written and tested**; for the others you write
+   **only the Claude Code hook here is written, tested, AND running**. The dsh shim
+   (`adapters/dsh/plugin/`) is written and decision-table-tested, but the preview's
+   plugin installer cannot mount it yet; for the others you write
    and verify the shim yourself. See `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.

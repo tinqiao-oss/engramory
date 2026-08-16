@@ -1,7 +1,9 @@
 # Security Policy
 
 Engramory is an experimental (0.x) local developer tool: a discipline plus a
-Claude Code index hook, optional Codex lifecycle hooks, and local helper
+Claude Code index hook, optional Codex lifecycle hooks, a dsh guard plugin
+(`adapters/dsh/plugin/`, same size-nudge role as the Claude Code hook — a
+discipline rail, not a security control), and local helper
 scripts. It has no network surface and runs entirely on your machine.
 
 ## Reporting a vulnerability
@@ -58,7 +60,8 @@ formal SLA, but we take memory-content and hook-safety issues seriously.
   completed steps on disk and reports exactly which ones they were.
 
 In scope: a crafted `tool_input` that makes the hook mis-gate (wrongly block or
-wrongly pass) a real index edit; a crafted Codex hook event that incorrectly
+wrongly pass) a real index edit; a crafted dsh tool execution that makes the
+plugin guard mis-gate the same way; a crafted Codex hook event that incorrectly
 blocks non-manual compaction, bypasses a dirty manual gate, escapes the configured
 store, or persists prompt content; or output that is not safely JSON-encoded.
 Out of scope: the store being readable by local processes (intended), and the

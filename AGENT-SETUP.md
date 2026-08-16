@@ -268,8 +268,11 @@ unasked is not a fix.
 Place the host on the degradation ladder in [`PORTING.md`](PORTING.md) §4 and report the
 rung honestly, including when the answer is "this host cannot have a deterministic cap".
 
-A deterministic pre-write deny is implemented and tested in this repo for **one** host.
-For anything else, the correct report is that the cap is best-effort discipline — not
+A deterministic pre-write deny is implemented, tested, and RUNNING in this repo for
+**one** host (Claude Code). A second implementation exists for dsh
+(`adapters/dsh/plugin/`) but cannot yet be installed upstream — written is not running,
+and only running counts. For anything else, the correct report is that the cap is
+best-effort discipline — not
 that it is "supported". Overstating this is the single most damaging thing you can do
 in this runbook, because the user will then trust a guarantee they do not have.
 

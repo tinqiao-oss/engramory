@@ -20,8 +20,9 @@ run. dsh exposes `ctx.tools.guard()` — a synchronous, **monotonic** refusal: o
 returns a reason, no later listener can turn it back into an allow. So here the limit is
 enforced, not requested — **once the plugin is actually installed and running**; a
 profile install currently fails upstream (see "Known limits"), and until then the cap on
-dsh is still rules plus the checker. Outside Claude Code, this is the only host where a
-deterministic cap is even possible.
+dsh is still rules plus the checker. Outside Claude Code, dsh is the first host with the
+shim actually written (a few others expose equivalent pre-write seams — see PORTING.md —
+but have no shim yet).
 
 **The protocol arrives with the plugin.** `ctx.skills.register()` contributes the skill at
 runtime, so it does not depend on landing files in one of the five skill roots dsh scans —
@@ -94,7 +95,7 @@ newline, so an index sitting exactly at the cap stays writable.
   unknown tools pass. Until the plugin runs inside a real profile this mapping is
   documentation-verified only.
 - **Not yet verified end to end inside dsh.** The guard's decision table is covered by
-  `node --test` (20 cases, run in Engramory's CI), and the wiring for the AGENTS.md block
+  `node --test` (21 cases, run in Engramory's CI), and the wiring for the AGENTS.md block
   and skill discovery was dogfooded against a live `deepseek-v4-flash` session. But
   installing a *third-party plugin* into a profile currently fails on dsh 0.1.0-rc.6:
   `dsh plugin` shells out to `pnpm` (not bundled), and a direct `pnpm add` then dies on

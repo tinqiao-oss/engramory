@@ -27,7 +27,7 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   silently disabled the guard; a sub-1 cap floored to zero. The guard now mirrors the
   Python hook's rule — deny only a result that is over a cap AND grew — simulates
   `old_str`/`new_str` edits, gates only known mutating tools, and validates its
-  config. 20 `node --test` cases pin the new table. (adapters/dsh/plugin/)
+  config. 21 `node --test` cases pin the new table. (adapters/dsh/plugin/)
 
 - **dsh installer: three installed-but-inert paths.** `$DSH_HOME` was ignored (config
   written to a `~/.dsh` dsh never read when the env var was set); a `--project-root`
@@ -77,15 +77,16 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   `node --test` suite pins the decision table (including the trailing-newline off-by-one
   that would refuse a legitimate at-cap index).
 
-  Outside Claude Code, this is the only host where the 200-line / 25 KB limit CAN be
-  enforced rather than requested — once the plugin is actually installed and running.
+  Outside Claude Code, dsh is the first host with the cap shim actually written —
+  enforced once the plugin is installed and running (Kiro / Hermes / Cursor expose
+  equivalent pre-write seams, but no shim exists for them yet).
   It is **not yet installable**, and that is upstream: `dsh plugin`
   shells out to a `pnpm` it does not bundle, and a direct `pnpm add` then dies on
   `ERR_PNPM_FETCH_404` for `@deepseek-ai/dsh-type-meta` — a package the published tree
   depends on but the registry does not carry. Preview packaging, not a plugin defect.
   Published to npm as 0.1.0/0.1.1 (0.1.0 shipped without the `dsh.bundle` manifest and
-  installed inert; 0.1.1 fixed that); the 0.2.0 guard overhaul in this tree is not
-  published yet. (adapters/dsh/plugin/README.md)
+  installed inert; 0.1.1 fixed that); the 0.2.0 guard overhaul went to npm on
+  2026-08-16, just after the 0.8.0 stamp. (adapters/dsh/plugin/README.md)
 
 - **DeepSeek Harness (dsh) adapter.** dsh opened as a developer preview on 2026-08-13 with
   the two rails this protocol needs and no memory system of its own: `agent-instructions`
