@@ -28,9 +28,14 @@ import { basename } from 'node:path'
 
 export const name = 'engramory'
 
-// `tools` carries the cap and is required. `skills` is optional so the plugin still
-// loads (and still caps) on a profile that mounts no skill registry.
-export const inject = { required: ['tools'], optional: ['skills'] }
+// `tools` carries the cap and is the plugin's only declared dependency. Cordis reads
+// `inject` as an array of service names (or an object KEYED by them) and treats every
+// entry as a hard wait — the `{ required, optional }` shape is older-Cordis syntax that
+// the build dsh vendors resolves as services literally named "required"/"optional",
+// which never appear, so the plugin sat pending forever (issue #8). `skills` is
+// deliberately NOT declared: the cap must mount even on a profile with no skill
+// registry, so apply() probes it at runtime instead.
+export const inject = ['tools']
 
 /** Mirrors hooks/engramory_index_guard.py — the caps are the protocol's, not this port's. */
 const DEFAULT_INDEX_NAME = 'MEMORY.md'
@@ -58,19 +63,30 @@ export function apply(ctx, config = {}) {
 
   ctx.tools.guard((exec) => refuseOversizedIndex(exec, settings))
 
-  if (ctx.skills && config.registerSkill !== false) {
-    const skill = config.skill ?? builtinSkillBody()
-    ctx.skills.register({
-      name: 'engramory',
-      description:
-        'Curated file-based long-term memory: recall through MEMORY.md at the start of ' +
-        'a task, save durable user/feedback/project/reference facts, and sync before ' +
-        'compacting or opening a fresh thread.',
-      whenToUse:
-        'Starting or resuming work, learning something durable worth a future session, ' +
-        'or approaching a compact/clear/new-thread boundary.',
-      source: 'runtime',
-      content: skill,
+  // The skill registry is optional AND may activate after this plugin — fiber order
+  // between unrelated providers is not guaranteed, so a one-shot probe here would
+  // silently skip registration on such boots. ctx.inject() is Cordis' reactive form:
+  // the callback runs once `skills` is available (however late), re-runs if the
+  // registry reloads, and never makes the cap wait. A bare `ctx.skills` read at THIS
+  // level would throw (undeclared service — issue #8's second crash); inside the
+  // callback the service is declared, so the read is legal.
+  if (config.registerSkill !== false) {
+    ctx.inject(['skills'], (inner) => {
+      const skill = config.skill ?? builtinSkillBody()
+      // effect() ties the registration to the child fiber: it is disposed when the
+      // registry unloads, so a reload cannot accumulate duplicate registrations.
+      inner.effect(() => inner.skills.register({
+        name: 'engramory',
+        description:
+          'Curated file-based long-term memory: recall through MEMORY.md at the start of ' +
+          'a task, save durable user/feedback/project/reference facts, and sync before ' +
+          'compacting or opening a fresh thread.',
+        whenToUse:
+          'Starting or resuming work, learning something durable worth a future session, ' +
+          'or approaching a compact/clear/new-thread boundary.',
+        source: 'runtime',
+        content: skill,
+      }))
     })
   }
 }

@@ -306,8 +306,8 @@ wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
 pre-write *deny* hook. Claude Code's is written, tested, and RUNNING here; dsh's shim
-(`adapters/dsh/plugin/`) is written and decision-table-tested but blocked from running
-by the preview's plugin installer; some other hosts
+(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+) installs and activates on current dsh
+builds — 0.2.0 never activated (issue #8); some other hosts
 expose an equivalent seam too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
 a per-host I/O shim you write and verify yourself — while OpenClaw can only block via a
 `before_tool_call` plugin and some hosts have none. See [PORTING.md](PORTING.md) for the

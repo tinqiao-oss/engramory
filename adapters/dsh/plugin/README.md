@@ -18,15 +18,17 @@ because the index loads every session and everything past the cap silently stops
 recalled. On most hosts that limit is rules plus a checker the agent has to remember to
 run. dsh exposes `ctx.tools.guard()` — a synchronous, **monotonic** refusal: once a guard
 returns a reason, no later listener can turn it back into an allow. So here the limit is
-enforced, not requested — **once the plugin is actually installed and running**; a
-profile install currently fails upstream (see "Known limits"), and until then the cap on
-dsh is still rules plus the checker. Outside Claude Code, dsh is the first host with the
-shim actually written (a few others expose equivalent pre-write seams — see PORTING.md —
-but have no shim yet).
+enforced, not requested. Use **0.2.1 or later**: 0.2.0 shipped before profile installs
+worked upstream and carried an `inject` declaration this Cordis does not accept — it
+installed but never activated (issue #8). Outside Claude Code, dsh is the first host with
+the shim actually written (a few others expose equivalent pre-write seams — see
+PORTING.md — but have no shim yet).
 
-**The protocol arrives with the plugin.** `ctx.skills.register()` contributes the skill at
-runtime, so it does not depend on landing files in one of the five skill roots dsh scans —
-a path that is easy to get subtly wrong and fails silently when you do.
+**The protocol arrives with the plugin.** The skill is registered at runtime through
+dsh's skill registry — via a reactive `ctx.inject(['skills'], …)` child, so a profile
+without a registry still gets the cap and one whose registry activates late still gets
+the skill — which means it does not depend on landing files in one of the five skill
+roots dsh scans, a path that is easy to get subtly wrong and fails silently when you do.
 
 ## Install
 
@@ -92,18 +94,23 @@ newline, so an index sitting exactly at the cap stays writable.
   index cannot be grown further, and a shrinking write always passes.
 - **The tool roster follows dsh's documented tool-fs contract** (`write`/`edit` with
   `file_path`, `str_replace_editor` with `path`) and is deliberately conservative:
-  unknown tools pass. Until the plugin runs inside a real profile this mapping is
-  documentation-verified only.
-- **Not yet verified end to end inside dsh.** The guard's decision table is covered by
-  `node --test` (21 cases, run in Engramory's CI), and the wiring for the AGENTS.md block
-  and skill discovery was dogfooded against a live `deepseek-v4-flash` session. But
-  installing a *third-party plugin* into a profile currently fails on dsh 0.1.0-rc.6:
-  `dsh plugin` shells out to `pnpm` (not bundled), and a direct `pnpm add` then dies on
-  `ERR_PNPM_FETCH_404` for `@deepseek-ai/dsh-type-meta`, a package the published tree
-  depends on but which is not on the registry. That is a preview-packaging problem
-  upstream, not a plugin defect; this note goes away once a profile install resolves.
+  unknown tools pass.
+- **0.2.0 never activated; 0.2.1 is the first version that runs.** While the rc.6
+  preview bug blocked all third-party profile installs upstream, the only coverage a
+  plugin could have was mocks — and 0.2.0's mock hid two activation bugs: an
+  older-Cordis `{ required, optional }` inject shape (read as waiting for services
+  literally named `required`/`optional`, pending forever) and a bare `ctx.skills` read
+  of an undeclared service (throws under Cordis' reflective context). The first field
+  install caught both the moment installs became possible (issue #8). 0.2.1 fixes them,
+  verified end to end on a live dsh 0.1.0-rc.7 web profile (0.2.0 reproduces the boot
+  failure byte for byte; 0.2.1 boots and serves) and against the vendored
+  `@deepseek-ai/cordis` resolver (activation with, without, and with a late-mounted
+  skill registry). The test mock now mirrors the reflective-context access rules, and
+  the guard's decision table stays covered by `node --test` (22 cases, run in
+  Engramory's CI).
 - dsh is a developer preview and its plugin API can change. This plugin deliberately
-  touches only `ctx.tools.guard()` and `ctx.skills.register()` so it stays cheap to fix.
+  touches only `ctx.tools.guard()` and a reactive `ctx.inject(['skills'], …)` child
+  that registers the skill, so it stays cheap to fix.
 
 ## License
 

@@ -3,8 +3,10 @@
  *
  * Covers the guard's decision table directly. The guard is the whole point of this
  * plugin — a wrong `undefined` silently drops the cap, and a wrong refusal blocks
- * unrelated work — so every branch is pinned here rather than left to an end-to-end
- * run that dsh's preview packaging cannot currently support (see README).
+ * unrelated work — so every branch is pinned here. The mount() mock mirrors Cordis'
+ * reflective context on purpose: a plain-object mock let 0.2.0 ship an `inject`
+ * shape and a bare `ctx.skills` read that could never survive real activation
+ * (issue #8), so the mock now enforces the same access rules the real host does.
  */
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -17,14 +19,46 @@ import { apply, inject, name } from './index.js'
 function mount(config = {}, { withSkills = true } = {}) {
   let guard
   const skills = []
-  const ctx = {
+  const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
+  const services = {
     tools: { guard: (fn) => { guard = fn; return () => {} } },
-    ...(withSkills
-      ? { skills: { register: (skill) => { skills.push(skill); return () => {} } } }
-      : {}),
+    ...(withSkills ? { skills: skillRegistry } : {}),
   }
-  apply(ctx, config)
-  return { guard, skills }
+  // Mirrors Cordis' reflective context (issue #8): only services named in the
+  // caller's inject are readable as properties — anything else throws and must go
+  // through ctx.get() (undefined when absent) or a reactive ctx.inject() child whose
+  // callback waits for the service. A regression to a bare top-level `ctx.skills`
+  // read fails every test in this file, not just a real dsh boot.
+  const pending = []
+  const makeCtx = (declared) => new Proxy({}, {
+    get(_, prop) {
+      if (prop === 'get') return (name) => services[name]
+      if (prop === 'effect') return (fn) => fn()
+      if (prop === 'inject') {
+        return (deps, callback) => {
+          const attempt = () => {
+            if (!deps.every((name) => name in services)) return false
+            callback(makeCtx(new Set(deps)))
+            return true
+          }
+          if (!attempt()) pending.push(attempt)
+        }
+      }
+      if (typeof prop !== 'string') return undefined
+      if (declared.has(prop)) return services[prop]
+      throw new Error(`cannot get property "${prop}" without inject`)
+    },
+  })
+  apply(makeCtx(new Set(inject)), config)
+  // Simulates a skill registry whose fiber only activates after this plugin's did —
+  // fiber order between unrelated providers is not guaranteed on a real boot.
+  const mountSkillsLate = () => {
+    services.skills = skillRegistry
+    for (let i = pending.length - 1; i >= 0; i--) {
+      if (pending[i]()) pending.splice(i, 1)
+    }
+  }
+  return { guard, skills, mountSkillsLate }
 }
 
 const INDEX = 'MEMORY.md'
@@ -36,8 +70,12 @@ function write(file_path, content) {
 
 test('plugin metadata is what the loader expects', () => {
   assert.equal(name, 'engramory')
-  assert.deepEqual(inject.required, ['tools'])
-  assert.ok(inject.optional.includes('skills'))
+  // An ARRAY of service names. Cordis reads object-form inject as keyed BY service
+  // name — `{ required: [...], optional: [...] }` meant "wait for services named
+  // required/optional" and the plugin never activated (issue #8). `skills` must stay
+  // out of here: every declared service is a hard wait, and the cap has to mount on
+  // profiles with no skill registry.
+  assert.deepEqual(inject, ['tools'])
 })
 
 test('a write well inside the caps passes', () => {
@@ -212,4 +250,20 @@ test('skill registration can be declined, and a skill-less host still gets the c
   assert.equal(mount({ registerSkill: false }).skills.length, 0)
   const { guard } = mount({}, { withSkills: false })
   assert.match(guard(write(`/s/${INDEX}`, big(300))), /200/)
+})
+
+test('a skill registry that activates after the plugin still gets the skill', () => {
+  // Adversarial review of the issue-#8 fix caught this window: a one-shot
+  // ctx.get() probe silently skipped registration whenever the registry's fiber
+  // activated later than this plugin's. The reactive ctx.inject() child must pick
+  // it up whenever it arrives — and a declined registration must stay declined.
+  const late = mount({}, { withSkills: false })
+  assert.equal(late.skills.length, 0)
+  late.mountSkillsLate()
+  assert.equal(late.skills.length, 1)
+  assert.equal(late.skills[0].name, 'engramory')
+
+  const declined = mount({ registerSkill: false }, { withSkills: false })
+  declined.mountSkillsLate()
+  assert.equal(declined.skills.length, 0)
 })

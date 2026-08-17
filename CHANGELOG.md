@@ -6,6 +6,31 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **dsh-engramory 0.2.1: the plugin could never activate — caught by the first field
+  install (issue #8).** Two bugs, both invisible to the plain-object test mock and both
+  latent while the rc.6 preview blocked third-party installs upstream. The `inject`
+  declaration used the older-Cordis `{ required: [...], optional: [...] }` shape, which
+  the Cordis dsh vendors resolves as waiting for services literally named
+  `required`/`optional` — never provided, so the plugin sat pending forever. And once
+  past that, `apply()` dereferenced `ctx.skills` bare, which Cordis' reflective context
+  forbids for undeclared services (`cannot get property "skills" without inject`). Now:
+  `inject = ['tools']` (every declared service is a hard wait, and the cap must mount on
+  profiles with no skill registry), and the skill registered through a reactive
+  `ctx.inject(['skills'], …)` child — adversarial review of the first cut caught that a
+  one-shot `ctx.get('skills')` probe silently skipped registration whenever the
+  registry's fiber activated later than the plugin's; the reactive form picks the
+  registry up whenever it arrives and ties the registration's disposal to its lifetime.
+  The test mock is replaced by a Proxy that enforces the reflective access rules (a
+  regression to a bare read fails every case in the file; a late-activating registry is
+  pinned by its own case), and the fix verified twice over: the activation matrix —
+  with, without, and with a late-mounted skill registry — against the vendored
+  `@deepseek-ai/cordis` resolver, and end to end on a live dsh 0.1.0-rc.7 web profile,
+  where 0.2.0 reproduces the reported boot failure byte for byte and 0.2.1 boots and
+  serves. Docs that still said "not installable
+  upstream" were swept in the same pass: installs work on current dsh builds, which is
+  exactly how the bug surfaced. (adapters/dsh/plugin/, published as `dsh-engramory`
+  0.2.1)
+
 - **Root discovery manifest.** Registry crawlers (plugin.dshdesk.com and the
   `awesome-dsh-plugin` review bar before it) verify a `dsh.bundle` object in the
   repo-ROOT `package.json` — the ecosystem's de-facto convention, and this repo kept

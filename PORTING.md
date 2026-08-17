@@ -149,10 +149,10 @@ The cap stops the index growing past the host's load window. Strongest → softe
    - **Trae** — has **no** pre-write deny (only post-write review/undo), so the cap
      can't be deterministic there; use rung 2.
 
-   So the cap is portable *in principle* on hosts with a real pre-write deny — but
-   **only the Claude Code hook here is written, tested, AND running**. The dsh shim
-   (`adapters/dsh/plugin/`) is written and decision-table-tested, but the preview's
-   plugin installer cannot mount it yet; for the others you write
+   So the cap is portable *in principle* on hosts with a real pre-write deny — and
+   **two shims here are written, tested, AND running**: the Claude Code hook and the
+   dsh plugin (`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+ — 0.2.0 never
+   activated, issue #8); for the others you write
    and verify the shim yourself. See `hooks/INSTALL.md`.
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
@@ -242,8 +242,8 @@ See [adapters/codex/README.md](adapters/codex/README.md),
 [adapters/openclaw/README.md](adapters/openclaw/README.md) and
 [adapters/dsh/README.md](adapters/dsh/README.md) for the exact behavior and
 limitations (all three enforce the cap by rules + `engramory_check.py`, not a
-deterministic hook; dsh additionally has a guard plugin, `dsh-engramory`, that is not
-yet installable upstream).
+deterministic hook; dsh additionally has a deterministic guard plugin, `dsh-engramory` —
+use 0.2.1+, the first version that activates on a real profile: issue #8).
 
 Kiro has no init helper yet — wire it manually (one always-on steering file + a
 non-steering `.engramory-memory/` store) per

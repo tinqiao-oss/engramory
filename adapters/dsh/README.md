@@ -85,12 +85,14 @@ Paths above are for the user-global install. A `--project-root` install puts the
 > [`plugin/`](plugin/) is that guard written for dsh — `dsh-engramory`, zero-dependency
 > ESM, its decision table pinned by `node --test` in CI.
 >
-> It is **not yet installable into a profile**, and that is upstream: `dsh plugin` shells
-> out to a `pnpm` it does not bundle, and a direct `pnpm add` dies on `ERR_PNPM_FETCH_404`
-> for `@deepseek-ai/dsh-type-meta` — a package the published tree depends on but which is
-> not on the registry. Until that resolves, the cap you get from the steps above is rules
-> + `engramory_check.py`. Engramory claims a deterministic guarantee only where it is both
-> written and running (today, Claude Code). See [plugin/README.md](plugin/README.md).
+> Profile installs succeed on current dsh builds — rc.6's `ERR_PNPM_FETCH_404` on
+> `@deepseek-ai/dsh-type-meta` is fixed upstream (rc.7), though `dsh plugin` still
+> shells out to a `pnpm` you must have on PATH. Install **`dsh-engramory` 0.2.1 or
+> later**: 0.2.0 installed but never activated (issue #8 — a stale-Cordis `inject`
+> declaration left it pending forever), which the very first field install caught.
+> Verified here end to end on a live rc.7 web profile: 0.2.0 reproduces the boot
+> failure byte for byte, 0.2.1 boots and serves. See
+> [plugin/README.md](plugin/README.md).
 
 ## What was dogfooded, and how
 

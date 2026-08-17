@@ -66,7 +66,7 @@ deny hook:
 > That plugin is **not shipped or verified here** — until it is, treat the OpenClaw cap
 > as best-effort (rules + `engramory_check.py`). This matches Engramory's honesty rule:
 > the deterministic guarantee is only claimed where it's actually written and tested
-> (today, Claude Code).
+> (today, Claude Code and dsh — `dsh-engramory` 0.2.1+, issue #8).
 
 ## Commands the agent can run
 
