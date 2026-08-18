@@ -1,0 +1,12 @@
+# Actions are pinned to immutable commit SHAs (a tag can be moved to point at new
+# code). Pinning alone would freeze them at whatever was current on the day it was
+# done, so Dependabot owns the other half of that trade: it bumps the SHA and the
+# trailing "# vX.Y.Z" comment together, and the bump arrives as a reviewable PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
