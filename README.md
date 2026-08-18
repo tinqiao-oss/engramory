@@ -18,6 +18,11 @@ itself stays git-ignored).
 > *Engramory* — coined from *engram* (the physical trace a memory leaves in the
 > brain) + *memory*. Here: one file = one fact.
 
+> ⚠️ **Unrelated projects share this name.** *engram + memory* is an obvious
+> coinage and at least one other repository arrived at it independently. This
+> project is only ever `tinqiao-oss/engramory` (npm: `dsh-engramory`); a same-named
+> repo under a different owner is not a fork, a mirror, or a newer version of it.
+
 > 🤖 **Are you an AI agent, asked to install or check this?** Start at
 > **[AGENT-SETUP.md](AGENT-SETUP.md)**, not at the install steps below. It is the
 > procedure for working out what your host can actually enforce, whether a store
@@ -270,6 +275,15 @@ that reads/writes workspace markdown, and a real pre-write deny hook. Wiring is 
 
 ### DeepSeek Harness (dsh)
 
+[![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
+
+That card is [dsh-xray](https://github.com/unStone/dsh-xray)'s static capability scan of
+the plugin, and `C2` reads worse than it is: the level fires on `manifest.bundle.patch`,
+which **74.6%** of the scanned ecosystem declares because a plugin that omits it silently
+never mounts. That one flag is the entire card here. Across 4,092 scanned plugins 42.6%
+ship `exec`, 14.0% `base64_decode`, 10.4% credential-like env reads — this plugin has none
+of those, no `eval`, no install script, and no outbound domains.
+
 Use the dsh init helper (defaults to `$DSH_HOME` — the env var wins when set, else `~/.dsh`):
 
 ```sh
@@ -287,7 +301,9 @@ file tools resolve relative paths against the session cwd); a project block stay
 relative so the repo can move. The index cap from those steps is rules + `engramory_check.py`,
 **not** a deterministic deny hook — though [`adapters/dsh/plugin/`](adapters/dsh/plugin/)
 (`dsh-engramory`) implements one against `ctx.tools.guard()`, whose refusal is monotonic.
-What blocks it today is dsh's own preview packaging, not the plugin.
+Install **0.2.1 or later**: dsh's preview-era "cannot install third-party plugins"
+bug is fixed upstream (rc.7), and 0.2.0 installs but never activates (issue #8 —
+older-Cordis `inject` syntax).
 
 Wiring *and* model behavior were dogfooded against `deepseek-v4-flash`: the block arrives
 as a `<system-reminder>`, a question answerable only from a stored note made the model open

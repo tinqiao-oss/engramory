@@ -11,6 +11,10 @@
 > *Engramory* —— 由 *engram*(记忆在大脑里留下的物理痕迹)+ *memory* 造的词。
 > 在这里:**一个文件 = 一条事实**。
 
+> ⚠️ **有同名但无关的项目。** *engram + memory* 这个词造得很自然,已经有别的仓库
+> 独立撞上同一个名字。本项目只有 `tinqiao-oss/engramory` 一个出处(npm 包名
+> `dsh-engramory`);其他所有者名下的同名仓库既不是它的 fork、镜像,也不是新版本。
+
 > 🤖 **你是被要求安装或检查它的 AI agent 吗?** 先读
 > **[AGENT-SETUP.md](AGENT-SETUP.md)**,不要直接照下面的安装步骤动手。那份文档告诉你:
 > 怎么判断你所在宿主**真正**能强制什么、机器上是否已有记忆库、哪些东西绝对不能碰、
@@ -158,6 +162,14 @@ markdown 的智能体,还有真正的写前 deny hook。目前手动接线(还�
 > 落地/实测)。完整说明:[adapters/kiro/README.md](adapters/kiro/README.md)。
 
 ### DeepSeek Harness(dsh)
+
+[![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
+
+上面这张卡是 [dsh-xray](https://github.com/unStone/dsh-xray) 对本插件的静态能力扫描。
+`C2` 看着比实际吓人:这一级是由 `manifest.bundle.patch` 触发的,而被扫描的生态里
+**74.6%** 都声明了它 —— 因为不声明的插件根本挂载不上(还不报错)。这里整张卡就只有
+这一个 flag。4092 个被扫插件中,42.6% 带 `exec`、14.0% 带 `base64_decode`、10.4% 会读
+疑似凭据的环境变量;本插件这些一个都没有,也没有 `eval`、没有安装脚本、不连任何外部域名。
 
 用 dsh init helper(默认装到 `$DSH_HOME`,环境变量优先,否则 `~/.dsh`):
 

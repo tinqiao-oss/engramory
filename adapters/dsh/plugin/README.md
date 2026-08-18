@@ -1,5 +1,9 @@
 # dsh-engramory
 
+[![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
+
+<sub>`C2` is the level `manifest.bundle.patch` puts every mountable dsh plugin at (74.6% of the scanned ecosystem); it is the only flag on this card — no `exec`, `eval`, install script, outbound domain, or environment read.</sub>
+
 Curated, file-based long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) —
 plain markdown notes you can open with anything, one store shared across every host you
 use, and an index cap that is a **real refusal** rather than a request. (If the store
