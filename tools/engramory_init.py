@@ -167,6 +167,47 @@ def _replace_block(existing, block, begin, end, heading="AGENTS.md"):
     return f"# {heading}\n\n" + block + "\n"
 
 
+def _remove_block(existing, begin, end):
+    """Cut a well-formed BEGIN..END pair out entirely. Mirror of `_replace_block`.
+
+    Returns `(new_text, status)`, status one of `removed` / `absent` / `malformed`.
+
+    The well-formedness bar is deliberately the SAME one `_replace_block` uses to decide
+    it may overwrite that span: exactly one BEGIN and one END, in order, each its own
+    whole line. Install and uninstall disagreeing about what "the block" is would be the
+    worst bug available here — one of them would be operating on a span the other never
+    wrote.
+
+    Where the two differ is the fallback. `_replace_block` may REPAIR a malformed file
+    (drop stray marker lines, append a fresh block) because its job is to end with a
+    correct block present. Uninstall's job is to DELETE from a user-owned file, so an
+    ambiguous file is exactly where guessing is unaffordable: leave it byte-identical and
+    report `malformed`. A block the user must remove by hand is recoverable; content this
+    tool deleted on a guess is not.
+    """
+    lines = existing.splitlines()
+    begins = [n for n, ln in enumerate(lines) if ln.strip() == begin]
+    ends = [n for n, ln in enumerate(lines) if ln.strip() == end]
+    if len(begins) == 1 and len(ends) == 1 and begins[0] < ends[0]:
+        before = "\n".join(lines[:begins[0]]).rstrip()
+        # Drop only the blank separator lines the writer put around the block. `strip()`
+        # here also ate the LEADING WHITESPACE of the first surviving line, silently
+        # re-indenting a user's nested list item or code block that followed the marker.
+        tail = lines[ends[0] + 1:]
+        while tail and not tail[0].strip():
+            tail.pop(0)
+        while tail and not tail[-1].strip():
+            tail.pop()
+        after = "\n".join(tail)
+        if before and after:
+            return before + "\n\n" + after + "\n", "removed"
+        remainder = before or after
+        return (remainder + "\n" if remainder else ""), "removed"
+    if not begins and not ends:
+        return existing, "absent"
+    return existing, "malformed"
+
+
 def _ensure_gitignore(project_root, memory_root):
     if not _same_or_inside(memory_root, project_root):
         return "skipped (memory root is outside project)"
@@ -707,6 +748,12 @@ def _remove_managed_hook_handlers(groups, path, event):
     return kept_groups
 
 
+# Written only when the file has no description of its own, which makes an exact match
+# the honest provenance test on the way back out: uninstall may drop this string, but
+# never a description the user wrote.
+_CODEX_HOOKS_DESCRIPTION = "Project lifecycle hooks, including Engramory continuity checks."
+
+
 def _merge_codex_hooks(
         existing, path, hook_path, sync_path, memory_root, mode, hook_python=None):
     data = dict(existing)
@@ -747,8 +794,7 @@ def _merge_codex_hooks(
 
     data["hooks"] = hooks
     if "description" not in data:
-        data["description"] = (
-            "Project lifecycle hooks, including Engramory continuity checks.")
+        data["description"] = _CODEX_HOOKS_DESCRIPTION
     return data
 
 
@@ -921,6 +967,264 @@ def _install_codex_hooks(
         f"sync helper {sync_status}; {ignore_status}; "
         f"interpreter baked in: {interpreter}; "
         f"NOT active until you trust it in Codex's /hooks")
+
+
+# --- Uninstall -------------------------------------------------------------------
+#
+# The store is NEVER touched. Everything below removes only wiring this installer
+# wrote: the marked rules block, the copied skill tree, and the managed Codex hooks.
+# Memories are the user's data and the only artefact here that cannot be regenerated
+# from the repo, so "uninstall" means "unwire the host", never "delete the notes".
+
+
+def _refuse_store_overlap(path, memory_root, what):
+    """Refuse to delete anything that is, or contains, the memory store.
+
+    The install-time overlap guards only fire for the flags that create the artefact
+    (`--install-skill` / `--install-hooks`), so a plain `init` accepts
+    `--memory-root .codex/engramory` and a later uninstall would have recursively
+    deleted the store. Nothing here is worth a note.
+    """
+    if _same_or_inside(memory_root, path) or _same_or_inside(path, memory_root):
+        raise SystemExit(
+            "refusing to remove %s (%s): it overlaps the memory store at %s. "
+            "Move the store, or delete the wiring by hand — uninstall never deletes "
+            "memories." % (what, path, memory_root))
+
+
+def _uninstall_skill(project_root, cfg, memory_root, dry_run):
+    # `_skill_root` consults $DSH_HOME to decide whether this root is the host's home
+    # (`<DSH_HOME>/skills`) or a project (`<project>/.dsh/skills`), so an uninstall run
+    # with a DIFFERENT $DSH_HOME than the install resolves a different directory. It
+    # then finds nothing to remove and says so; the fingerprint check below is what
+    # keeps that miss from turning into a delete of whatever else lives at the new path.
+    skill_root = _skill_root(project_root, cfg)
+    display = _display_path(skill_root, project_root)
+    if not skill_root.exists():
+        return "absent (%s)" % display
+    # Only delete a directory that is recognisably THIS installer's output. A lone
+    # SKILL.md proves the directory is *a* skill, not that it is ours — someone else's
+    # skill that happens to be named `engramory` would have been rmtree'd. Require the
+    # full set `_copy_skill` writes; a partially-copied install is reported, not deleted.
+    fingerprint = ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md")
+    missing = [n for n in fingerprint if not (skill_root / n).is_file()]
+    if missing:
+        return ("left %s (missing %s - not recognisable as an Engramory skill install)"
+                % (display, ", ".join(missing)))
+    _refuse_store_overlap(skill_root, memory_root, "the skill install dir")
+    if dry_run:
+        return "would remove %s" % display
+    # Re-check containment immediately before the rmtree, exactly as _copy_skill does:
+    # a parent swapped for a symlink between check and call would aim the delete
+    # outside the project.
+    _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
+    shutil.rmtree(skill_root)
+    return "removed %s" % display
+
+
+def _managed_handler_count(groups):
+    """How many handlers in `groups` are ours. Structural churn is NOT ownership."""
+    total = 0
+    for group in groups if isinstance(groups, list) else []:
+        if not isinstance(group, dict):
+            continue
+        for handler in group.get("hooks", []) or []:
+            if not isinstance(handler, dict):
+                continue
+            if handler.get("type") == "command" and handler.get("statusMessage") in (
+                    tuple(_CODEX_HOOK_STATUSES.values())
+                    + tuple(_CODEX_LEGACY_HOOK_STATUSES.values())):
+                total += 1
+    return total
+
+
+def _uninstall_codex_hooks(project_root, memory_root, dry_run):
+    """Drop this installer's Codex handlers, its managed scripts, and its ignore rule."""
+    notes = []
+    hooks_path = project_root / ".codex" / "hooks.json"
+    if hooks_path.exists():
+        # A malformed file must not abort the run: by this point the rules block and the
+        # skill are already gone, so raising here would leave a half-uninstalled tree
+        # with no report and an error message about *installing*.
+        try:
+            data = _load_codex_hooks(hooks_path)
+        except SystemExit as exc:
+            return "hooks.json: LEFT UNTOUCHED (%s)" % exc
+        hooks = data.get("hooks", {})
+        # Count what is OURS, not whether the structure changed. An empty user group
+        # (`{"matcher": "...", "hooks": []}`) is dropped by the pruning helper, which
+        # made a never-installed file look like it had held only Engramory handlers —
+        # and then deleted it.
+        dropped = any(_managed_handler_count(hooks.get(e, [])) for e in _CODEX_HOOK_EVENTS)
+        for event in _CODEX_HOOK_EVENTS:
+            if event not in hooks:
+                continue
+            kept = _remove_managed_hook_handlers(hooks[event], hooks_path, event)
+            if kept:
+                hooks[event] = kept
+            else:
+                del hooks[event]
+        if not dropped:
+            notes.append("hooks.json: no Engramory handlers found")
+        elif dry_run:
+            notes.append("hooks.json: would drop Engramory handlers")
+        else:
+            data["hooks"] = hooks
+            # The description is ours only when it still matches what we wrote (the
+            # merge fills in an ABSENT one and never overwrites). Leaving it behind
+            # stranded a file reading {"hooks": {}, "description": "...Engramory..."},
+            # which is both untrue and enough to stop the emptiness check below firing.
+            # KNOWN EDGE: a user who hand-wrote this exact sentence before installing
+            # would have it dropped with the file. Byte-equality is the only provenance
+            # signal the format carries, the collision needs a verbatim match, and what
+            # is lost is one sentence about hooks that no longer exist.
+            if data.get("description") == _CODEX_HOOKS_DESCRIPTION:
+                del data["description"]
+            # A file that is now empty was ours alone; one that still carries a
+            # teammate's handler is shared and must survive with their entry intact.
+            if data == {"hooks": {}}:
+                # `.codex` itself could be a symlink pointing outside the project; unlink
+                # follows the parent path, so check containment before deleting.
+                _refuse_symlink_escape(hooks_path, project_root, "the Codex hooks file")
+                hooks_path.unlink()
+                notes.append("hooks.json: removed (held only Engramory handlers)")
+            else:
+                _write_text(hooks_path, json.dumps(data, indent=2) + "\n",
+                            guard_root=project_root)
+                notes.append("hooks.json: dropped Engramory handlers, kept the rest")
+    else:
+        notes.append("hooks.json: absent")
+
+    managed_root = project_root / ".codex" / "engramory"
+    if managed_root.exists():
+        _refuse_store_overlap(managed_root, memory_root, "the managed hook dir")
+        if dry_run:
+            notes.append("would remove .codex/engramory/")
+        elif not managed_root.is_dir():
+            # A plain file (or a symlink to one) at this path is not our script dir;
+            # rmtree would raise NotADirectoryError after the rest was already gone.
+            notes.append("left .codex/engramory (not a directory)")
+        else:
+            _refuse_symlink_escape(managed_root, project_root, "the managed hook dir")
+            shutil.rmtree(managed_root)
+            notes.append("removed .codex/engramory/")
+
+    if not dry_run:
+        # Only un-ignores a rule this installer wrote (it looks for its own comment
+        # header directly above the entry); a user's deliberate ignore line stays.
+        if _drop_codex_hooks_gitignore_entry(project_root):
+            notes.append("dropped the .codex/hooks.json .gitignore entry")
+    return "; ".join(notes)
+
+
+def uninstall_host(args, host):
+    """Remove the wiring `init_host` installed for `host`. Never touches the store."""
+    cfg = HOST_CONFIG[host]
+    if args.install_skill or args.install_hooks:
+        raise SystemExit(
+            "--uninstall removes whatever this host installed; do not combine it "
+            "with --install-skill / --install-hooks")
+    root_arg = args.project_root
+    if root_arg is None:
+        root_arg = str(_host_home(cfg))
+    project_root = Path(root_arg).expanduser().resolve()
+    rules_file = cfg.get("rules_file", "AGENTS.md")
+    target = project_root / rules_file
+    dry = args.dry_run
+    # Resolved up front: every deletion below is checked against it, so it cannot be
+    # computed after the fact.
+    memory_root = Path(args.memory_root).expanduser()
+    if not memory_root.is_absolute():
+        memory_root = project_root / memory_root
+    memory_root = memory_root.resolve()
+
+    # Preflight, before ANY side effect - the same order init_host uses. Every path this
+    # run could delete is checked against the store first, so an overlap refuses the whole
+    # uninstall instead of taking the rules block with it and then stopping. The
+    # install-time guards only fire for the flags that create the artefact, so a plain
+    # `init --memory-root .codex/engramory` is accepted and only shows up here.
+    doomed = [(target, "the host rule file")]
+    if cfg.get("creates_store", True):
+        doomed.append((_skill_root(project_root, cfg), "the skill install dir"))
+    if host == "codex":
+        doomed.append((project_root / ".codex" / "engramory", "the managed hook dir"))
+        doomed.append((project_root / ".codex" / "hooks.json", "the Codex hooks file"))
+    for path, what in doomed:
+        _refuse_store_overlap(path, memory_root, what)
+
+    results = []
+
+    # 1. The rules wiring.
+    if cfg.get("frontmatter"):
+        # A dedicated file this installer owns outright (Cursor .mdc / Kiro steering):
+        # it carries no markers, so ownership is judged by path plus content.
+        display = _display_path(target, project_root)
+        if not target.exists():
+            results.append((rules_file, "absent (%s)" % display))
+        elif "Engramory" not in _read_text(target):
+            results.append((rules_file,
+                            "left %s (no Engramory content - not ours)" % display))
+        elif dry:
+            results.append((rules_file, "would remove %s" % display))
+        else:
+            # A parent of this dedicated file (e.g. `.kiro/steering`) may be a symlink
+            # out of the project; unlink() would then delete a file outside it.
+            _refuse_symlink_escape(target, project_root, "the host rule file")
+            _refuse_store_overlap(target, memory_root, "the host rule file")
+            target.unlink()
+            results.append((rules_file, "removed %s" % display))
+    elif not target.exists():
+        results.append((rules_file, "absent (%s)" % _display_path(target, project_root)))
+    else:
+        old = _read_text(target)
+        new, status = _remove_block(old, cfg["begin"], cfg["end"])
+        display = _display_path(target, project_root)
+        if status == "absent":
+            results.append((rules_file, "no Engramory block in %s" % display))
+        elif status == "malformed":
+            results.append((rules_file,
+                            "LEFT UNTOUCHED: %s has stray/duplicated Engramory markers, "
+                            "so the block's extent is ambiguous - remove the %s .. %s "
+                            "span by hand" % (display, cfg["begin"], cfg["end"])))
+        elif dry:
+            results.append((rules_file,
+                            "would remove the Engramory block from %s" % display))
+        elif new.strip():
+            _write_text(target, new, guard_root=project_root)
+            results.append((rules_file,
+                            "removed the Engramory block from %s" % display))
+        else:
+            # Nothing of the user's was in there - the file existed only to carry it.
+            target.unlink()
+            results.append((rules_file, "removed %s (it held only the block)" % display))
+
+    # 2. The skill copy — write hosts only. A reader is REFUSED --install-skill at
+    #    install time, so it has none of its own; letting it delete one would have had
+    #    `codex-reader --uninstall` wipe the skill that the Codex WRITE host installed
+    #    at the same shared `.agents/skills/engramory` path.
+    if cfg.get("creates_store", True):
+        results.append(("skill", _uninstall_skill(project_root, cfg, memory_root, dry)))
+    else:
+        results.append(("skill", "skipped (a reader installs none)"))
+
+    # 3. Codex hooks - only for the host that can install them, so uninstalling dsh
+    #    never disturbs a Codex setup living in the same tree.
+    if host == "codex":
+        results.append(("hooks", _uninstall_codex_hooks(project_root, memory_root, dry)))
+
+    verb = "Would uninstall" if dry else "Uninstalled"
+    print("%s Engramory wiring for %s in %s" % (verb, cfg["label"], project_root))
+    for label, detail in results:
+        print("  %s: %s" % (label, detail))
+    print("")
+    print("  memory store: NOT touched - %s" % memory_root)
+    print("  Your notes, the store's .gitignore entry, and any git history are left "
+          "exactly as they are.")
+    print("  Delete the store yourself if you truly want the memories gone.")
+    if dry:
+        print("")
+        print("  (--dry-run: nothing was written)")
+    return 0
 
 
 def init_host(args, host):
@@ -1199,6 +1503,18 @@ def build_parser():
     )
     parser.add_argument("--force", action="store_true",
                         help="replace the installed skill and managed Codex hook scripts")
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="remove this host's Engramory wiring (rules block, installed skill, managed "
+             "Codex hooks). The memory store is never touched - delete it yourself if you "
+             "want the notes gone.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --uninstall: report what would be removed without writing anything",
+    )
     return parser
 
 
@@ -1212,6 +1528,13 @@ def main(argv):
     except (AttributeError, ValueError, OSError):
         pass
     args = build_parser().parse_args(argv[1:])
+    if args.uninstall:
+        return uninstall_host(args, args.host)
+    # --dry-run describes an uninstall plan; there is no install equivalent, and silently
+    # ignoring it on an install would let a cautious "let me preview this" run write to
+    # the user's rules file for real.
+    if args.dry_run:
+        raise SystemExit("--dry-run is only meaningful with --uninstall")
     return init_host(args, args.host)
 
 

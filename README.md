@@ -339,6 +339,29 @@ hand-write Why/How.
 A plain chat UI with no file access / no rules mechanism cannot run Engramory — it
 needs a host that executes skills/rules and can read & write files.
 
+## Uninstall
+
+Remove a host's wiring by re-running the same host with `--uninstall`:
+
+```sh
+python tools/engramory_init.py codex --uninstall --dry-run   # print the plan
+python tools/engramory_init.py codex --uninstall             # do it
+```
+
+It removes only what the installer wrote — the marked block in the rules file, the
+installed skill copy, and the managed Codex hooks (dropping this installer's handlers
+while keeping anyone else's, and deleting `.codex/hooks.json` only when nothing but ours
+was in it).
+
+**The memory store is never touched**, nor is its `.gitignore` entry: the notes are the
+one artefact here that cannot be regenerated from this repo, and the ignore rule is what
+keeps a still-present store out of git. Delete the store yourself if you want the
+memories gone.
+
+A rules file with stray or duplicated markers (a botched hand-edit) is left
+byte-identical and reported, rather than guessed at — an Engramory block you must remove
+by hand is recoverable; content deleted on a guess is not.
+
 ## Configuration
 
 - **`<MEMORY_ROOT>`** — where memory lives. Keep it somewhere you'll actually

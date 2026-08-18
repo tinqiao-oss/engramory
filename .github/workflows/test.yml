@@ -32,6 +32,10 @@ jobs:
         run: python tests/test_codex_hooks.py
       - name: codex installer tests
         run: python tests/test_codex_init.py
+      # Uninstall deletes from user-owned files, so its fail-safe behaviour (malformed
+      # markers, foreign hook handlers, a store that must survive) is matrix-tested.
+      - name: uninstall tests
+        run: python tests/test_uninstall.py
       - name: protocol-text tests
         run: python tests/test_protocol_sync.py
       # Runs the plugin's own `node --test` decision table (node ships on all three

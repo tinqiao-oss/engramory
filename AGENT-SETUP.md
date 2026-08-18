@@ -298,9 +298,14 @@ decisions only they can make. This is Gate 2.
 Follow [`README.md`](README.md) for the host, or `engramory_init.py` where an adapter
 exists. Two things to carry into your report afterwards:
 
-- **There is no rollback.** Several targets are user-owned files, so a failure part-way
-  leaves earlier steps on disk. The installer prints exactly which steps landed — pass
-  that through to the user verbatim rather than summarizing it as "install failed".
+- **There is no AUTOMATIC rollback.** Several targets are user-owned files, so a failure
+  part-way leaves earlier steps on disk. The installer prints exactly which steps landed —
+  pass that through to the user verbatim rather than summarizing it as "install failed".
+  To clean up afterwards, re-run the same host with `--uninstall` (add `--dry-run` first to
+  print the plan): it removes the marked rules block, the installed skill, and the managed
+  Codex hooks, and it never touches the memory store. That is a separate deliberate step —
+  the failed run does not do it for you, and it is never the right answer to a failure you
+  have not yet reported.
 - **Re-running is not unconditionally safe.** A truncated index is adopted as "kept
   existing" by the next run, and a half-copied skill directory is kept without
   `--force`. If a run failed part-way, read its report before re-running.

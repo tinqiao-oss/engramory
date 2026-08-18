@@ -186,6 +186,25 @@ Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记
 
 一个没有文件访问、没有规则机制的纯聊天界面**用不了** Engramory——它需要一个能执行技能/规则、能读写文件的宿主。
 
+## 卸载
+
+对同一个宿主再跑一次、加 `--uninstall` 即可移除接线:
+
+```sh
+python tools/engramory_init.py codex --uninstall --dry-run   # 先打印将要做什么
+python tools/engramory_init.py codex --uninstall             # 真的执行
+```
+
+它只移除安装器自己写下的东西:规则文件里那段带标记的块、装进去的 skill 副本,以及托管的
+Codex hooks(只摘掉本安装器的 handler、保留别人的;仅当 `.codex/hooks.json` 里除了我们
+的没有别的内容时才删掉该文件)。
+
+**记忆库永不触碰**,它的 `.gitignore` 条目也不动:笔记是这里唯一无法从仓库重新生成的东西,
+而那条 ignore 规则正是让仍然留在磁盘上的记忆库不进 git 的保障。真想让记忆消失,请自己删。
+
+规则文件若有散落/重复的标记(手工改坏了),块的边界就是**有歧义**的 —— 这时文件会**逐字节
+原样保留**并给出报告,而不是去猜:需要你手动删掉的块是可恢复的,被猜错删掉的内容不是。
+
 ## 配置
 
 - **`<MEMORY_ROOT>`** —— 记忆放哪。放在你真的会去看的地方;在仓库里就 `.gitignore` 掉。
