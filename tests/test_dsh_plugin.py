@@ -87,6 +87,54 @@ def test_root_discovery_manifest_stays_in_step_with_the_plugin():
         os.path.join(PLUGIN, plugin["dsh"]["bundle"]["patch"]))
 
 
+def test_the_translated_readme_documents_the_same_config_fields():
+    """A second README is a drift point; the config table is the part users act on.
+
+    The plugin's directory README is what the community directories render (their
+    entry points at `adapters/dsh/plugin`, and they look for a translation only in
+    that same directory), so the Chinese version lives here rather than at the repo
+    root. Adding a config field to one table and not the other would leave half the
+    readership with documentation that silently omits it.
+
+    Only the field NAMES are compared - prose is expected to differ, that is the
+    point of a translation.
+    """
+    import re
+
+    def fields(name):
+        text = open(os.path.join(PLUGIN, name), encoding="utf-8").read()
+        # rows look like: | `indexName` | `MEMORY.md` | ... |
+        return {m.group(1) for m in re.finditer(r"^\|\s*`([A-Za-z]+)`\s*\|", text, re.M)}
+
+    en = fields("README.md")
+    zh = fields("README.zh-CN.md")
+    assert en, "no config rows found in README.md - did the table format change?"
+    assert en == zh, (
+        "the two READMEs document different config fields.\n"
+        "  only in README.md:        %s\n"
+        "  only in README.zh-CN.md:  %s" % (sorted(en - zh), sorted(zh - en)))
+
+
+def test_the_translated_readme_is_actually_translated():
+    """Guards against an English stub sitting at the zh filename.
+
+    The community directory sniffs language by CJK ratio (>3% = Chinese) rather than
+    trusting the filename, so a stub would be listed as English-only anyway - and the
+    reader would have been sent to a file that does not help them.
+    """
+    import re
+
+    text = open(os.path.join(PLUGIN, "README.zh-CN.md"), encoding="utf-8").read()
+    ratio = len(re.findall(r"[\u4e00-\u9fff]", text)) / max(len(text), 1)
+    assert ratio > 0.03, f"CJK ratio {ratio:.3f} would be sniffed as English"
+
+    en = open(os.path.join(PLUGIN, "README.md"), encoding="utf-8").read()
+    en_ratio = len(re.findall(r"[\u4e00-\u9fff]", en)) / max(len(en), 1)
+    assert en_ratio <= 0.03, (
+        f"README.md CJK ratio {en_ratio:.3f} is over the sniff threshold - the "
+        f"English page would be listed as Chinese")
+
+
 def test_dsh_plugin_ships_a_bundle_manifest():
     """Without `dsh.bundle.patch`, dsh has no idea how to mount an installed plugin.
 
