@@ -157,7 +157,13 @@ def _replace_block(existing, block, begin, end, heading="AGENTS.md"):
     if len(begins) == 1 and len(ends) == 1 and begins[0] < ends[0]:
         before = "\n".join(lines[:begins[0]])
         after = "\n".join(lines[ends[0] + 1:])
-        return before.rstrip() + "\n\n" + block + "\n\n" + after.lstrip()
+        # A block at the END of the file has nothing to separate from, so it gets a
+        # single trailing newline - the same ending the append paths below produce.
+        # Emitting "\n\n" unconditionally left one blank line the first re-run added
+        # and every later run kept, which showed up as a spurious one-line diff on a
+        # rules file people keep in git.
+        tail = "\n\n" + after.lstrip() if after.strip() else "\n"
+        return before.rstrip() + "\n\n" + block + tail
     # Malformed: drop the stray marker LINES only. A line that merely mentions a marker
     # is left alone — it is user prose, not a marker.
     cleaned = "\n".join(ln for ln in lines

@@ -409,6 +409,32 @@ def test_install_output_states_hooks_are_inactive_until_trusted(tmp_path):
 # exits 0 silently having run NOTHING (that near-miss shipped: the suite existed
 # for two releases while CI never executed a single test in it).
 
+def test_reinstalling_is_byte_identical(tmp_path):
+    """A second init must not change the rules file at all.
+
+    The block-replacement path appended a blank-line separator even when the block
+    ended the file, so the first re-run added one blank line that every later run then
+    preserved - a one-line diff appearing out of nowhere in a file people keep in git.
+    """
+    import subprocess
+    import sys as _sys
+
+    rules = tmp_path / "AGENTS.md"
+    rules.write_text("# Mine\n\nKeep this.\n", encoding="utf-8")
+
+    def run():
+        proc = subprocess.run(
+            [_sys.executable, str(INIT), "codex", "--project-root", str(tmp_path)],
+            capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        return rules.read_bytes()
+
+    first = run()
+    assert run() == first, "a second init changed the rules file"
+    assert run() == first, "a third init changed the rules file"
+    assert b"Keep this." in first
+
+
 def _main():
     import pathlib
     import shutil

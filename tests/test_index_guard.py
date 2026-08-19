@@ -151,6 +151,52 @@ def test_edit_shrink_over_cap_allowed(tmp_path):
 
 # --- exact boundary: 200 ok, 201 over ---
 
+def _unreadable_index(tmp_path):
+    """An index that EXISTS but cannot be read.
+
+    A directory at the index path is the portable way to get there: open() raises
+    (PermissionError on Windows, IsADirectoryError elsewhere - both OSError) while
+    os.path.exists() is True, which is exactly the state a lock or a permission
+    problem produces.
+    """
+    idx = tmp_path / "MEMORY.md"
+    idx.mkdir()
+    return idx
+
+
+def test_unreadable_index_does_not_deny_a_whole_file_rewrite(tmp_path):
+    """The compaction rewrite is the one operation the cap must never block.
+
+    An unreadable index leaves cur_lines/cur_bytes at 0, so every over-cap write
+    looks like growth - including the whole-file rewrite a user performs to SHRINK an
+    over-cap index. Edit/MultiEdit already refused to guess here; Write fell through
+    to the growth comparison and denied on a fiction, telling the user their
+    compaction "would GROW the memory index".
+    """
+    idx = _unreadable_index(tmp_path)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 250)))
+    assert rc == 0
+    assert _decision(out) != "deny", "a transient lock must not brick compaction"
+    assert _nudges(out), "but it must say the comparison was not verified"
+    assert "NOT verified" in (out.get("additionalContext") or "")
+
+
+def test_unreadable_index_stays_quiet_for_a_write_within_the_caps(tmp_path):
+    """Only an over-cap result is worth a word; small writes are not interesting."""
+    idx = _unreadable_index(tmp_path)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 40)))
+    assert rc == 0 and _decision(out) == "(silent)"
+
+
+def test_unreadable_index_still_lets_an_edit_through(tmp_path):
+    """Pins the pre-existing Edit contract, which Write now matches."""
+    idx = _unreadable_index(tmp_path)
+    rc, out = _run(idx, {"tool_name": "Edit", "tool_input": {
+        "file_path": str(idx), "old_string": "L\n", "new_string": ""}})
+    assert rc == 0 and _decision(out) != "deny"
+    assert _nudges(out)
+
+
 def test_boundary_200_lines_ok(tmp_path):
     idx = tmp_path / "MEMORY.md"  # new file
     rc, out = _run(idx, _w(idx, "\n".join(["L"] * 200)))

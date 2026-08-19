@@ -6,6 +6,27 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **The cap denied the one write that compacts an over-cap index.** When the index
+  exists but cannot be read — a transient lock, a permission problem — the guard has
+  no current size to compare against, so every over-cap write looked like growth,
+  including the whole-file rewrite a user performs to shrink it. The `Edit`/`MultiEdit`
+  path already refused to guess and reported "cap NOT verified" instead; `Write` fell
+  through to the growth comparison and denied on that fiction, telling the user their
+  compaction "would GROW the memory index". It now reports the same non-blocking
+  warning, naming the size the write will produce (which, unlike an edit, is known).
+  A within-caps write against an unreadable index stays silent.
+
+- **A second `init` changed the rules file for no reason.** Replacing the managed block
+  appended a blank-line separator even when the block ended the file, so the first
+  re-run added one blank line and every later run preserved it — a one-line diff
+  appearing out of nowhere in a file people keep in git. Both paths now end a
+  file-final block the same way.
+
+- Docs: the install note now says which interpreter to use where (`python3` on
+  macOS/Linux, `python` on Windows where `python3` is often a Store stub) instead of
+  parenthesising it, since every command below it is written as `python`.
+
+
 - **`--uninstall` could delete the memory store, while reporting that it had not.**
   `.codex/engramory/` was removed with `rmtree`, and the only thing standing between
   that and a user's notes was an overlap check against the memory root resolved for
