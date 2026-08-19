@@ -180,8 +180,10 @@ manual transition; they do **not** perform or guarantee this semantic sync.
 
 ## Install
 
-> Requires **Python 3.9+** for the hook and the `tools/` scripts (`python3` on
-> most systems).
+> Requires **Python 3.9+** for the hook and the `tools/` scripts. The commands below
+> are written as `python`; on macOS and most Linux distributions a bare `python` does
+> not exist, so use `python3` there (and `python` on Windows, where `python3` is often
+> a Microsoft Store stub that does nothing).
 
 ### Claude Code
 1. **Load the discipline as standing rules (primary):** paste

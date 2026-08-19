@@ -94,7 +94,9 @@ feedback → 保存持久 reference 指针 → 归档/删除过时或已完成�
 
 ## 安装
 
-> 需要 **Python 3.9+**,用于 hook 与 `tools/` 脚本(多数系统上是 `python3`)。
+> 需要 **Python 3.9+**,用于 hook 与 `tools/` 脚本。下面的命令一律写作 `python`;
+> macOS 与多数 Linux 上并不存在裸 `python`,请改用 `python3`(Windows 上反过来用
+> `python` —— 那里的 `python3` 常常是个什么都不做的微软商店占位程序)。
 
 ### Claude Code
 1. **把纪律作为常驻规则加载(主路径)**:把 [`rules-snippet.md`](rules-snippet.md) 贴进常驻规则——`~/.claude/CLAUDE.md`(所有项目)或项目 `CLAUDE.md`——让协议每个任务都生效,而不只是 skill 按相关性加载时才生效。

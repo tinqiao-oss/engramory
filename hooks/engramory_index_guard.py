@@ -236,6 +236,27 @@ def main():
         if new_text is None:
             new_text = ti.get("file_text", "")
         result = new_text or ""
+        if unreadable and (_lines(result) > hard or _bytes(result) > hard_b):
+            # An index that exists but could not be read leaves cur_lines/cur_bytes at
+            # 0, which makes EVERY over-cap write look like growth - including the
+            # whole-file rewrite a user performs to COMPACT an over-cap index, which is
+            # the one operation the cap must never block. Same contract as the
+            # Edit/MultiEdit path below: report that the comparison was not verified
+            # instead of denying on a fiction. A transient lock must not brick editing.
+            #
+            # Only over-cap writes are worth a word here; a small write against an
+            # unreadable index is not interesting and stays silent.
+            _emit(
+                context=(
+                    f"Engramory: the memory index could not be read, so whether this "
+                    f"write grows or shrinks it was NOT verified. The result would be "
+                    f"{_plural(_lines(result), 'line')} / {_kb(_bytes(result))} "
+                    f"(cap {hard} lines / {_kb(hard_b)}). The write is allowed - a "
+                    f"guard must never brick editing, and this may well be the "
+                    f"compaction itself - but run `python tools/engramory_check.py "
+                    f"<index>` afterwards and keep compacting if it reports OVER."
+                ),
+            )
     elif tool in ("Edit", "MultiEdit"):
         if unreadable:
             # The prediction would be fiction: report that the cap was NOT

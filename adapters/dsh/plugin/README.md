@@ -111,7 +111,7 @@ newline, so an index sitting exactly at the cap stays writable.
   failure byte for byte; 0.2.1 boots and serves) and against the vendored
   `@deepseek-ai/cordis` resolver (activation with, without, and with a late-mounted
   skill registry). The test mock now mirrors the reflective-context access rules, and
-  the guard's decision table stays covered by `node --test` (22 cases, run in
+  the guard's decision table stays covered by `node --test` (28 cases, run in
   Engramory's CI).
 - dsh is a developer preview and its plugin API can change. This plugin deliberately
   touches only `ctx.tools.guard()` and a reactive `ctx.inject(['skills'], …)` child
