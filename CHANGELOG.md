@@ -4,47 +4,18 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
-## Unreleased
+## 0.9.0 — 2026-08-19
 
-- The dsh plugin now ships a Chinese README. The community directories render the
-  README of the directory their entry points at (`adapters/dsh/plugin`) and look for a
-  translation **only in that same directory**, so the repo-root `README.zh-CN.md` was
-  never going to be found — the listing correctly reported the plugin as English-only
-  while most of its readers are Chinese-speaking. Two tests keep the pair honest: the
-  config tables must document the same field names, and the translation must survive
-  the directories' own language sniff (CJK ratio > 3%) in both directions.
-
-
-- **Uninstalling one write host deleted a skill another was still using.** `codex` and
-  `openclaw` resolve the same `.agents/skills/engramory` and the same `AGENTS.md`, so
-  removing either took the shared skill with it: the other host's block stayed in the
-  rules file, the skill it refers to was gone, and nothing said so. The reader/writer
-  form of this collision was already handled (a reader is refused `--install-skill`, so
-  it never deletes one); this is its write-host twin. The skill is now kept, and named
-  as still in use, while any other write host's block is still installed - and removed
-  by the last one to leave.
-
-
-- **The cap denied the one write that compacts an over-cap index.** When the index
-  exists but cannot be read — a transient lock, a permission problem — the guard has
-  no current size to compare against, so every over-cap write looked like growth,
-  including the whole-file rewrite a user performs to shrink it. The `Edit`/`MultiEdit`
-  path already refused to guess and reported "cap NOT verified" instead; `Write` fell
-  through to the growth comparison and denied on that fiction, telling the user their
-  compaction "would GROW the memory index". It now reports the same non-blocking
-  warning, naming the size the write will produce (which, unlike an edit, is known).
-  A within-caps write against an unreadable index stays silent.
-
-- **A second `init` changed the rules file for no reason.** Replacing the managed block
-  appended a blank-line separator even when the block ended the file, so the first
-  re-run added one blank line and every later run preserved it — a one-line diff
-  appearing out of nowhere in a file people keep in git. Both paths now end a
-  file-final block the same way.
-
-- Docs: the install note now says which interpreter to use where (`python3` on
-  macOS/Linux, `python` on Windows where `python3` is often a Store stub) instead of
-  parenthesising it, since every command below it is written as `python`.
-
+- **`--uninstall`: the wiring can be taken back out.** Re-running any host with
+  `--uninstall` reverses exactly what `init` wrote — its marked block in the rules
+  file (or the dedicated file a Cursor/Kiro reader owns outright), the copied skill
+  tree, and the managed Codex hooks — and `--dry-run` prints the plan first. THE
+  MEMORY STORE IS NEVER TOUCHED, nor is its `.gitignore` entry: the notes are the one
+  artefact here that cannot be regenerated from this repo. Where install and uninstall
+  deliberately differ is the fallback: `_replace_block` may REPAIR a malformed marker
+  file because it must end with a correct block present, while uninstall deletes from
+  user-owned files and so leaves anything ambiguous byte-identical and says so. A block
+  you must remove by hand is recoverable; content deleted on a guess is not.
 
 - **`--uninstall` could delete the memory store, while reporting that it had not.**
   `.codex/engramory/` was removed with `rmtree`, and the only thing standing between
@@ -85,25 +56,24 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   keeping a file we did write costs a line of output while deleting one we did not is
   unrecoverable.
 
-- **dsh-engramory 0.2.2: an unrelated `MEMORY.md` in any other project was refused,
-  with no way out.** The guard matched on basename alone, so a legitimate write to
-  some other repo's `MEMORY.md` (or, on Linux, a lowercase `memory.md`) got a real
-  refusal telling the user to compact a file that is not a memory index — and
-  retargeting `indexName` to dodge it would have left the real index unguarded. The
-  Claude Code hook has had `ENGRAMORY_INDEX_PATH` for this; the plugin now has its
-  counterpart, `indexPath`, which pins the guard to exactly one file (compared by
-  identity: symlinks and `..` resolved, case-folded on Windows only, with a path that
-  does not exist yet still guarded on its first write). Basename matching is unchanged
-  when it is unset, and an unpinned refusal now carries the way out in its own text.
+- **Uninstalling one write host deleted a skill another was still using.** `codex` and
+  `openclaw` resolve the same `.agents/skills/engramory` and the same `AGENTS.md`, so
+  removing either took the shared skill with it: the other host's block stayed in the
+  rules file, the skill it refers to was gone, and nothing said so. The reader/writer
+  form of this collision was already handled (a reader is refused `--install-skill`, so
+  it never deletes one); this is its write-host twin. The skill is now kept, and named
+  as still in use, while any other write host's block is still installed - and removed
+  by the last one to leave.
 
-  Identity is resolved through the deepest ancestor that exists rather than through a
-  plain `resolve()` fallback: pinning an index that does not exist yet, under a
-  symlinked ancestor, otherwise keyed it by its alias at config time and by the link's
-  target on every later call — the two never matched again and the guard silently
-  stopped gating its own index once the file was created. The pinned-path check also
-  runs only after the tool has been classified as one that can be refused, so a `read`
-  or an unknown tool still costs nothing but two string compares, and a refusal names
-  the pinned file rather than an `indexName` that is being ignored.
+- **The cap denied the one write that compacts an over-cap index.** When the index
+  exists but cannot be read — a transient lock, a permission problem — the guard has
+  no current size to compare against, so every over-cap write looked like growth,
+  including the whole-file rewrite a user performs to shrink it. The `Edit`/`MultiEdit`
+  path already refused to guess and reported "cap NOT verified" instead; `Write` fell
+  through to the growth comparison and denied on that fiction, telling the user their
+  compaction "would GROW the memory index". It now reports the same non-blocking
+  warning, naming the size the write will produce (which, unlike an edit, is known).
+  A within-caps write against an unreadable index stays silent.
 
 - **dsh-engramory 0.2.1: the plugin could never activate — caught by the first field
   install (issue #8).** Two bugs, both invisible to the plain-object test mock and both
@@ -130,6 +100,26 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   exactly how the bug surfaced. (adapters/dsh/plugin/, published as `dsh-engramory`
   0.2.1)
 
+- **dsh-engramory 0.2.2: an unrelated `MEMORY.md` in any other project was refused,
+  with no way out.** The guard matched on basename alone, so a legitimate write to
+  some other repo's `MEMORY.md` (or, on Linux, a lowercase `memory.md`) got a real
+  refusal telling the user to compact a file that is not a memory index — and
+  retargeting `indexName` to dodge it would have left the real index unguarded. The
+  Claude Code hook has had `ENGRAMORY_INDEX_PATH` for this; the plugin now has its
+  counterpart, `indexPath`, which pins the guard to exactly one file (compared by
+  identity: symlinks and `..` resolved, case-folded on Windows only, with a path that
+  does not exist yet still guarded on its first write). Basename matching is unchanged
+  when it is unset, and an unpinned refusal now carries the way out in its own text.
+
+  Identity is resolved through the deepest ancestor that exists rather than through a
+  plain `resolve()` fallback: pinning an index that does not exist yet, under a
+  symlinked ancestor, otherwise keyed it by its alias at config time and by the link's
+  target on every later call — the two never matched again and the guard silently
+  stopped gating its own index once the file was created. The pinned-path check also
+  runs only after the tool has been classified as one that can be refused, so a `read`
+  or an unknown tool still costs nothing but two string compares, and a refusal names
+  the pinned file rather than an `indexName` that is being ignored.
+
 - **Root discovery manifest.** Registry crawlers (plugin.dshdesk.com and the
   `awesome-dsh-plugin` review bar before it) verify a `dsh.bundle` object in the
   repo-ROOT `package.json` — the ecosystem's de-facto convention, and this repo kept
@@ -138,6 +128,24 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   ships (never published from the root; npm publishing stays in the plugin dir), and
   a test pins root and plugin name/version/patch in step so the duplicate cannot
   drift. Repo also gained the `dsh-plugin` GitHub topic the crawlers key on.
+
+- **A second `init` changed the rules file for no reason.** Replacing the managed block
+  appended a blank-line separator even when the block ended the file, so the first
+  re-run added one blank line and every later run preserved it — a one-line diff
+  appearing out of nowhere in a file people keep in git. Both paths now end a
+  file-final block the same way.
+
+- The dsh plugin now ships a Chinese README. The community directories render the
+  README of the directory their entry points at (`adapters/dsh/plugin`) and look for a
+  translation **only in that same directory**, so the repo-root `README.zh-CN.md` was
+  never going to be found — the listing correctly reported the plugin as English-only
+  while most of its readers are Chinese-speaking. Two tests keep the pair honest: the
+  config tables must document the same field names, and the translation must survive
+  the directories' own language sniff (CJK ratio > 3%) in both directions.
+
+- Docs: the install note now says which interpreter to use where (`python3` on
+  macOS/Linux, `python` on Windows where `python3` is often a Store stub) instead of
+  parenthesising it, since every command below it is written as `python`.
 
 ## 0.8.0 — 2026-08-16
 
