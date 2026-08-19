@@ -358,6 +358,12 @@ one artefact here that cannot be regenerated from this repo, and the ignore rule
 keeps a still-present store out of git. Delete the store yourself if you want the
 memories gone.
 
+That holds even for a store kept inside a directory the uninstall cleans up — it removes
+its own files by name and leaves anything else in place, naming what it kept. If your
+store is not at the default path, passing the same `--memory-root` to `--uninstall` is
+still worth it: it lets the closing report name your real store instead of saying it
+could not find one.
+
 A rules file with stray or duplicated markers (a botched hand-edit) is left
 byte-identical and reported, rather than guessed at — an Engramory block you must remove
 by hand is recoverable; content deleted on a guess is not.

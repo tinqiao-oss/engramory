@@ -9,9 +9,9 @@
  * (issue #8), so the mock now enforces the same access rules the real host does.
  */
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
@@ -196,6 +196,118 @@ test('the index name matches case-insensitively', () => {
   const { guard } = mount()
   assert.match(guard(write('/s/memory.md', big(300))), /300 lines/)
   assert.match(guard(write('/s/Memory.MD', big(300))), /300 lines/)
+})
+
+test('indexPath pins the guard to one file, so a same-named file elsewhere is free', () => {
+  // Without this, the only signal is the basename: an unrelated MEMORY.md in any
+  // other project got a real refusal, and renaming `indexName` to dodge it would
+  // have unguarded the real index. There was no way out; now there is one.
+  // The collision that matters is the SAME basename in a DIFFERENT project — that is
+  // what an unrelated repo's MEMORY.md looks like. A differently-named file would be
+  // let through by basename matching alone and would prove nothing.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const otherProject = mkdtempSync(join(tmpdir(), 'unrelated-'))
+  const real = join(dir, 'MEMORY.md')
+  const unrelated = join(otherProject, 'MEMORY.md')
+  writeFileSync(real, '- x\n')
+  writeFileSync(unrelated, '- x\n')
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+
+  const pinned = mount({ indexPath: real }).guard
+  assert.match(pinned({ name: 'write', arguments: { file_path: real, content: over } }),
+    /over the Engramory index cap/, 'the pinned index must still be guarded')
+  assert.equal(pinned({ name: 'write', arguments: { file_path: unrelated, content: over } }),
+    undefined, 'a different file must not be gated just because it exists')
+})
+
+test('a pinned path is compared by identity, not by spelling', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const real = join(dir, 'MEMORY.md')
+  writeFileSync(real, '- x\n')
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+  // Same file reached through a redundant `..` segment.
+  const detour = join(dir, '..', basename(dir), 'MEMORY.md')
+
+  const guard = mount({ indexPath: detour }).guard
+  assert.match(guard({ name: 'write', arguments: { file_path: real, content: over } }),
+    /over the Engramory index cap/, 'a `..` detour is the same file')
+})
+
+test('pinning an index that does not exist yet still guards its first write', () => {
+  // realpath() throws for a path with no file behind it; falling back to resolve()
+  // keeps the very first write to a brand-new index gated.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const notYet = join(dir, 'MEMORY.md')
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+
+  const guard = mount({ indexPath: notYet }).guard
+  assert.match(guard({ name: 'write', arguments: { file_path: notYet, content: over } }),
+    /over the Engramory index cap/)
+})
+
+test('an unpinned refusal tells the user how to stop guarding the wrong file', () => {
+  const guard = mount().guard
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+  const reason = guard({
+    name: 'write',
+    arguments: { file_path: '/some/other/project/MEMORY.md', content: over },
+  })
+  assert.match(reason, /indexPath/, 'the way out has to be in the refusal itself')
+
+  // ...and once pinned, the hint is noise: it no longer applies.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const real = join(dir, 'MEMORY.md')
+  writeFileSync(real, '- x\n')
+  const pinnedReason = mount({ indexPath: real }).guard(
+    { name: 'write', arguments: { file_path: real, content: over } })
+  assert.doesNotMatch(pinnedReason, /indexPath/)
+})
+
+test('a pinned index under a symlinked ancestor keeps its identity once created', () => {
+  // The dangerous pairing is "does not exist yet" + "symlinked ancestor". Keying the
+  // pin with a plain resolve() fallback stored the ALIAS path at config time, while
+  // every later call - the file now existing - resolved to the link's TARGET. The two
+  // never matched again, so the guard silently stopped guarding its own index: the
+  // exact silent-failure shape this project has shipped before.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'engramory-link-')))
+  const realDir = join(base, 'real-store')
+  const aliasDir = join(base, 'alias')
+  mkdirSync(realDir)
+  try {
+    // 'junction' works without elevation on Windows; 'dir' elsewhere.
+    symlinkSync(realDir, aliasDir, process.platform === 'win32' ? 'junction' : 'dir')
+  } catch {
+    return // no symlink privilege here; the assertions below need a real link
+  }
+
+  const pinned = join(aliasDir, 'MEMORY.md')
+  const guard = mount({ indexPath: pinned }).guard
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+
+  assert.match(guard({ name: 'write', arguments: { file_path: pinned, content: over } }),
+    /over the Engramory index cap/, 'the first write to a not-yet-created index')
+
+  writeFileSync(join(realDir, 'MEMORY.md'), '- x\n') // that first write lands
+
+  assert.match(guard({ name: 'write', arguments: { file_path: pinned, content: over } }),
+    /over the Engramory index cap/, 'GUARD WENT SILENT once the index existed')
+  assert.match(
+    guard({ name: 'write', arguments: { file_path: join(realDir, 'MEMORY.md'), content: over } }),
+    /over the Engramory index cap/, 'the same file by its real path is still the index')
+})
+
+test('a refusal names the pinned file, not an indexName that is being ignored', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const real = join(dir, 'FOO.md')
+  writeFileSync(real, Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n'))
+
+  // indexPath wins; quoting `indexName` would send the user after the wrong file.
+  const guard = mount({ indexPath: real, indexName: 'BAR.md' }).guard
+  // No old_str: the edit's result cannot be simulated, which is the branch that
+  // quotes the index name back at the user.
+  const reason = guard({ name: 'edit', arguments: { file_path: real, new_str: 'x' } })
+  assert.match(reason, /FOO\.md is already over/)
+  assert.doesNotMatch(reason, /BAR\.md/)
 })
 
 test('an empty or non-string indexName falls back instead of disabling the guard', () => {

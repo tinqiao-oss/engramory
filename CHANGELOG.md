@@ -6,6 +6,65 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **`--uninstall` could delete the memory store, while reporting that it had not.**
+  `.codex/engramory/` was removed with `rmtree`, and the only thing standing between
+  that and a user's notes was an overlap check against the memory root resolved for
+  the CURRENT run. Nothing persists where the store was installed, so the documented
+  bare `python tools/engramory_init.py codex --uninstall` compared against the default
+  path and deleted a store that had legitimately been created at
+  `--memory-root .codex/engramory` (a plain `init` accepts that layout — the
+  install-time overlap guard only fires for `--install-skill` / `--install-hooks`).
+  The report then printed "Your notes ... are left exactly as they are". Uninstall now
+  deletes the two managed scripts **by name** and `rmdir`s the directory only when
+  nothing else is left, so it no longer needs to know where the store is; anything
+  else in there is kept and named in the report. A shared filename is not ownership
+  either, so each candidate is checked for the `Engramory` header both managed scripts
+  carry: a user's own `engramory_sync.py` at that path survives. Every filesystem call
+  in the delete path now degrades into the report rather than raising — by the time it
+  runs the rules block and the skill are already gone, so an unhandled `OSError`
+  (a locked file, a permission-denied listing, one of the names turning out to be a
+  directory) would have left a half-uninstalled tree and a traceback in place of the
+  summary. Containment is re-checked immediately before each `unlink`, matching the
+  narrowing `_copy_skill` already does. The closing summary only claims the store is
+  untouched when it can actually see it, and otherwise says so and points at
+  `--memory-root`.
+
+  The skill directory had the same hole through a different door. Its fingerprint
+  check proves the directory **is** an Engramory skill install — it says nothing about
+  what else has been put beside it — and `rmtree(skill_root)` then took a store kept
+  at that same path (`--memory-root .agents/skills/engramory`, which a plain init
+  accepts) along with the skill. It now removes its own payload entry by entry
+  (`SKILL.md`, `rules-snippet.md`, `PORTING.md`, `AGENT-SETUP.md`, `LICENSE`,
+  `templates/`, `tools/`, kept in one list shared with the installer) and `rmdir`s the
+  directory only when nothing else remains, so a clean uninstall still leaves nothing
+  behind while a store in there survives and is named in the report.
+
+  Known limits, unchanged and deliberate: the containment re-checks narrow the
+  symlink-swap window rather than closing it (Python has no `dir_fd` on Windows), and
+  a file that cannot be read is treated as *not* ours — kept and reported, since
+  keeping a file we did write costs a line of output while deleting one we did not is
+  unrecoverable.
+
+- **dsh-engramory 0.2.2: an unrelated `MEMORY.md` in any other project was refused,
+  with no way out.** The guard matched on basename alone, so a legitimate write to
+  some other repo's `MEMORY.md` (or, on Linux, a lowercase `memory.md`) got a real
+  refusal telling the user to compact a file that is not a memory index — and
+  retargeting `indexName` to dodge it would have left the real index unguarded. The
+  Claude Code hook has had `ENGRAMORY_INDEX_PATH` for this; the plugin now has its
+  counterpart, `indexPath`, which pins the guard to exactly one file (compared by
+  identity: symlinks and `..` resolved, case-folded on Windows only, with a path that
+  does not exist yet still guarded on its first write). Basename matching is unchanged
+  when it is unset, and an unpinned refusal now carries the way out in its own text.
+
+  Identity is resolved through the deepest ancestor that exists rather than through a
+  plain `resolve()` fallback: pinning an index that does not exist yet, under a
+  symlinked ancestor, otherwise keyed it by its alias at config time and by the link's
+  target on every later call — the two never matched again and the guard silently
+  stopped gating its own index once the file was created. The pinned-path check also
+  runs only after the tool has been classified as one that can be refused, so a `read`
+  or an unknown tool still costs nothing but two string compares, and a refusal names
+  the pinned file rather than an `indexName` that is being ignored.
+
 - **dsh-engramory 0.2.1: the plugin could never activate — caught by the first field
   install (issue #8).** Two bugs, both invisible to the plain-object test mock and both
   latent while the rc.6 preview blocked third-party installs upstream. The `inject`
