@@ -6,6 +6,15 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- The dsh plugin now ships a Chinese README. The community directories render the
+  README of the directory their entry points at (`adapters/dsh/plugin`) and look for a
+  translation **only in that same directory**, so the repo-root `README.zh-CN.md` was
+  never going to be found — the listing correctly reported the plugin as English-only
+  while most of its readers are Chinese-speaking. Two tests keep the pair honest: the
+  config tables must document the same field names, and the translation must survive
+  the directories' own language sniff (CJK ratio > 3%) in both directions.
+
+
 - **Uninstalling one write host deleted a skill another was still using.** `codex` and
   `openclaw` resolve the same `.agents/skills/engramory` and the same `AGENTS.md`, so
   removing either took the shared skill with it: the other host's block stayed in the
