@@ -305,6 +305,17 @@ def _skill_root(project_root, cfg):
     return project_root.joinpath(*_skill_dir(cfg, project_root).split("/"), "engramory")
 
 
+# Exactly what _copy_skill writes into the skill directory. Uninstall removes these
+# entries and nothing else, for the same reason the Codex hook dir is emptied by name:
+# a user may legitimately keep a memory store at the same path
+# (`--memory-root .agents/skills/engramory`), and the fingerprint check below proves
+# the directory IS an Engramory skill install - it says nothing about whatever else
+# has been put beside it. An rmtree took the notes with it and the report still said
+# the store was untouched.
+_SKILL_FILES = ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md", "LICENSE")
+_SKILL_DIRS = ("templates", "tools")
+
+
 def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
     rel = f"{skill_dir}/engramory"
     skill_root = project_root.joinpath(*skill_dir.split("/"), "engramory")
@@ -322,9 +333,9 @@ def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
     # AGENT-SETUP.md travels with the install so the runbook is still reachable
     # afterwards — an agent asked to check, repair, or upgrade an existing setup needs
     # it exactly then, and the source checkout is often long gone.
-    for name in ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md", "LICENSE"):
+    for name in _SKILL_FILES:
         shutil.copy2(source_root / name, skill_root / name)
-    for dirname in ("templates", "tools"):
+    for dirname in _SKILL_DIRS:
         shutil.copytree(
             source_root / dirname,
             skill_root / dirname,
@@ -930,8 +941,8 @@ def _install_codex_hooks(
         existing,
         hook_python=None):
     managed_root = project_root / ".codex" / "engramory"
-    hook_path = managed_root / "engramory_codex_hook.py"
-    sync_path = managed_root / "engramory_sync.py"
+    hook_path = managed_root / _MANAGED_CODEX_SCRIPTS[0]
+    sync_path = managed_root / _MANAGED_CODEX_SCRIPTS[1]
     hook_status = _copy_managed_file(
         source_root / "hooks" / "codex" / "engramory_codex_hook.py",
         hook_path,
@@ -967,6 +978,51 @@ def _install_codex_hooks(
         f"sync helper {sync_status}; {ignore_status}; "
         f"interpreter baked in: {interpreter}; "
         f"NOT active until you trust it in Codex's /hooks")
+
+
+# The only two files the installer ever writes into `.codex/engramory/`. Uninstall
+# deletes these BY NAME and nothing else: the directory used to be rmtree'd wholesale,
+# which erased a store that a user had legitimately placed there with
+# `--memory-root .codex/engramory` (a plain `init` accepts that layout, and the
+# install-time overlap guard only fires for the flags that create an artefact). The
+# overlap check below is still worth keeping as an early, explicit refusal, but it
+# compares against the memory root of THIS run — an uninstall invoked without the
+# original `--memory-root` resolves the default and cannot see the real store. Deleting
+# only what we wrote does not depend on knowing where the store is.
+_MANAGED_CODEX_SCRIPTS = ("engramory_codex_hook.py", "engramory_sync.py")
+
+
+# One distinctive line from each managed script's header, used as its fingerprint.
+# Merely containing "Engramory" is too weak: a user writing their own tooling around
+# this project could easily mention it in a file that happens to share the name, and
+# uninstall would then delete their work. These sentences are specific enough that a
+# match means the file IS the shipped script (or a copy of it).
+#
+# If a script's header is ever reworded, update it here too. Failing to is the SAFE
+# direction - the file stops being recognised and is kept and reported, never deleted -
+# and `test_managed_script_markers_match_the_shipped_files` fails loudly to say so.
+_MANAGED_SCRIPT_MARKERS = {
+    "engramory_codex_hook.py": b"Codex lifecycle hook for explicit/assisted Engramory",
+    "engramory_sync.py": b"Record Codex/Engramory synchronization state",
+}
+
+
+def _looks_like_our_script(path, name):
+    """Content fingerprint: a shared NAME is not ownership.
+
+    A bounded read keeps a huge file from stalling the uninstall, and an unreadable
+    file is treated as NOT ours - the conservative direction, since the cost of
+    keeping a file we did write is a line in the report, while the cost of deleting
+    one we did not is unrecoverable.
+    """
+    marker = _MANAGED_SCRIPT_MARKERS.get(name)
+    if marker is None:
+        return False
+    try:
+        with open(path, "rb") as handle:
+            return marker in handle.read(4096)
+    except OSError:
+        return False
 
 
 # --- Uninstall -------------------------------------------------------------------
@@ -1012,14 +1068,55 @@ def _uninstall_skill(project_root, cfg, memory_root, dry_run):
         return ("left %s (missing %s - not recognisable as an Engramory skill install)"
                 % (display, ", ".join(missing)))
     _refuse_store_overlap(skill_root, memory_root, "the skill install dir")
+    try:
+        entries = sorted(e.name for e in skill_root.iterdir())
+    except OSError as exc:
+        return "left %s (could not read it: %s)" % (display, exc)
+    # Our own payload, and nothing else. A store kept at this same path shows up in
+    # `others` and survives - which is the whole point. (`templates/` legitimately
+    # contains a MEMORY.md of its own, so "holds an index" is not a usable signal for
+    # the payload directories; the store that matters sits at the root.)
+    payload = [n for n in (_SKILL_FILES + _SKILL_DIRS) if n in entries]
+    others = [n for n in entries if n not in payload]
     if dry_run:
-        return "would remove %s" % display
-    # Re-check containment immediately before the rmtree, exactly as _copy_skill does:
-    # a parent swapped for a symlink between check and call would aim the delete
-    # outside the project.
-    _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
-    shutil.rmtree(skill_root)
-    return "removed %s" % display
+        if payload and not others:
+            return "would remove %s" % display
+        if payload:
+            return ("would remove %d entr%s from %s and keep %d other%s (%s)"
+                    % (len(payload), "y" if len(payload) == 1 else "ies", display,
+                       len(others), "" if len(others) == 1 else "s",
+                       ", ".join(others[:3])))
+        return "would leave %s (nothing in it is recognisably ours)" % display
+    removed, failed = [], []
+    for name in payload:
+        # Re-check containment immediately before each delete, exactly as _copy_skill
+        # does: a parent swapped for a symlink in between would aim it outside the
+        # project.
+        _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
+        target = skill_root / name
+        try:
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            removed.append(name)
+        except OSError as exc:
+            failed.append("%s (%s)" % (name, exc))
+    note = ""
+    if failed:
+        note = "; could NOT remove %s" % "; ".join(failed)
+    if removed and not others and not failed:
+        try:
+            skill_root.rmdir()
+            return "removed %s" % display
+        except OSError as exc:
+            return "emptied %s but kept the directory (%s)" % (display, exc)
+    if removed:
+        return ("removed the skill payload from %s; KEPT the directory - %d entr%s in "
+                "it %s not ours (%s)%s"
+                % (display, len(others), "y" if len(others) == 1 else "ies",
+                   "is" if len(others) == 1 else "are", ", ".join(others[:3]), note))
+    return "left %s (nothing in it is recognisably ours)%s" % (display, note)
 
 
 def _managed_handler_count(groups):
@@ -1098,16 +1195,75 @@ def _uninstall_codex_hooks(project_root, memory_root, dry_run):
     managed_root = project_root / ".codex" / "engramory"
     if managed_root.exists():
         _refuse_store_overlap(managed_root, memory_root, "the managed hook dir")
-        if dry_run:
-            notes.append("would remove .codex/engramory/")
-        elif not managed_root.is_dir():
-            # A plain file (or a symlink to one) at this path is not our script dir;
-            # rmtree would raise NotADirectoryError after the rest was already gone.
+        if not managed_root.is_dir():
+            # A plain file (or a symlink to one) at this path is not our script dir.
             notes.append("left .codex/engramory (not a directory)")
         else:
             _refuse_symlink_escape(managed_root, project_root, "the managed hook dir")
-            shutil.rmtree(managed_root)
-            notes.append("removed .codex/engramory/")
+            # Delete the two scripts BY NAME AND CONTENT, never the directory as a
+            # whole. Anything else living here belongs to someone: most importantly a
+            # memory store put here with `--memory-root .codex/engramory`, which an
+            # rmtree destroyed while the report still promised the notes were untouched.
+            # Every filesystem call below is failure-tolerant: by this point the rules
+            # block and the skill are already gone, so raising here would leave a
+            # half-uninstalled tree and a traceback in place of the report.
+            try:
+                entries = sorted(e.name for e in managed_root.iterdir())
+            except OSError as exc:
+                entries = None
+                notes.append("left .codex/engramory/ (could not read it: %s)" % exc)
+            if entries is not None:
+                ours = [n for n in _MANAGED_CODEX_SCRIPTS
+                        if n in entries and (managed_root / n).is_file()
+                        and _looks_like_our_script(managed_root / n, n)]
+                others = [n for n in entries if n not in ours]
+                if dry_run:
+                    if ours and not others:
+                        notes.append("would remove .codex/engramory/")
+                    elif ours:
+                        notes.append("would remove %s from .codex/engramory/ and keep "
+                                     "%d other entr%s (%s)"
+                                     % (", ".join(ours), len(others),
+                                        "y" if len(others) == 1 else "ies",
+                                        ", ".join(others[:3])))
+                    else:
+                        notes.append("would leave .codex/engramory/ (nothing in it is "
+                                     "recognisably ours)")
+                else:
+                    removed, failed = [], []
+                    for name in ours:
+                        # Re-check containment immediately before each unlink: a parent
+                        # swapped for a symlink after the check above would aim the
+                        # delete outside the project (same narrowing as _copy_skill).
+                        _refuse_symlink_escape(
+                            managed_root, project_root, "the managed hook dir")
+                        try:
+                            (managed_root / name).unlink()
+                            removed.append(name)
+                        except OSError as exc:
+                            failed.append("%s (%s)" % (name, exc))
+                    if failed:
+                        notes.append("could NOT remove %s" % "; ".join(failed))
+                    # rmdir, not rmtree: it succeeds only when nothing of anyone else's
+                    # is left, so the tidy-up can never become a data loss. A file that
+                    # appeared since the listing just makes it fail, and that is fine.
+                    if removed and not others and not failed:
+                        try:
+                            managed_root.rmdir()
+                            notes.append("removed .codex/engramory/")
+                        except OSError as exc:
+                            notes.append("removed %s; kept .codex/engramory/ (%s)"
+                                         % (", ".join(removed), exc))
+                    elif removed:
+                        notes.append("removed %s; KEPT .codex/engramory/ - %d entr%s in "
+                                     "it could not be confirmed as ours (%s%s)"
+                                     % (", ".join(removed), len(others),
+                                        "y" if len(others) == 1 else "ies",
+                                        ", ".join(others[:3]),
+                                        ", ..." if len(others) > 3 else ""))
+                    elif not failed:
+                        notes.append("left .codex/engramory/ (nothing in it is "
+                                     "recognisably ours)")
 
     if not dry_run:
         # Only un-ignores a rule this installer wrote (it looks for its own comment
@@ -1217,10 +1373,21 @@ def uninstall_host(args, host):
     for label, detail in results:
         print("  %s: %s" % (label, detail))
     print("")
-    print("  memory store: NOT touched - %s" % memory_root)
-    print("  Your notes, the store's .gitignore entry, and any git history are left "
-          "exactly as they are.")
-    print("  Delete the store yourself if you truly want the memories gone.")
+    # Only claim the store is safe when we can see the store. `memory_root` is
+    # resolved from THIS invocation, so an uninstall run without the original
+    # `--memory-root` names the default path — and printing "your notes are fine"
+    # about a directory that does not exist is a promise about the wrong place.
+    if memory_root.is_dir():
+        print("  memory store: NOT touched - %s" % memory_root)
+        print("  Your notes, the store's .gitignore entry, and any git history are left "
+              "exactly as they are.")
+        print("  Delete the store yourself if you truly want the memories gone.")
+    else:
+        print("  memory store: no store found at %s" % memory_root)
+        print("  Uninstall deletes only files it recognises as its own (by name and "
+              "content), so a store kept somewhere else was not touched either -")
+        print("  but nothing was verified about it. Pass --memory-root <path> to have "
+              "this report name your real store.")
     if dry:
         print("")
         print("  (--dry-run: nothing was written)")

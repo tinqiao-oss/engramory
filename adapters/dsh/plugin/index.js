@@ -23,8 +23,8 @@
  *
  * Zero dependencies, no build step: plain ESM, node: builtins only.
  */
-import { readFileSync } from 'node:fs'
-import { basename } from 'node:path'
+import { readFileSync, realpathSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 
 export const name = 'engramory'
 
@@ -55,8 +55,26 @@ const WHOLE_FILE_WRITES = new Set(['write'])
 const PARTIAL_WRITES = new Set(['edit', 'str_replace', 'insert'])
 
 export function apply(ctx, config = {}) {
+  // `indexPath` pins the guard to ONE file. Without it the only signal is the
+  // basename, so an unrelated MEMORY.md in any other project is gated too — a real
+  // refusal on a file that is not a memory index at all, with no way to opt out
+  // (renaming `indexName` would just unguard the real index). The Claude Code hook
+  // has had ENGRAMORY_INDEX_PATH for exactly this; this is its counterpart.
+  //
+  // The key and the basename are computed ONCE here: guards run on every tool call
+  // and must stay cheap, so the per-call path stays a string compare and the single
+  // realpath() only happens when the basename already matched.
+  const indexPath = typeof config.indexPath === 'string' && config.indexPath.trim()
+    ? config.indexPath.trim()
+    : undefined
   const settings = {
     indexName: indexNameOf(config.indexName),
+    indexPath,
+    indexKey: indexPath === undefined ? undefined : pathKey(indexPath),
+    // When pinned, the name to match is the pinned file's own basename.
+    matchName: (indexPath === undefined
+      ? indexNameOf(config.indexName)
+      : basename(indexPath)).toLowerCase(),
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
@@ -112,11 +130,24 @@ function refuseOversizedIndex(exec, settings) {
     : typeof args.path === 'string' ? args.path
       : undefined
   if (filePath === undefined) return undefined
-  if (basename(filePath).toLowerCase() !== settings.indexName.toLowerCase()) {
-    return undefined
-  }
+  if (basename(filePath).toLowerCase() !== settings.matchName) return undefined
 
   const tool = typeof exec.name === 'string' ? exec.name : ''
+
+  // Nothing below can refuse a read, a view, or an unknown tool, so leave before the
+  // pinned-path check: pathKey() touches the filesystem and a guard runs on EVERY tool
+  // call. Ordering it here keeps the common case a pair of string compares.
+  const gated = WHOLE_FILE_WRITES.has(tool)
+    || PARTIAL_WRITES.has(tool)
+    || (tool === 'str_replace_editor'
+      && (args.command === 'create' || args.command === 'str_replace'
+        || args.command === 'insert'))
+  if (!gated) return undefined
+  // If the guard is pinned to one file, this is where an unrelated same-named file in
+  // another project drops out.
+  if (settings.indexKey !== undefined && pathKey(filePath) !== settings.indexKey) {
+    return undefined
+  }
 
   if (WHOLE_FILE_WRITES.has(tool)) {
     if (typeof args.content !== 'string') return undefined
@@ -146,11 +177,12 @@ function refuseOversizedIndex(exec, settings) {
   const breach = measure(current, settings)
   if (!breach) return undefined
   return (
-    `${settings.indexName} is already over the Engramory cap (${breach}) and this ` +
+    `${displayName(settings)} is already over the Engramory cap (${breach}) and this ` +
     `edit's result cannot be measured. Compact it with a whole-file write instead: ` +
     `a rewrite that SHRINKS the index always passes, even while still over the cap. ` +
     `Pointer-ify over-long lines, merge duplicates, archive cold notes — the index ` +
-    `is a table of contents, and anything past the cap silently stops being recalled.`
+    `is a table of contents, and anything past the cap silently stops being recalled.` +
+    notMyIndexHint(settings)
   )
 }
 
@@ -184,7 +216,32 @@ function verdict(text, currentBuf, filePath, settings) {
     `so far, so anything past the cap silently stops being recalled. Compact before ` +
     `writing: move detail into the linked note files, merge duplicates, archive cold ` +
     `notes, and keep every line to "one short hook + link". A write that SHRINKS the ` +
-    `index always passes, so you can compact step by step.`
+    `index always passes, so you can compact step by step.` + notMyIndexHint(settings)
+  )
+}
+
+
+/**
+ * The name to show in a refusal. `indexPath` wins over `indexName` when both are set,
+ * so quoting the ignored one would send a user looking for the wrong file.
+ */
+function displayName(settings) {
+  return settings.indexPath === undefined
+    ? settings.indexName
+    : basename(settings.indexPath)
+}
+
+
+/**
+ * Without `indexPath` the guard matches on basename alone, so it can land on a file
+ * that is not a memory index at all. Say so in the refusal: a user who hits this
+ * needs the way out, not just the cap.
+ */
+function notMyIndexHint(settings) {
+  if (settings.indexPath !== undefined) return ''
+  return (
+    ` (If this file is NOT your memory index, set this plugin's \`indexPath\` config ` +
+    `to your real index's absolute path so only that file is gated.)`
   )
 }
 
@@ -252,6 +309,39 @@ function positive(value, fallback) {
   const floored = Math.floor(value)
   return floored > 0 ? floored : fallback
 }
+
+/**
+ * Normalise a path for identity comparison. `realpath` resolves symlinks and `..` so
+ * two spellings of the same file compare equal, but it throws for a path with no file
+ * behind it yet — and a plain `resolve` fallback is NOT interchangeable with it: an
+ * index pinned before it exists, under a symlinked ancestor, would be keyed by its
+ * alias at config time and by the link's target on every later call. The keys would
+ * never match again and the guard would silently stop guarding its own index.
+ *
+ * So resolve the deepest ancestor that DOES exist and re-attach the missing tail:
+ * the same file then keys identically whether or not it exists yet. Case is folded on
+ * Windows only, mirroring `os.path.normcase` in the Python guard — folding it on Linux
+ * would make an unrelated `memory.md` collide with the pinned index. (Known limit:
+ * `toLowerCase` is not NTFS's exact case-folding table, same as the Python guard.)
+ */
+function pathKey(p) {
+  let head = resolve(p)
+  const tail = []
+  for (;;) {
+    try {
+      head = realpathSync(head)
+      break
+    } catch {
+      const parent = dirname(head)
+      if (parent === head) break // hit the root with nothing resolvable
+      tail.unshift(basename(head))
+      head = parent
+    }
+  }
+  const out = tail.length ? join(head, ...tail) : head
+  return process.platform === 'win32' ? out.toLowerCase() : out
+}
+
 
 /**
  * An empty or non-string indexName must fall back, not silently disable the cap:

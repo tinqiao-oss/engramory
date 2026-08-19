@@ -67,6 +67,7 @@ supplies the protocol; it does not create the store.
 | `indexName` | `MEMORY.md` | Basename treated as the memory index (case-insensitive; both `file_path` and `str_replace_editor`'s `path` are checked). An empty or non-string value falls back to the default. Nothing else is inspected. |
 | `maxLines` | `200` | Hard line cap. Non-positive or non-finite values fall back to the default. |
 | `maxBytes` | `25600` | Hard UTF-8 byte cap (25 KB). |
+| `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity (symlinks and `..` resolved; case-folded on Windows only), and a path that does not exist yet still has its first write guarded. |
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 

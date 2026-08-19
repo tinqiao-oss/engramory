@@ -8,7 +8,7 @@
     "with the plugin's own package.json — bump both together."
   ],
   "name": "dsh-engramory",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Curated file-based long-term memory for DeepSeek Harness — discovery manifest for the installable plugin in adapters/dsh/plugin/",
   "license": "MIT",
