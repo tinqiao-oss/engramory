@@ -442,6 +442,41 @@ def test_refuses_when_the_store_sits_in_the_skill_dir(tmp_path):
     assert "overlaps the memory store" in out
 
 
+def test_uninstalling_one_write_host_keeps_a_skill_another_still_uses(tmp_path):
+    """codex and openclaw share BOTH the skill dir and AGENTS.md.
+
+    Uninstalling one deleted the skill the other was still using: its block stayed in
+    the rules file while the skill that block refers to was gone, and nothing said so.
+    The reader/writer version of this was already handled; this is the write-host twin.
+    """
+    assert _run("codex", tmp_path, "--install-skill")[0] == 0
+    assert _run("openclaw", tmp_path, "--install-skill")[0] == 0
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+    assert (skill / "SKILL.md").is_file()
+
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert (skill / "SKILL.md").is_file(), "DELETED A SKILL ANOTHER HOST STILL USES"
+    assert "still wired up for openclaw" in out
+    # The codex block is gone; openclaw's is untouched.
+    rules = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "BEGIN ENGRAMORY CODEX" not in rules
+    assert "BEGIN ENGRAMORY OPENCLAW" in rules
+
+
+def test_the_last_write_host_to_leave_does_remove_the_shared_skill(tmp_path):
+    """Sharing must not turn into 'nobody ever cleans it up'."""
+    assert _run("codex", tmp_path, "--install-skill")[0] == 0
+    assert _run("openclaw", tmp_path, "--install-skill")[0] == 0
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+
+    assert _run("codex", tmp_path, "--uninstall")[0] == 0
+    assert skill.exists()
+    code, out = _run("openclaw", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert not skill.exists(), "the last host out should remove the shared skill"
+
+
 def test_reader_never_deletes_a_write_hosts_skill(tmp_path):
     # Both hosts resolve the same `.agents/skills/engramory` path, but a reader is
     # refused --install-skill, so it can never own one.

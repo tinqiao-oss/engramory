@@ -1054,6 +1054,35 @@ def _refuse_store_overlap(path, memory_root, what):
             "memories." % (what, path, memory_root))
 
 
+def _write_hosts_still_using_skill(host, cfg, project_root):
+    """Other WRITE hosts whose rules block is still installed at the same skill root.
+
+    `codex` and `openclaw` resolve the same `.agents/skills/engramory` AND the same
+    AGENTS.md, so uninstalling one deleted the skill the other was still using: its
+    block stayed in the rules file, the skill that block refers to did not, and
+    nothing said so - the silent-failure shape this project keeps running into. The
+    reader/writer version of this collision was already handled next door; this is its
+    write-host twin.
+
+    Checked AFTER the rules block for THIS host has been removed, so a leftover block
+    means another host genuinely still wants the skill.
+    """
+    mine = _skill_root(project_root, cfg)
+    still = []
+    for name, other in HOST_CONFIG.items():
+        if name == host or not other.get("creates_store", True):
+            continue
+        if _skill_root(project_root, other) != mine:
+            continue
+        rules = project_root / other.get("rules_file", "AGENTS.md")
+        try:
+            if rules.is_file() and other["begin"] in _read_text(rules):
+                still.append(name)
+        except OSError:
+            continue  # unreadable rules file: cannot prove it is in use, do not guess
+    return still
+
+
 def _uninstall_skill(project_root, cfg, memory_root, dry_run):
     # `_skill_root` consults $DSH_HOME to decide whether this root is the host's home
     # (`<DSH_HOME>/skills`) or a project (`<project>/.dsh/skills`), so an uninstall run
@@ -1365,7 +1394,13 @@ def uninstall_host(args, host):
     #    `codex-reader --uninstall` wipe the skill that the Codex WRITE host installed
     #    at the same shared `.agents/skills/engramory` path.
     if cfg.get("creates_store", True):
-        results.append(("skill", _uninstall_skill(project_root, cfg, memory_root, dry)))
+        shared_with = _write_hosts_still_using_skill(host, cfg, project_root)
+        if shared_with:
+            results.append(("skill", "left %s (still wired up for %s)" % (
+                _display_path(_skill_root(project_root, cfg), project_root),
+                ", ".join(shared_with))))
+        else:
+            results.append(("skill", _uninstall_skill(project_root, cfg, memory_root, dry)))
     else:
         results.append(("skill", "skipped (a reader installs none)"))
 

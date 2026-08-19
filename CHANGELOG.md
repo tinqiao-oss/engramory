@@ -6,6 +6,16 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 
 ## Unreleased
 
+- **Uninstalling one write host deleted a skill another was still using.** `codex` and
+  `openclaw` resolve the same `.agents/skills/engramory` and the same `AGENTS.md`, so
+  removing either took the shared skill with it: the other host's block stayed in the
+  rules file, the skill it refers to was gone, and nothing said so. The reader/writer
+  form of this collision was already handled (a reader is refused `--install-skill`, so
+  it never deletes one); this is its write-host twin. The skill is now kept, and named
+  as still in use, while any other write host's block is still installed - and removed
+  by the last one to leave.
+
+
 - **The cap denied the one write that compacts an over-cap index.** When the index
   exists but cannot be read — a transient lock, a permission problem — the guard has
   no current size to compare against, so every over-cap write looked like growth,
