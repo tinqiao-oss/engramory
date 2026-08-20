@@ -68,8 +68,14 @@ outside the project, the init command does not add a `.gitignore` entry.
 ## Continuity model
 
 An unfinished task is resumed through an ordinary `project` note in the canonical
-store, not a fifth `handoff` type. That note may contain the current goal, status,
-decisions, constraints, blockers, and next concrete step. `feedback` remains only
+store — one **flat** active directory, `MEMORY.md` plus one file per note, with
+`archive/` as its one reserved subdirectory — and not a fifth `handoff` type. A task
+keeps **at most one** such note — a
+ceiling, not a quota — updated **in place**, never a dated series and never a
+second handoff log indexed beside it. That note may contain the current goal,
+status, decisions, constraints, blockers, and next concrete step. When the task
+ends, the completion checkpoint (`SKILL.md` §5) retires its transient state; that
+checkpoint is a judgement, and these lifecycle hooks cannot perform it. `feedback` remains only
 for a reusable correction or workflow. Such a note stores only **stable**
 pointers (branch name, issue/PR number, file path) and may record a settled fact
 ("2.0 shipped on 2026-01-15"), but never **current state** — the version you are

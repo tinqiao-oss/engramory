@@ -97,11 +97,14 @@ export function apply(ctx, config = {}) {
         name: 'engramory',
         description:
           'Curated file-based long-term memory: recall through MEMORY.md at the start of ' +
-          'a task, save durable user/feedback/project/reference facts, and sync before ' +
-          'compacting or opening a fresh thread.',
+          'a task, save durable user/feedback/project/reference facts, run a curation ' +
+          'checkpoint when a task finishes, and sync before compacting or opening a ' +
+          'fresh thread.',
         whenToUse:
           'Starting or resuming work, learning something durable worth a future session, ' +
-          'or approaching a compact/clear/new-thread boundary.',
+          'finishing a task — including one that leaves nothing worth saving, since the ' +
+          'checkpoint is still a decision to make — or approaching a ' +
+          'compact/clear/new-thread boundary.',
         source: 'runtime',
         content: skill,
       }))
@@ -364,7 +367,10 @@ function builtinSkillBody() {
     '',
     'One canonical store: `MEMORY.md` is an index of pointers, one line per memory;',
     'each fact lives in its own small markdown file beside it. Never put content in',
-    'the index, and never keep a second parallel store for handoffs.',
+    'the index, and never keep a second parallel store for handoffs. The ACTIVE',
+    'store is flat — the four type names are values of the `type:` field, not',
+    'subdirectories to create; `archive/` is the one reserved subdirectory, for',
+    'notes retired out of the index.',
     '',
     '## Recall',
     '',
@@ -397,6 +403,21 @@ function builtinSkillBody() {
     'Store settled facts, never current state: "2.0 shipped on 2026-01-15" is durable;',
     '"the current version is X", the tip commit, or a passing test count will rot —',
     'record where to read those instead.',
+    '',
+    'An unfinished task may keep AT MOST ONE live `project` note holding its goal,',
+    'status, decisions, constraints, blockers, and next step together — the single',
+    'exception to one-file-one-fact, and a ceiling rather than a quota: a task that',
+    'needs no resumable state keeps no note. Update it IN PLACE. Never a dated',
+    'series (`state-2026-01-15.md`, `state-2026-01-16.md`, …), never a second',
+    'handoff log indexed beside it, and retire its transient state once it ends.',
+    '',
+    '## When a task finishes',
+    '',
+    'Run one curation checkpoint. It is a judgement, not a write: promote what is',
+    'durable, retire the transient state the CURRENT task left on its own live',
+    '`project` note if it has one, and when nothing is worth keeping, write',
+    'nothing and say so. Never append a per-turn log TO THE STORE, and never touch',
+    'a file just to mark it fresh — a timestamp is not a memory.',
     '',
     '## Sync',
     '',

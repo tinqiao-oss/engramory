@@ -29,7 +29,7 @@ itself stays git-ignored).
 > already exists, what you must not touch, and what to tell the user — the parts
 > agents reliably get wrong when improvising.
 
-> **Status: 0.9.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.10.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
@@ -156,9 +156,11 @@ protocol, and it is not the cross-agent plan.
 ## Continuity without a second handoff store
 
 Engramory uses **one canonical store**. It does not add a `handoff` type or a
-parallel handoff folder. A live `project` note may hold the current goal, status,
-decisions, constraints, blockers, and next concrete step needed to resume an
-unfinished task. A `feedback` note is narrower: only a correction or workflow
+parallel handoff folder. An unfinished task may keep **at most one** live `project`
+note — a ceiling, not a quota — holding the current goal, status, decisions,
+constraints, blockers, and next concrete step needed to resume it. That note is
+updated **in place**: never a dated series of state files, and never a per-turn
+handoff log indexed beside it. A `feedback` note is narrower: only a correction or workflow
 that should be reused beyond that task.
 
 Before a deliberate compact, clear, or move to a new thread, the agent performs

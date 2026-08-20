@@ -211,6 +211,36 @@ Then settle two things explicitly, because both are load-bearing:
   same files ([`SKILL.md`](SKILL.md) §0). Reusing the host's directory is only correct
   when it is a plain directory of files the user controls.
 
+## Step 3b — Does the way they work fit a curated store?
+
+Ask this **before** proposing an install, because the answer is occasionally "no" and
+that is much cheaper to say now than after they have wired it in.
+
+Engramory is a **curation discipline** for a personal-scale store: one writer, notes
+worth keeping months from now, an index small enough to load every session. Some of
+what people mean by "shared agent memory" is a different thing wearing the same word:
+
+- **A per-turn coordination log** — every agent appending what it just did so the next
+  one can pick up mid-task. That is a work log. It wants append-only writes, high
+  frequency, and no judgement about what deserves to survive; Engramory wants the
+  opposite of all three.
+- **A team handoff channel** between several agents writing concurrently. Engramory
+  assumes one writer and has no lock (Step 3, *Ownership*).
+- **A store past the always-loaded window.** Once the active set outgrows the index cap,
+  the right answer is a retrieval system, not a bigger index — [`README.md`](README.md)
+  names that boundary and does not pretend otherwise.
+
+None of these are failures of the user's setup, and none are a reason to bend the
+protocol into a log. Say plainly which part of what they want Engramory covers and
+which part it does not, and let the two coexist: a scratch coordination file living in
+the project is fine, as long as it is **not** wired into the store or indexed in
+`MEMORY.md` — the moment it is, every rule here starts fighting it.
+
+The failure this prevents is specific and has already happened in the field: a team
+adopts Engramory for turn-by-turn handoff, finds the discipline too heavy for that job,
+and concludes the protocol is too heavy in general — having never used it for the job it
+does. Being told up front which half fits costs one paragraph.
+
 ## Step 4 — Survey what is already there
 
 For the confirmed root:
@@ -250,9 +280,25 @@ Two traps in particular:
 - **A half install looks like a working one.** The standing-rules snippet is the
   *primary* install step for Claude Code ([`README.md`](README.md)), yet it is the
   easiest to skip — a store plus a skill plus a hook, with no snippet in the rules file,
-  means the discipline never loads on an ordinary task. If you find this, say so
-  loudly; it is invisible from the outside and the store slowly fills with notes that
-  do not follow the protocol.
+  leaves the discipline off the always-loaded path, so an ordinary task may run without
+  it. If you find this, say so loudly; it is invisible from the outside and the store
+  slowly fills with notes that do not follow the protocol.
+
+  It is the easiest to skip because it is the least visible: the skill and the hook
+  leave obvious traces, and the snippet is just some text in a file that was already
+  there. Report it on its own line, never folded into "installed", and confirm the
+  *file* as well as the text — a snippet in a rules file this host does not load is
+  `present` but not `active`. Two runs of this failure, both quiet:
+
+  - This project ran for weeks with the skill and the hook installed and the snippet
+    never pasted into `CLAUDE.md`. Nothing errored. The evidence was only in the store:
+    most notes missing the `Why:` / `How to apply:` lines the protocol asks for.
+  - A team that deliberately dropped the snippet later reported that agents "never
+    maintained" the store, and published a lighter rewrite of the protocol —
+    diagnosing content they had removed from their agents' context. Where a host
+    loads the skill by relevance the discipline can still reach a task, so the
+    accurate finding is that it is **no longer guaranteed** on every task, not that
+    it can never apply.
 - **Present but stale.** An installed skill copy and the managed hook scripts are
   **kept, not replaced**, unless `--force` is passed. An old copy left by an earlier
   version is "present" and is not "configured".

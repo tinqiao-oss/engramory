@@ -26,15 +26,24 @@ individual note on demand — never load the whole store into context.**
   know). A
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line. Add one pointer line to `MEMORY.md`. **Delete** notes that
-  turn out wrong.
-- **One unfinished task may keep ONE live `project` note** holding its goal, status,
-  decisions, constraints, blockers, and next step together — that is the single
-  exception to one-file-one-fact. Update it in place; never accumulate snapshots, and
-  retire its transient state when the task completes.
+  turn out wrong. The **active** store is flat — `MEMORY.md` plus one file per note
+  beside it; the four type names are values of the `type:` field, **not**
+  subdirectories (`archive/` is the one reserved subdirectory, for retired notes).
+- **An unfinished task may keep AT MOST ONE live `project` note** holding its goal,
+  status, decisions, constraints, blockers, and next step together — that is the
+  single exception to one-file-one-fact, and it is a ceiling, not a quota: a task that
+  needs no resumable state keeps no note. Update it in place; never accumulate
+  snapshots (`state-2026-01-15.md`, `state-2026-01-16.md`, …), never index a second
+  parallel handoff log beside it, and retire its transient state when it completes.
 - **Store settled facts, never current state.** "2.0 shipped on 2026-01-15" is fine —
   time cannot falsify it. The version you are on now, the tip commit, the current test
   count are not: record *where to read* them. Keep only stable pointers (branch name,
   issue/PR number, file path) and re-verify them on recall.
+- **When a task finishes**, run one curation checkpoint — a *judgement*, not a write:
+  promote what is durable, retire the transient state of *this task's* live `project`
+  note if it has one, and when nothing is worth keeping, write **nothing** and say so.
+  Never append a per-turn log **to the store**, and never touch a file just to mark it
+  fresh — a timestamp is not a memory.
 - **Before a deliberate compact, clear, or new thread**, sync once: scan the task;
   dedup/update; refresh the live `project` note; promote only reusable `feedback`;
   save durable `reference` pointers; retire stale/completed transient state; run the

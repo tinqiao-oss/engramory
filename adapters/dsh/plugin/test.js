@@ -356,6 +356,20 @@ test('the protocol skill is registered, and carries the parts that matter', () =
   assert.match(skill.content, /type: user \| feedback \| project \| reference/)
   assert.match(skill.content, /How to apply/)
   assert.match(skill.content, /settled facts/)
+  // The write-side rules a downstream store got wrong, asserted on the REGISTERED
+  // content rather than the source file, so a comment or dead code cannot satisfy
+  // them. Line wrapping is normalised away first: these sentences are wrapped for
+  // readability in the source and must not be pinned to a particular break.
+  const flat = skill.content.replace(/\s+/g, ' ')
+  assert.match(flat, /ACTIVE store is flat/)
+  assert.match(flat, /`archive\/` is the one reserved subdirectory/)
+  assert.match(flat, /AT MOST ONE live `project` note/)
+  assert.match(flat, /Update it IN PLACE/)
+  assert.match(flat, /never a second handoff log indexed beside it/)
+  assert.match(flat, /curation checkpoint/)
+  assert.match(flat, /judgement, not a write/)
+  assert.match(flat, /per-turn log TO THE STORE/)
+  assert.match(flat, /timestamp is not a memory/)
 })
 
 test('skill registration can be declined, and a skill-less host still gets the cap', () => {
