@@ -4,6 +4,94 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.10.0 — 2026-08-20
+
+- **A task-completion checkpoint (new protocol).** The spec had a transition sync —
+  before a compact, a clear, a new thread — and the retirement rule inside the narrow
+  live-note exception, but nothing that said what to do at the ordinary end of an
+  ordinary task. `SKILL.md` §5 now names one: promote what the task settled, retire the
+  transient state *that task's* live `project` note is carrying, and **write nothing**
+  when nothing qualifies. It is a judgement, not a write, and an empty checkpoint is a
+  complete checkpoint — the point is to make the decision, not to leave a trace. Two
+  clauses exist because of how this fails in practice: never append a per-turn log **to
+  the store**, and never touch a file just to mark it fresh. A store that records having
+  been updated without recording anything worth updating is worse than one that stayed
+  still. A host hook can prompt this; nothing can perform it (§8).
+
+- **Write-side rules that had not reached the layer agents actually read.** The flat
+  store layout was in `SKILL.md` and in no snippet at all; the narrow one-live-note
+  exception had reached the Kiro steering template but neither `rules-snippet.md` — the
+  one every installed write host renders from — nor the dsh plugin. The snippet is what
+  an agent has in front of it on the turn it writes; the spec is a document it may never
+  open. All three surfaces now carry both, alongside the new checkpoint. The read-only
+  reader snippet gets the layout sentence only: a recalling agent needs to know where
+  notes live and has no write side to govern. `README.md`, `README.zh-CN.md`,
+  `PORTING.md`, and the Kiro and Codex adapter READMEs carry the same rules, so a human
+  reading any install path sees what the agent was told.
+
+  Wording that a first pass got wrong, and that the tests now pin:
+
+  - **`at most one`, never `exactly one`.** The spec says a task *may* keep one live
+    note. "Exactly one" would make a note mandatory for every unfinished task and
+    contradict "when nothing is worth keeping, write nothing" three bullets later. It is
+    a ceiling, not a quota — and `SKILL.md` §1/§2 now say `at most one` too, so the
+    ceiling reads identically everywhere instead of being paraphrased per host.
+  - **Flat, without disowning `archive/`.** "The store is one flat directory —
+    `MEMORY.md` plus one file per note" is not true: `archive/` is part of the protocol,
+    and the doctor treats an index pointer into it as legitimate. Read-only hosts were
+    the acute risk — an agent told the store is flat could refuse a valid
+    `archive/…` pointer as an escape. The claim is now scoped to the **active** store,
+    with `archive/` named as its one reserved subdirectory.
+  - **The per-turn-log ban is scoped to the store.** Unqualified, "never append a
+    per-turn log" reads as a whole-project prohibition and contradicts the runbook, which
+    explicitly allows a scratch coordination file as long as it is not wired into the
+    store.
+
+- **The completion checkpoint is also a load trigger.** A rule that only fires when a
+  task ends is useless on a host that loads the skill by relevance unless the skill says
+  so: `SKILL.md`'s frontmatter and the dsh plugin's `description` / `whenToUse` now name
+  task completion, explicitly including the case that leaves nothing worth saving —
+  that one still has a decision in it, and it is the case a "save durable facts" trigger
+  never matches.
+
+- **`AGENT-SETUP.md`: a fit check before the survey.** New Step 3b. Some of what people
+  mean by "shared agent memory" is a per-turn coordination log or a concurrent team
+  handoff channel — append-only, high-frequency, no judgement about what survives, and
+  against the one-writer assumption. Naming which half Engramory covers costs a
+  paragraph before the install and prevents a specific outcome: adopting it for
+  turn-by-turn handoff, finding the discipline too heavy for that job, and concluding it
+  is too heavy in general, having never used it for the job it does.
+
+- **The missing-snippet failure, folded into Step 4 rather than given its own step.**
+  Step 4 already owned this ground — the four states (`present` / `configured` /
+  `active` / `verified`), the "half install looks like a working one" trap, and the rule
+  that a deliberate deviation is asked about, never corrected. A parallel section
+  restated all three in fresh words, which is how two sections drift apart. What was
+  genuinely new now lives in that existing bullet: *why* this layer is the one that gets
+  skipped (it is the only one that leaves no trace), that it is reported on its own line
+  and never folded into "installed", and two runs of the failure — this project ran for
+  weeks with the skill and hook installed and the snippet never pasted in, and a
+  downstream team that deliberately dropped the snippet later reported agents "never
+  maintained" the store and published a lighter rewrite of the protocol, diagnosing
+  content they had removed from their agents' context. Stated carefully: where a host
+  loads the skill by relevance the discipline can still reach a task, so a missing
+  snippet means **no longer guaranteed**, not "never applies".
+
+- **Regression net for the drift class itself.** 0.6.x shipped a protocol change that
+  reached the spec and stopped there. `tests/test_protocol_sync.py` now asserts each
+  rule across every markdown standing surface by whole phrase rather than by keyword —
+  "flat" and "subdirectories" both appear in a sentence that says the opposite, so a
+  keyword pair proves nothing — checks that `SKILL.md` remains the authority for every
+  rule a snippet states, and fails when an `adapters/**` snippet or steering file exists
+  that no list mentions. The dsh surface is asserted in `adapters/dsh/plugin/test.js`
+  against the **registered** skill content, where a comment or dead code cannot satisfy
+  it; a Python test keeps that coverage from quietly disappearing.
+
+- `dsh-engramory` 0.2.3 — the registered skill body carries the rules above, and the
+  skill's `description` / `whenToUse` now name task completion, so what the plugin
+  serves a model has changed. The guard is untouched: same caps, same refusal, same
+  decision table.
+
 ## 0.9.0 — 2026-08-19
 
 - **`--uninstall`: the wiring can be taken back out.** Re-running any host with

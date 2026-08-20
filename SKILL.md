@@ -3,9 +3,12 @@ name: engramory
 description: >-
   Curated, file-based long-term memory for an AI agent. Use this skill (1) at the
   start of a task or when resuming unfinished work to recall via the memory index,
-  (2) during or after a task to save durable user, feedback, project, or reference
-  facts, and (3) before compacting, clearing context, or opening a fresh thread to
-  sync the current goal, state, decisions, constraints, blockers, and next step.
+  (2) during a task to save durable user, feedback, project, or reference facts,
+  (3) when a task finishes, to run the completion checkpoint — promote what is
+  durable, retire what was only transient, and write nothing when nothing qualifies
+  (an empty checkpoint still has to be decided) — and (4) before compacting,
+  clearing context, or opening a fresh thread to sync the current goal, state,
+  decisions, constraints, blockers, and next step.
   Each memory is one small markdown file; a single always-loaded index (MEMORY.md)
   lists them. Works on any agent host that can read and write local files.
 ---
@@ -69,7 +72,8 @@ Every memory is its own markdown file. Normally one file holds exactly **one**
 durable fact or agreement. If you are tempted to combine unrelated facts, make
 separate files.
 
-The narrow exception is one live `project` note for one unfinished task: its
+The narrow exception is **at most one** live `project` note for one unfinished
+task: its
 goal, current status, decisions, constraints, blockers, and next step form one
 cohesive continuity unit and are useful together. Update that note in place;
 never create a series of snapshot files, and retire its transient state when the
@@ -164,8 +168,8 @@ converted to absolute dates (project facts go stale, and "last week" rots).
 
 A *pure historical snapshot* — only version numbers or a completed to-do list,
 with no decision or constraint behind it — usually isn't a `project` note at all.
-An unfinished task may keep one live, compact project note so a cold-started
-agent can continue it; when the task completes, archive/delete its transient
+An unfinished task may keep **at most one** live, compact project note so a
+cold-started agent can continue it; when the task completes, archive/delete its transient
 status and promote only durable decisions or constraints. Never accumulate a
 timeline of handoff snapshots in the active index.
 
@@ -316,6 +320,26 @@ session. Before writing, run the checks in this order:
 5. **Delete when wrong.** If a memory turns out to be false or obsolete, delete
    the file (or move it to `archive/`) and remove its index line. Forgetting is a
    first-class operation — a store full of stale facts is worse than a small one.
+
+### Task-completion checkpoint
+
+When a task finishes, run one checkpoint over what it produced. It is a
+**judgement, not a write**: most tasks end with nothing worth keeping, and that is
+the expected outcome, not a failure to record.
+
+1. **Promote** anything durable the task settled — a decision, a constraint, a
+   correction worth reusing — into the right type, following §5.
+2. **Retire** the transient state of *this task's* live `project` note if it had
+   one: its status, blockers, and next step stop being true the moment the task is
+   done. Other tasks' notes are none of this checkpoint's business.
+3. **Write nothing** when nothing qualifies, and say so. An empty checkpoint is a
+   complete checkpoint.
+
+Never append a per-turn log to the store, and never touch a file just to mark it
+fresh: a timestamp is not a memory, and a store that records that it was updated
+without recording anything worth updating is worse than one that stayed still.
+This checkpoint is a decision you make; a host hook may prompt it, but nothing can
+perform it for you (§8).
 
 ### Unified continuity sync
 

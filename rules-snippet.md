@@ -31,14 +31,26 @@ in a `project` note.
   you know). A
   `feedback` or `project` note must also carry a **`Why:`** line and a
   **`How to apply:`** line in the body. Add one pointer line to `MEMORY.md`.
-  **Delete** memories that turn out wrong.
+  **Delete** memories that turn out wrong. The **active** store is flat —
+  `MEMORY.md` plus one file per note beside it; `user` / `feedback` / `project` /
+  `reference` are values of the `type:` field, **not** subdirectories to create.
+  (`archive/` is the one reserved subdirectory, holding notes retired out of the
+  index.)
 - `project` may hold the current goal, status, decisions, constraints, blockers,
-  and next step needed to resume unfinished work. `feedback` is only for a
-  reusable correction/workflow. Never restate what code/git already says: store
+  and next step needed to resume unfinished work. An unfinished task that needs
+  resumable state may keep **at most one** live `project` note, updated **in
+  place** — never a dated series (`state-2026-01-15.md`, `state-2026-01-16.md`),
+  and never a second parallel handoff log indexed beside it. Retire that note's
+  transient state when the task completes. `feedback` is only for a reusable correction/workflow. Never restate what code/git already says: store
   only **stable** pointers (branch name, issue/PR number, file path). A *settled
   fact* ("2.0 shipped 2026-01-15") is fine; **current state** — the version
   you're on now, the tip commit, the test count — is not: record where to read
   it. Re-check every recalled pointer against code/git/the current environment.
+- **When a task finishes**, run one curation checkpoint. It is a *judgement*,
+  not a write: promote what is durable, retire the transient state of *this
+  task's* live `project` note if it has one, and when nothing is worth keeping,
+  write **nothing** and say so. Never append a per-turn log **to the store**, and
+  never touch a file just to mark it fresh — a timestamp is not a memory.
 - **Before a deliberate compact, clear, or new thread**, sync once: scan the task;
   dedup/update; refresh `project`; promote only reusable `feedback`; save durable
   `reference` pointers; archive/delete stale or completed transient state; run

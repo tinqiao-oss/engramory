@@ -82,6 +82,9 @@ ready-to-copy template: [adapters/kiro/README.md](adapters/kiro/README.md).
 
 Task continuity stays in an ordinary `project` note in the canonical store:
 current goal, status, decisions, constraints, blockers, and next concrete step.
+A task keeps **at most one** such note, updated in place — never a dated series.
+When a task ends, the completion checkpoint (`SKILL.md` §5) decides what survives;
+it is a judgement a host can prompt but never perform.
 `feedback` is only for a correction or workflow reusable beyond the task. A
 resumed agent must re-check any branch, file, commit, command, or test-result
 pointer against the live environment.

@@ -96,8 +96,10 @@ tested here yet**, so treat the Phase-1 cap as **rules + an explicit check**
    discipline only.
 
 > **Protocol version.** The steering file in this adapter carries the protocol rules
-> in condensed form (one live `project` note per unfinished task, settled-fact vs.
-> current-state, optional `scope`, root-confined recall, the pre-transition sync). It is a standing
+> in condensed form (at most one live `project` note per unfinished task, updated in
+> place; the flat active layout with `archive/` as its one reserved subdirectory;
+> settled-fact vs. current-state, optional `scope`, root-confined recall, the
+> task-completion checkpoint, the pre-transition sync). It is a standing
 > rules file, so it states each rule in one line where `SKILL.md` spends a
 > paragraph — `SKILL.md` remains the authority, and the steering file points at it.
 > If you copy an older steering file forward, re-sync it against `SKILL.md` rather
