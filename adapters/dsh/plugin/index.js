@@ -109,7 +109,8 @@ export function apply(ctx, config = {}) {
           'compact/clear/new-thread boundary. Not for a bare greeting, ' +
           'acknowledgement, or reaction, which starts no task — but a terse reply ' +
           'that continues work underway does, and material already in hand (a ' +
-          'pasted diff to review) does not make work a non-task.',
+          'pasted diff to review) does not make work a non-task. Unsure? Treat it ' +
+          'as a task.',
         source: 'runtime',
         content: skill,
       }))
@@ -381,8 +382,9 @@ function builtinSkillBody() {
     '',
     'A turn, a message, or a session is NOT BY ITSELF a task: a greeting, an',
     'acknowledgement, or a reaction starts none, so it gets no recall and no',
-    'checkpoint. A task is user-directed work whose handling could depend on what',
-    'the store holds — read-only work (analysis, diagnosis, planning, review)',
+    'checkpoint. A task is user-directed work whose CORRECT handling could depend',
+    'on what the store holds — read-only work (analysis, diagnosis, planning,',
+    'review)',
     'counts, and changing a file is not required. HAVING THE MATERIAL IN HAND does',
     'not make work a non-task: a diff pasted for review is still a task. NEVER INFER',
     'THIS FROM LENGTH: a one-word reply that picks an option or carries on work',

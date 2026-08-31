@@ -16,7 +16,8 @@ You have **READ-ONLY** access to a curated, file-based memory at `<MEMORY_ROOT>/
 **sole writer** — you recall from it, you never change it.
 
 - **What counts as a task.** A turn, a message, or a session is not by itself a
-  task; a task is user-directed work whose handling could depend on something the
+  task; a task is user-directed work whose **correct** handling could depend on
+  something the
   store might hold. Read-only work counts — analysis, diagnosis, planning, review —
   and changing a file is not required. A greeting, an acknowledgement, or a reaction
   does not start one: do not open the store for it. **Having the material in hand

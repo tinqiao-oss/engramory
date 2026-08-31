@@ -36,6 +36,10 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   conversation was already doing, and treated as a task when that is unclear — a
   needless recall costs a little context, a missed one costs the discipline. Making
   small talk cheap on a per-message bridge is the bridge's job, not the protocol's.
+  A rule keyed on "no resolvable request and no visible task context" could exempt
+  that "1" without ever measuring length; this one deliberately does not, because in a
+  per-message session the previous turn is invisible by construction and guessing
+  wrong there skips the discipline silently. A policy choice, not a logical necessity.
 
 - **The bound reaches every surface an agent actually reads.** `rules-snippet.md`,
   the Kiro steering template, and the dsh plugin's registered skill body carry it;
@@ -43,10 +47,22 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   side. It is also in `SKILL.md`'s frontmatter and the dsh skill metadata, because
   those descriptions drive implicit selection on a progressive-disclosure host — an
   unbounded trigger there invites the same over-firing the block exists to stop.
-  `tests/test_protocol_sync.py` and `adapters/dsh/plugin/test.js` assert the sentences
-  **whole** rather than by substring, and pin the inversions: a text reading "it is
-  false that a turn is not by itself a task … infer it from length" passed an earlier
-  substring version of these assertions.
+  `tests/test_protocol_sync.py` and `adapters/dsh/plugin/test.js` assert long whole
+  phrases rather than keywords, and pin the inversions review turned up — a shorter
+  version of these assertions passed a text reading "it is false that a turn is not by
+  itself a task … infer it from length". They are still substring checks and the test
+  now says so: they catch a rule deleted, reworded past recognition, or drifted on one
+  surface, which is the failure that file exists for. They do not prove the prose
+  around them agrees, and a snippet written to contradict itself is a review problem,
+  not something an assertion settles.
+
+- **The derived surfaces had quietly widened the rule.** The authority text says a
+  task is work whose *correct* handling could depend on what the store holds; the
+  snippets and the dsh body said "whose handling", which is a different set — "output
+  OK verbatim" has a settled correct answer the store cannot change, yet an agent can
+  always argue its *handling* might depend on a style preference. All five now match
+  `SKILL.md`, and the wording is asserted, since a derived surface drifting from the
+  authority is the exact failure `test_protocol_sync.py` was written for.
 
 - **Codex adapter: what a chat bridge actually pays for.** A new section separates the
   two costs, because only one of them is this protocol's. Engramory decides whether a

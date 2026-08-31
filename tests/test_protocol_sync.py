@@ -139,7 +139,17 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
         over-broad reading costs nothing visible. Off one — a chat bridge where every
         message is its own session — it turned "1" into a file read and a cold start.
         The exemption must not be inferable from length either: a one-word reply that
-        picks an option is the middle of real work and still has to recall.
+        picks an option is the middle of real work and still has to recall. Nor by
+        having the material in hand: a pasted diff is still a task, and dropping that
+        clause let "review this diff" satisfy the exemption and the definition at once.
+
+        Scope, stated honestly: these are substring assertions over long phrases.
+        They catch a rule being deleted, reworded past recognition, or drifting on one
+        surface — the failure this file exists for. They do NOT prove the surrounding
+        prose agrees: a text can keep every phrase and negate it around them ("it is
+        false that ..."), which is why the two known inversions are pinned below.
+        That is a floor, not a proof; a deliberately self-contradicting snippet is a
+        review problem, not something an assertion can settle.
         """
         surfaces = list(self._surfaces())
         for rel in ("SKILL.md", "adapters/reader/reader-snippet.md"):
@@ -156,8 +166,13 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
                 # "review this pasted diff" reads as a non-task and skips recall.
                 self.assertIn(
                     "having the material in hand does not make work a non-task", text)
+                # The derived surfaces once dropped "correct", which widens the task
+                # set: "output OK verbatim" has a settled answer the store cannot
+                # change, and only "correct handling" excludes it.
+                self.assertIn("correct handling could depend", text)
                 self.assertNotIn("is by itself a task", text)
                 self.assertNotIn("infer it from length", text)
+                self.assertNotIn("it is false that", text)
         # The bound has to survive into the relevance-loaded trigger as well, or a
         # host that only ever sees the frontmatter keeps the unbounded reading.
         frontmatter = _plain(
@@ -240,6 +255,7 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
             "NOT BY ITSELF a task",
             "NEVER INFER THIS FROM LENGTH",
             "HAVING THE MATERIAL IN HAND",
+            "CORRECT handling could depend",
             "ACTIVE store is flat",
             "AT MOST ONE live `project` note",
             "never a second handoff log indexed beside it",
