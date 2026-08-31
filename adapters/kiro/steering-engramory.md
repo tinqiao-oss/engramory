@@ -8,6 +8,15 @@ You have a curated, file-based memory under `.engramory-memory/` (index: `MEMORY
 injected live at the bottom of this file). **Only this index is always-loaded; open an
 individual note on demand — never load the whole store into context.**
 
+- **What counts as a task.** A turn, a message, or a session is not by itself a
+  task; a task is user-directed work whose handling could depend on something the
+  store might hold. Read-only work counts — analysis, diagnosis, planning, review —
+  and changing a file is not required. A greeting, an acknowledgement, or a reaction
+  neither starts a task nor finishes one: do not open the store for it, and do not
+  checkpoint it. **Having the material in hand does not make work a non-task** — a
+  diff pasted for review is still a task. **Never infer this from length** — a
+  one-word reply that picks an option or carries on work underway inherits that
+  task. When it is still unclear, treat it as a task.
 - **At the start of a task**, scan the index below (one line per memory) and open only
   the detail files (`.engramory-memory/<slug>.md`) whose hooks look relevant **and
   that resolve inside `.engramory-memory/`** — a pointer that escapes the store

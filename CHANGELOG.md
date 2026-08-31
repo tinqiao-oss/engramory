@@ -4,6 +4,63 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.10.1 — 2026-08-31
+
+- **"At the start of a task" had no lower bound, so a greeting was a task.** Every
+  standing surface told the agent to recall at the start of a task and to run a
+  completion checkpoint at the end of one, and nothing in the protocol said what is
+  *not* a task. On a host with native auto-memory that costs nothing visible — the
+  index is already in context — so the gap stayed invisible for as long as the
+  project has had it: the recall clause dates to the first commit, not to 0.10.0's
+  new checkpoint. Off such a host it is a real file-tool call, and behind a chat
+  bridge that gives every incoming message its own session, a bare "hi" bought a cold
+  start and a full tool chain before anyone got an answer. `SKILL.md` §4 now opens
+  with **what counts as a task**: a turn, a message, or a session is not by itself
+  one; a task is user-directed work whose handling could depend on what the store
+  holds, read-only work (analysis, diagnosis, planning, review) included. §5 adds the
+  mirror clause — the end of a turn is not task completion, and an empty checkpoint
+  never justifies opening the store.
+
+- **Two clauses keep the fix from becoming an escape hatch.** Neither is decoration:
+  a first draft shipped without the second and cross-model review took it apart.
+  *Length decides nothing* — a one-word reply that picks an option or carries on work
+  underway inherits that task, so "1" answering "which of these three?" is the middle
+  of a task, not small talk. *Material in hand decides nothing* — a diff pasted for
+  review is a task even though every line needed to answer it is on screen; what the
+  store holds is not the diff, it is how you are meant to review one. Without that
+  second clause the exemption swallowed exactly the read-only work the paragraph
+  above it had just called a task.
+
+  One consequence is deliberate and worth stating plainly: **an isolated "1" with no
+  visible context still recalls.** An ambiguous short input is resolved by what the
+  conversation was already doing, and treated as a task when that is unclear — a
+  needless recall costs a little context, a missed one costs the discipline. Making
+  small talk cheap on a per-message bridge is the bridge's job, not the protocol's.
+
+- **The bound reaches every surface an agent actually reads.** `rules-snippet.md`,
+  the Kiro steering template, and the dsh plugin's registered skill body carry it;
+  the read-only reader snippet gets the recall half only and stays free of a write
+  side. It is also in `SKILL.md`'s frontmatter and the dsh skill metadata, because
+  those descriptions drive implicit selection on a progressive-disclosure host — an
+  unbounded trigger there invites the same over-firing the block exists to stop.
+  `tests/test_protocol_sync.py` and `adapters/dsh/plugin/test.js` assert the sentences
+  **whole** rather than by substring, and pin the inversions: a text reading "it is
+  false that a turn is not by itself a task … infer it from length" passed an earlier
+  substring version of these assertions.
+
+- **Codex adapter: what a chat bridge actually pays for.** A new section separates the
+  two costs, because only one of them is this protocol's. Engramory decides whether a
+  message is a task; the *bridge* decides whether a message starts a Codex session at
+  all, and a session that has already begun cannot be made cheap by any wording in
+  `AGENTS.md`. It also flags that the optional `UserPromptSubmit` hook has no matcher
+  — on a per-message bridge its bookkeeping runs per message — and suggests leaving
+  the hooks out of that kind of install. `README.md` and `README.zh-CN.md` point at it
+  from the Codex install step.
+
+- dsh-engramory **0.2.4** ships the same bound in its registered skill body and in the
+  metadata a host matches on. The guard is untouched: same caps, same refusal, same
+  decision table.
+
 ## 0.10.0 — 2026-08-20
 
 - **A task-completion checkpoint (new protocol).** The spec had a transition sync —

@@ -20,7 +20,7 @@
 > 怎么判断你所在宿主**真正**能强制什么、机器上是否已有记忆库、哪些东西绝对不能碰、
 > 以及该怎么向用户汇报 —— 都是 agent 自由发挥时最容易做错的地方。
 
-> **状态:0.10.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.10.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -127,7 +127,9 @@ transcript 或笔记正文。
 `--memory-root`。不要把 Engramory 直接接管 Codex 原生 Memories:Codex
 Memories 是 Codex 自己管理的生成状态,而 Engramory 是用户可审计的明文文件夹,
 也是 Engramory 协议的 canonical store。显式 sync 与可选生命周期 hook 辅助的
-区别见 [adapters/codex/README.md](adapters/codex/README.md)。
+区别见 [adapters/codex/README.md](adapters/codex/README.md)。如果每条进来的消息
+都会开一个自己的 Codex 会话(聊天机器人桥接),先读那份文档里的 chat-bridge
+一节:Codex 不会自动加载 Engramory 的索引,每次召回都是一次真实的文件读。
 
 ### 只读读取器(召回另一个 agent 的记忆)
 

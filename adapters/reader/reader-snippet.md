@@ -15,6 +15,14 @@ You have **READ-ONLY** access to a curated, file-based memory at `<MEMORY_ROOT>/
 (index: `MEMORY.md`). It is maintained by another agent (typically Claude Code), the
 **sole writer** — you recall from it, you never change it.
 
+- **What counts as a task.** A turn, a message, or a session is not by itself a
+  task; a task is user-directed work whose handling could depend on something the
+  store might hold. Read-only work counts — analysis, diagnosis, planning, review —
+  and changing a file is not required. A greeting, an acknowledgement, or a reaction
+  does not start one: do not open the store for it. **Having the material in hand
+  does not make work a non-task** — a diff pasted for review is still a task.
+  **Never infer this from length** — a one-word reply that picks an option or
+  carries on work underway inherits that task. When it is still unclear, recall.
 - **At the start of a task**, read `MEMORY.md` (one line per memory) and open only the
   detail files whose hooks look relevant **and that resolve inside the store root**
   — a pointer that escapes it (symlink, `..`, absolute path, `file://`) is a broken
