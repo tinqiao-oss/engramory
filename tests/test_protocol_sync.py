@@ -132,6 +132,54 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
         for rel in self.MARKDOWN_SURFACES:
             yield rel, _plain((ROOT / rel).read_text(encoding="utf-8"))
 
+    def test_a_bare_turn_is_not_a_task(self):
+        """"At the start of a task" had no lower bound, so a greeting was a task.
+
+        On a host with native auto-memory the index is already in context and the
+        over-broad reading costs nothing visible. Off one — a chat bridge where every
+        message is its own session — it turned "1" into a file read and a cold start.
+        The exemption must not be inferable from length either: a one-word reply that
+        picks an option is the middle of real work and still has to recall. Nor by
+        having the material in hand: a pasted diff is still a task, and dropping that
+        clause let "review this diff" satisfy the exemption and the definition at once.
+
+        Scope, stated honestly: these are substring assertions over long phrases.
+        They catch a rule being deleted, reworded past recognition, or drifting on one
+        surface — the failure this file exists for. They do NOT prove the surrounding
+        prose agrees: a text can keep every phrase and negate it around them ("it is
+        false that ..."), which is why the two known inversions are pinned below.
+        That is a floor, not a proof; a deliberately self-contradicting snippet is a
+        review problem, not something an assertion can settle.
+        """
+        surfaces = list(self._surfaces())
+        for rel in ("SKILL.md", "adapters/reader/reader-snippet.md"):
+            surfaces.append(
+                (rel, _plain((ROOT / rel).read_text(encoding="utf-8"))))
+        for rel, text in surfaces:
+            with self.subTest(surface=rel):
+                # Whole sentences: the substrings alone pass on a text that says the
+                # opposite ("it is false that a turn is not by itself a task").
+                self.assertIn(
+                    "a turn, a message, or a session is not by itself a task", text)
+                self.assertIn("never infer this from length", text)
+                # ... and the material being in hand is not an exemption either, or
+                # "review this pasted diff" reads as a non-task and skips recall.
+                self.assertIn(
+                    "having the material in hand does not make work a non-task", text)
+                # The derived surfaces once dropped "correct", which widens the task
+                # set: "output OK verbatim" has a settled answer the store cannot
+                # change, and only "correct handling" excludes it.
+                self.assertIn("correct handling could depend", text)
+                self.assertNotIn("is by itself a task", text)
+                self.assertNotIn("infer it from length", text)
+                self.assertNotIn("it is false that", text)
+        # The bound has to survive into the relevance-loaded trigger as well, or a
+        # host that only ever sees the frontmatter keeps the unbounded reading.
+        frontmatter = _plain(
+            (ROOT / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1])
+        self.assertIn("is not a task", frontmatter)
+        self.assertIn("never judge that by length", frontmatter)
+
     def test_one_live_project_note_is_a_ceiling_not_a_quota(self):
         # "exactly one" would make a note mandatory for every unfinished task and
         # collide with "when nothing is worth keeping, write nothing".
@@ -204,6 +252,10 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
             encoding="utf-8").splitlines()
         live = [ln for ln in lines if not ln.lstrip().startswith("//")]
         for phrase in (
+            "NOT BY ITSELF a task",
+            "NEVER INFER THIS FROM LENGTH",
+            "HAVING THE MATERIAL IN HAND",
+            "CORRECT handling could depend",
             "ACTIVE store is flat",
             "AT MOST ONE live `project` note",
             "never a second handoff log indexed beside it",

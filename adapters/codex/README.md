@@ -217,6 +217,33 @@ the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks),
 then use `/hooks` to verify the installed entries; if unavailable or
 incompatible, fall back to explicit sync.
 
+## Chat bridges and other one-session-per-message entry points
+
+Codex never auto-loads Engramory's `MEMORY.md` — its own native Memories are a
+separate, Codex-managed store — so "read `MEMORY.md` at the start of a task" is a
+real file-tool call here, not an index that is already in context. In an editor session
+that cost is paid once and amortised over a long piece of work. Behind a chat
+bridge — a bot that hands each incoming message to its own Codex session — it is
+paid on every message, cold start included.
+
+Two separate things decide what that costs you, and only one of them is Engramory's:
+
+- **Whether a message is a task.** A greeting or a bare acknowledgement is not
+  (`SKILL.md` §4), so it gets no recall and no completion checkpoint. Length alone
+  never decides it: a one-word reply that picks an option or continues work already
+  underway inherits that task and still recalls.
+- **Whether the bridge starts a Codex session at all.** That is the bridge's routing,
+  not the protocol's. Even with Engramory reading nothing, a message routed into
+  Codex pays for the session it starts. If small talk should be cheap, the bridge has
+  to answer it without spinning up an agent turn — no wording in `AGENTS.md` can undo
+  a session that already began.
+
+If you installed the optional lifecycle hooks, note that `UserPromptSubmit` has no
+matcher and therefore runs on **every** prompt, including ones the protocol treats as
+non-tasks. It only touches synchronization bookkeeping, but on a per-message bridge
+that bookkeeping is per message. Leave the hooks out of a chat-bridge install unless
+you want that.
+
 ## Reliability model on Codex
 
 The base Codex adapter uses three layers:

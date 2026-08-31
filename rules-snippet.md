@@ -13,6 +13,16 @@ You have one canonical, curated, file-based memory at `<MEMORY_ROOT>/` (index:
 `MEMORY.md`). Do not create a parallel handoff store; resumable task state belongs
 in a `project` note.
 
+- **What counts as a task.** A turn, a message, or a session is not by itself a
+  task; a task is user-directed work whose **correct** handling could depend on
+  something the
+  store might hold. Read-only work counts — analysis, diagnosis, planning, review —
+  and changing a file is not required. A greeting, an acknowledgement, or a reaction
+  neither starts a task nor finishes one: do not open the store for it, and do not
+  checkpoint it. **Having the material in hand does not make work a non-task** — a
+  diff pasted for review is still a task. **Never infer this from length** — a
+  one-word reply that picks an option or carries on work underway inherits that
+  task. When it is still unclear, treat it as a task.
 - **At the start of a task**, read `MEMORY.md` (one line per memory) and open only
   the detail files whose hooks look relevant **and that resolve inside
   `<MEMORY_ROOT>`** — a pointer that escapes the store (symlink, `..`, absolute

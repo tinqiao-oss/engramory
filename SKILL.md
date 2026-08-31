@@ -9,6 +9,9 @@ description: >-
   (an empty checkpoint still has to be decided) — and (4) before compacting,
   clearing context, or opening a fresh thread to sync the current goal, state,
   decisions, constraints, blockers, and next step.
+  A turn that starts no work — a greeting, an acknowledgement — is not a task and
+  needs none of this, but never judge that by length: a one-word reply continuing
+  work underway inherits that task.
   Each memory is one small markdown file; a single always-loaded index (MEMORY.md)
   lists them. Works on any agent host that can read and write local files.
 ---
@@ -251,6 +254,35 @@ always "one short hook + link".
 
 ## 4. Recall protocol (reading)
 
+### What counts as a task
+
+A turn, a message, or a session is not by itself a task. A **task** is
+user-directed work whose correct handling could depend on something the store
+might hold — a preference, a settled decision, where a project stands. Read-only
+work counts: analysis, diagnosis, planning, and review are tasks. Changing a file
+is not required, and neither is spanning several turns.
+
+A greeting, an acknowledgement, or a reaction does not start a task — do not open
+the store for it — and does not finish one. **Having the material in hand does not
+make work a non-task.** A diff pasted for review is a task even though every line
+needed to answer is on screen: what the store holds is not the diff, it is how you
+are meant to review one.
+
+**Never infer this from length.** A one-word message that picks an option,
+confirms an action, or carries on work already underway inherits that work's
+task: "1" answering "which of these three?" is the middle of a task, not small
+talk. Resolve an ambiguous short input by what the conversation was already
+doing, never by its size; when that is still unclear, treat it as a task. A
+needless recall costs a little context; a missed one costs the discipline.
+
+This bound matters most where recall is not free. On a host with native
+auto-memory the index is already in context, so an over-broad reading of "task"
+costs nothing visible; on a host without one — and especially where each chat
+message is its own session — it turns every "hi" into a file read and a cold
+start.
+
+### Protocol
+
 1. At the start of a task, read `MEMORY.md`.
 2. Scan the one-line descriptions. Open only the detail files whose hooks look
    relevant to the task at hand. If continuing unfinished work, open the matching
@@ -334,6 +366,12 @@ the expected outcome, not a failure to record.
    done. Other tasks' notes are none of this checkpoint's business.
 3. **Write nothing** when nothing qualifies, and say so. An empty checkpoint is a
    complete checkpoint.
+
+The end of a turn, or of a session, is not by itself task completion (§4): a turn
+that never started a task has no checkpoint to run. Never open the store merely to
+produce an empty one — when the work plainly settled nothing durable and no live
+`project` note was in play, the empty judgement is complete without touching a
+file.
 
 Never append a per-turn log to the store, and never touch a file just to mark it
 fresh: a timestamp is not a memory, and a store that records that it was updated
