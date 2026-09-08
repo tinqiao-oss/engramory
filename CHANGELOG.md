@@ -4,6 +4,37 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.11.0 — 2026-09-08
+
+- **A store of conclusions had no way back to the evidence.** Engramory deliberately
+  keeps curated facts rather than raw history: a note says *the retry wrapper must
+  stay — it is a correctness fix*, not the session where that was worked out. That is
+  the right trade for recall, but it leaves three questions unanswerable from the
+  store alone — what was the reasoning behind this terse note, is this stale one still
+  true, and what was discussed but never written down. New `tools/engramory_trace.py`
+  searches the host's own transcripts for exactly those cases: `engramory_trace.py
+  "streaming parser"` to find where a topic was argued, `--show <session-id>` to
+  replay one session (which lands directly on the origin session where the host
+  stamps one onto a note). Local and read-only — nothing is uploaded, indexed, or
+  embedded, and the store itself is never touched.
+- **Scoped as a convenience, not a protocol change.** `SKILL.md` does not mention it
+  and does not need to: unlike `engramory_check.py` / `engramory_doctor.py`, which
+  exist to *enforce* the index cap and the write rules, nothing in the discipline
+  depends on this tool. It is also Claude Code only — it parses that host's JSONL
+  layout — so putting it in a protocol that is otherwise host-agnostic would hand
+  other hosts an instruction they cannot follow. Documented in `README.md` under the
+  Claude Code install instead.
+- Two behaviors worth naming, both learned the hard way against a real store. It
+  searches **only what was said** by default (`--tools` opts tool calls and output
+  back in): in a tool-heavy session the large majority of `user` records are tool
+  results, and a host that re-injects standing context every turn means a term drawn
+  *from* a memory otherwise matches dozens of copies of that memory's own history.
+  And it prefilters with a **byte scan rather than shelling out to ripgrep** — `rg` is
+  absent from many real PATHs (it often exists only inside a host's bundled
+  environment), so that call silently degrades to parsing every transcript; worse, two
+  matching engines means two case-folding rules, and anything the external filter
+  drops the Python matcher never sees.
+
 ## 0.10.1 — 2026-08-31
 
 - **"At the start of a task" had no lower bound, so a greeting was a task.** Every
