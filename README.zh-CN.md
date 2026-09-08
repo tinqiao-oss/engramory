@@ -20,7 +20,7 @@
 > 怎么判断你所在宿主**真正**能强制什么、机器上是否已有记忆库、哪些东西绝对不能碰、
 > 以及该怎么向用户汇报 —— 都是 agent 自由发挥时最容易做错的地方。
 
-> **状态:0.10.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.11.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -107,6 +107,20 @@ feedback → 保存持久 reference 指针 → 归档/删除过时或已完成�
 2. **(可选)把完整规范注册成 skill**:把本文件夹复制或软链接到 Claude Code 技能目录、命名 `engramory/`,让 [`SKILL.md`](SKILL.md) 作为详细参考按需加载(路径见 `hooks/INSTALL.md`)。
 3. **装硬卡口 hook**:把 `hooks/` 里的 hook 注册进 `settings.json`(片段在 `hooks/settings.snippet.json`)。
 4. 把 `<MEMORY_ROOT>` 指向你的记忆目录;若在 git 仓库内,务必 `.gitignore` 掉。
+
+> **可选 —— 回查一条记忆背后的原始记录。** 记忆存的是**结论**,宿主的会话记录存的是**当时到底怎么说的**。
+> 当一条笔记太简略、你想要背后的推理时,当你怀疑它已经过期、想看原始证据时,或者当某件事讨论过却从没记下来时,
+> `tools/engramory_trace.py` 就是去翻那些会话记录的 —— 全程本地只读,不上传、不建索引、不做 embedding:
+>
+> ```bash
+> python tools/engramory_trace.py "streaming parser"   # 搜当前项目
+> python tools/engramory_trace.py --show <session-id>  # 展开某次会话
+> ```
+>
+> 默认只搜**说过的话**,不搜工具输出 —— 否则一个取自记忆的词会命中每一轮重新注入那条记忆的上下文,
+> 把真正产生它的讨论淹掉。宿主若在笔记上盖了来源会话号,`--show` 直接带你到那次讨论。
+> 仅限 Claude Code:它解析的是该宿主的 JSONL 布局。这是给**你**用的便利工具,不属于协议 ——
+> [`SKILL.md`](SKILL.md) 里的纪律既不需要它,也不提它。
 
 ### Codex
 

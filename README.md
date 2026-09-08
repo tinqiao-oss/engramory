@@ -29,7 +29,7 @@ itself stays git-ignored).
 > already exists, what you must not touch, and what to tell the user — the parts
 > agents reliably get wrong when improvising.
 
-> **Status: 0.10.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.11.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
