@@ -75,6 +75,9 @@ in a `project` note.
 - Keep `MEMORY.md` small. Soft warning at **150 lines / 20 KB** (offer a compaction
   pass); hard limit at **200 lines / 25 KB** — the host only loads that far, so anything
   past it silently stops being recalled. Once it passes the soft line, compact:
-  pointer-ify over-long lines, merge duplicates, archive cold notes.
+  pointer-ify over-long lines, merge duplicates, archive cold notes. An index line is
+  one hook + link (prose past ~200 bytes is content leaking into the index); a note
+  past ~12 KB is a timeline — keep its conclusion, move the history to
+  `archive/<slug>_history.md`.
 
 Full protocol & rationale: the engramory `SKILL.md`.

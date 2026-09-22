@@ -4,6 +4,50 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.12.0 — 2026-09-23
+
+- **The store had a size rule for the index and none for anything else.** Found by
+  compacting the author's own store: the index sat comfortably under its caps at
+  126 lines / 18.9 KB, yet 34 of 172 notes were over 15 KB and the largest was
+  57 KB — a `project` note that had grown into a PR-by-PR timeline, costing ~20k
+  tokens on every recall while claiming to be "one fact". Nothing in the protocol
+  or the tools could see that. Two of the four things that went wrong were pure
+  discipline the rules already covered (retire completed work, merge before
+  creating); the other two were measurement gaps, fixed here:
+  - `engramory_doctor.py` now reports **bloated notes** — any note over
+    `ENGRAMORY_NOTE_WARN_BYTES` (default 12 KB), summarised on one line largest
+    first — and **leaky index lines**: an index line whose prose, once its
+    `](path.md)` targets and `[[wikilinks]]` are stripped, exceeds
+    `ENGRAMORY_LINE_WARN_BYTES` (default 200). Measuring prose rather than raw
+    length is the point: a line of six pointers with one-word hooks is fine, one
+    pointer followed by a paragraph is the leak that eats the byte cap while the
+    line count still looks healthy. Both are INFO, exit code unchanged — they
+    measure a symptom, and a store that was clean yesterday stays clean today.
+  - The Claude Code hook adds the same per-line measure as a **nudge only**: when
+    an edit *adds* a leaky line it says so in `additionalContext`, rides along
+    with the existing WARN/OVER text when both apply, and stays silent for an
+    edit that rewrites or removes already-leaky lines (so compaction is never
+    nagged). It never denies for this; only the index caps deny.
+- **A fourth compaction step: split conclusion from history.** SKILL.md §6 had
+  pointer-ify / merge / archive, none of which helps a note that is legitimately
+  live but has accreted its own timeline. Step 4 keeps the slug and rewrites it
+  as the conclusion layer (invariants, decisions, pitfalls, how to resume) and
+  moves the dated record, whole, to `archive/<slug>_history.md` — nothing is
+  deleted, the index line does not change, and recall pays for the conclusion
+  only. Applied to the author's five largest notes: 57 → 9 KB, 56 → 5 KB,
+  51 → 11 KB, 46 → 5 KB, 45 → 16 KB. §6 also states the two budgets in words
+  (one hook + link per index line; a note past ~12 KB is a timeline), and the
+  same sentence reaches `rules-snippet.md` and the Kiro steering file.
+- `engramory_check.py` refuses a directory argument with EX_USAGE instead of
+  answering it. `os.path.getsize` on a directory returns the directory entry's
+  own size (48 KB for a big one on NTFS), which sailed past the byte cap and
+  printed a confident OVER about an index that was never read; a caller that
+  passed `memory/` instead of `memory/MEMORY.md` acted on that fabricated verdict.
+- 12 new tests (doctor: bloated note, threshold override, leaky line, pointer-heavy
+  line not flagged, wikilinks count as pointers; hook: nudge within caps, never
+  denies, silent on rewrite / removal / pointer-heavy line, rides along with WARN,
+  env override). `hooks/INSTALL.md` documents the new variable.
+
 ## 0.11.0 — 2026-09-08
 
 - **A store of conclusions had no way back to the evidence.** Engramory deliberately

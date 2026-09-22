@@ -428,6 +428,16 @@ first wins.
   Only if it still cannot get under the caps do you stop and ask the user which
   memories to drop. **Never silently discard a fact you just learned because the
   index is full** — compact first, ask second.
+- **Per line, the budget is one hook + link.** Measure an index line by its prose
+  *with the pointers removed* (the `](path.md)` targets and `[[wikilinks]]`): a
+  line of six pointers with one-word hooks is fine, one pointer followed by a
+  paragraph is content that leaked into the index. Over ~200 bytes of such prose
+  on a line, move the detail back into the note. This is the leak that eats the
+  byte cap while the line count still looks healthy.
+- **A note has a size too.** One file is one fact; a note past ~12 KB is almost
+  always a timeline (PR-by-PR, round-by-round, episode-by-episode) stacked under
+  one slug, and it costs its full size on every recall. Split it (step 4 below)
+  rather than letting it grow.
 
 On a Claude Code host, a `PreToolUse` hook is the hard backstop (see `hooks/`): it
 blocks edits that would *grow* the index past the caps, but always allows
@@ -451,7 +461,15 @@ judgment are your job either way.
    doctor deliberately skips it, so those notes become undiscoverable — kept on
    disk, but effectively deleted. If you will not write the pointer file, delete
    the notes outright and say so; silently stranding them is the worse outcome.
-4. **Re-count.** Under 200 → proceed. Still over → stop and ask the user which
+4. **Split a bloated note into conclusion + history.** For a note that has grown
+   into a timeline (see the size note above), keep the slug and rewrite it as the
+   *conclusion layer* — invariants, decisions, pitfalls, how to resume — and move
+   the dated process record, whole and unedited, to `archive/<slug>_history.md`.
+   The live note's first lines say the history is there; the index line does not
+   change. Nothing is deleted, but recall now pays for the conclusion only. This
+   is the one way a long-lived `project` or `reference` note stays small without
+   losing anything.
+5. **Re-count.** Under 200 → proceed. Still over → stop and ask the user which
    memories to retire.
 
 ---

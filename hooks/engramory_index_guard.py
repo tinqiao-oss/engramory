@@ -57,12 +57,18 @@ Config via environment variables (all optional):
   ENGRAMORY_WARN          soft line warning,  default 150
   ENGRAMORY_HARD_BYTES    hard byte ceiling,  default 25600  (25 KB)
   ENGRAMORY_WARN_BYTES    soft byte warning,  default 20480  (20 KB)
+  ENGRAMORY_LINE_WARN_BYTES  per-line prose budget, default 200: an index line whose
+                       text — with its `](path.md)` targets and `[[wikilinks]]`
+                       removed — exceeds this is content leaking into the index.
+                       The hook nudges (context only, never denies) when an edit
+                       ADDS such a line; existing ones are the doctor's job.
   ENGRAMORY_INDEX_NAME    index filename to guard, default "MEMORY.md"
   ENGRAMORY_INDEX_PATH    absolute path of the one index to guard (overrides name
                        matching; use when several MEMORY.md exist)
 """
 import json
 import os
+import re
 import sys
 
 
@@ -145,6 +151,18 @@ def _which(p_lines, p_bytes, line_cap, byte_cap, cur_lines=None, cur_bytes=None)
     if p_bytes > byte_cap and (cur_bytes is None or p_bytes > cur_bytes):
         parts.append(f"{_kb(p_bytes)} > {_kb(byte_cap)}")
     return " and ".join(parts)
+
+
+# A pointer part of an index line: a Markdown link target `](...)` or a `[[wikilink]]`.
+# What is left after stripping them is the prose the author wrote — the part that
+# grows when content leaks into the index. Same definition as engramory_doctor.py.
+_POINTER_PART_RE = re.compile(r"\]\([^)]*\)|\[\[[^\]]+\]\]")
+
+
+def _leaky_lines(text, budget):
+    # Count index lines whose prose (pointers stripped) exceeds `budget` bytes.
+    return sum(1 for ln in text.split("\n")
+               if len(_POINTER_PART_RE.sub("", ln).encode("utf-8")) > budget)
 
 
 def _apply_edits(current, edits):
@@ -294,6 +312,22 @@ def main():
     size = f"{_plural(p_lines, 'line')} / {_kb(p_bytes)}"
     caps = f"{hard} lines / {_kb(hard_b)}"
 
+    # Content leaking into the index: the edit ADDS a line whose prose (pointers
+    # stripped) is over the per-line budget. Only growth in that count is worth a
+    # word — a compaction that rewrites an already-leaky index unchanged, or one
+    # that removes leaky lines, must not be nagged. Context only, never a deny: a
+    # long line is a symptom the doctor also reports, not a cap.
+    line_warn = _envint("ENGRAMORY_LINE_WARN_BYTES", 200)
+    new_leaky = _leaky_lines(result, line_warn) - _leaky_lines(current, line_warn)
+    leak_note = ""
+    if new_leaky > 0:
+        leak_note = (
+            f" This edit also adds {_plural(new_leaky, 'index line')} carrying over "
+            f"{_kb(line_warn)} of prose besides the pointer — that is content leaking "
+            f"into the index (it is what eats the byte cap); keep the detail in the "
+            f"note and leave one hook + link on the index line."
+        )
+
     if worsens_cap:
         which = _which(p_lines, p_bytes, hard, hard_b, cur_lines, cur_bytes)
         _emit(
@@ -318,7 +352,7 @@ def main():
                 f"Engramory: index will be {size}, still over the load window "
                 f"({_which(p_lines, p_bytes, hard, hard_b)}; cap {caps}), but this edit "
                 f"shrinks/keeps it so it's allowed. Keep compacting (pointer-ify / merge / "
-                f"archive) until it's at or under {caps}."
+                f"archive) until it's at or under {caps}." + leak_note
             ),
         )
     elif over_warn:
@@ -328,9 +362,11 @@ def main():
                 f"{_which(p_lines, p_bytes, warn, warn_b)} (caps {caps}). Allowed, but tell "
                 f"the user the index is getting long and offer a compaction pass — pointer-ify "
                 f"over-long index lines, merge duplicates, archive cold notes — before it "
-                f"hits the hard cap."
+                f"hits the hard cap." + leak_note
             ),
         )
+    elif leak_note:
+        _emit(context="Engramory: index stays within its caps." + leak_note)
     else:
         _allow_silently()
 

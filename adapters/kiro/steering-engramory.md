@@ -65,7 +65,9 @@ individual note on demand — never load the whole store into context.**
   record only *where* the secret lives.
 - Keep `MEMORY.md` small (soft 150 lines / 20 KB, hard 200 lines / 25 KB). If a write
   would push it past the hard cap, compact first (pointer-ify long lines, merge
-  duplicates, archive cold notes) — don't just append. After editing the index you may
+  duplicates, archive cold notes; a note past ~12 KB is a timeline — keep its
+  conclusion, move the history to `archive/<slug>_history.md`) — don't just append.
+  After editing the index you may
   run the portable checker and compact if it prints `OVER`:
   `python <ENGRAMORY>/tools/engramory_check.py .engramory-memory/MEMORY.md`, where
   `<ENGRAMORY>` is wherever you cloned this repo. **Kiro has no pre-write deny hook

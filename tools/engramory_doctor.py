@@ -46,6 +46,17 @@ with no `scope` (its reach is then unstated; unlabelled beats guessed — SKILL.
 only via a `[[wikilink]]` (not in the index, so it won't load at session start).
 Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
 
+BLOAT (INFO -> exit 0, summarised on one line each): an index line that carries
+more than ENGRAMORY_LINE_WARN_BYTES (default 200) bytes of prose once its pointers
+(`](path.md)` targets and `[[wikilinks]]`) are removed — content has leaked into
+the index, which is what eats the byte cap while the line count still looks fine;
+and a note file larger than ENGRAMORY_NOTE_WARN_BYTES (default 12 KB) — a note is
+one fact, and past that size it is almost always a timeline of PR-by-PR / round-by-
+round history stacked under one slug, which costs its full size on every recall.
+Both measure a symptom, not a rule violation, so neither fails the run; the fix
+for the second is SKILL.md §6 step 4 (keep the conclusion, move the history to
+`archive/<slug>_history.md`).
+
 Note: indentation is ignored, so fields nested under a host's `metadata:` block
 (e.g. Claude Code's) are read; the name<->filename check ignores `-`/`_`/case so
 CC's `a-b` name vs `a_b.md` file isn't flagged. The frontmatter grammar is the
@@ -92,6 +103,17 @@ _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
 # like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
 # a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
 _PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)")
+# Everything on an index line that is a POINTER rather than prose: a Markdown link
+# target `](...)` and a `[[wikilink]]`. What remains after stripping these is the hook
+# text the author wrote — the part that grows when content leaks into the index. A
+# line of six pointers with one-word hooks measures small; one pointer followed by a
+# paragraph measures large, which is exactly the distinction a raw line length loses.
+_POINTER_PART_RE = re.compile(r"\]\([^)]*\)|\[\[[^\]]+\]\]")
+
+
+def _prose_bytes(line):
+    # UTF-8 bytes of an index line with its pointer parts removed (see _POINTER_PART_RE).
+    return len(_POINTER_PART_RE.sub("", line).encode("utf-8"))
 
 
 def _short(value, limit=60):
@@ -413,6 +435,20 @@ def main(argv):
         issues.append(f"index over cap ({' and '.join(over)}): {nlines} lines / "
                       f"{_kb(nbytes)} (cap {hard} lines / {_kb(hard_b)}) — compact it")
 
+    # Content leaked into the index: lines whose PROSE (pointers stripped) is long.
+    # Reported once, as a summary, with the worst lines named so the author knows
+    # where to start pointer-ifying. INFO, not ISSUE — it measures a symptom.
+    line_warn = _envint("ENGRAMORY_LINE_WARN_BYTES", 200)
+    leaky = sorted(((_prose_bytes(ln), i) for i, ln in enumerate(itext.split("\n"), 1)
+                    if _prose_bytes(ln) > line_warn), reverse=True)
+    if leaky:
+        where = ", ".join(f"line {i} ({_kb(b)})" for b, i in leaky[:3])
+        more = f", +{len(leaky) - 3} more" if len(leaky) > 3 else ""
+        info.append(f"{len(leaky)} index line(s) carry over {_kb(line_warn)} of prose "
+                    f"besides their pointers ({where}{more}) — content has leaked into "
+                    f"the index; move it back into the note and leave one hook + link "
+                    f"(SKILL.md §6 step 1)")
+
     # note files (by basename; a store uses unique slugs), excluding the top-level
     # templates/ & archive/ dirs only. Match on the FIRST path component, not a raw
     # string prefix, so a sibling like "templates-old/" is still checked and a
@@ -549,9 +585,20 @@ def main(argv):
     # per-note nudge printed 108 identical lines on the author's own store — burying
     # every real finding this tool exists to surface.
     scopeless = []
+    # Bloated notes, summarised after the loop like `scopeless` (one line, largest
+    # first) — an existing store can have dozens, and one line per note would bury
+    # the ISSUE lines this tool exists to surface.
+    note_warn = _envint("ENGRAMORY_NOTE_WARN_BYTES", 12 * 1024)
+    bloated = []
     for base, p in sorted(notes.items()):
         if base == "MEMORY.md":
             continue
+        try:
+            nsize = os.path.getsize(p)
+        except OSError:
+            nsize = 0
+        if nsize > note_warn:
+            bloated.append((nsize, base))
         text = _read(p)
         if text is _TOO_LARGE:
             issues.append(f"note file is too large to validate ({_kb(os.path.getsize(p))}, "
@@ -642,6 +689,15 @@ def main(argv):
                     if _HOW_NEAR.search(body):
                         msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
                     issues.append(msg)
+
+    if bloated:
+        bloated.sort(reverse=True)
+        shown = ", ".join(f"{b} {_kb(s)}" for s, b in bloated[:3])
+        more = f", +{len(bloated) - 3} more" if len(bloated) > 3 else ""
+        info.append(f"{len(bloated)} note(s) over {_kb(note_warn)} ({shown}{more}) — a "
+                    f"note is one fact and costs its full size on every recall; keep the "
+                    f"conclusion in place and move the timeline to archive/<slug>_history.md "
+                    f"(SKILL.md §6 step 4)")
 
     if scopeless:
         shown = ", ".join(scopeless[:3])

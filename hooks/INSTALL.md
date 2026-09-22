@@ -85,6 +85,7 @@ file that isn't the index, and only acts when the target's filename is the index
 | `ENGRAMORY_WARN` | `150` | soft line warning — model is nudged to compact |
 | `ENGRAMORY_HARD_BYTES` | `25600` | hard byte ceiling (25 KB) — growth past it is denied |
 | `ENGRAMORY_WARN_BYTES` | `20480` | soft byte warning (20 KB) |
+| `ENGRAMORY_LINE_WARN_BYTES` | `200` | per-line prose budget — an index line whose text, with its `](path.md)` targets and `[[wikilinks]]` removed, exceeds this is content leaking into the index; the hook nudges (never denies) when an edit adds one, and `engramory_doctor.py` reports the existing ones |
 | `ENGRAMORY_INDEX_NAME` | `MEMORY.md` | which filename counts as the index |
 | `ENGRAMORY_INDEX_PATH` | — | absolute path of the one index to guard (use when several `MEMORY.md` files exist; overrides name matching) |
 

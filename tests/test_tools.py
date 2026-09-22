@@ -1515,3 +1515,54 @@ def test_run_helper_reports_stderr_refusals(tmp_path):
 # tests would silently never run there. (14 of them already had that fate.)
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# --- 0.12.0: bloat is reported (INFO), never failed ---
+
+def test_doctor_bloated_note_is_info_not_issue(tmp_path):
+    # a 20 KB note is a timeline, not a fact: named on one summary line, exit stays 0
+    _note(tmp_path / "big.md", "big", body="x" * 20000)
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [B](big.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+    assert "1 note(s) over 12.0 KB (big.md" in out and "_history.md" in out
+
+
+def test_doctor_note_size_threshold_env_override(tmp_path):
+    _note(tmp_path / "mid.md", "mid", body="x" * 3000)
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [M](mid.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "note(s) over" not in out          # under the 12 KB default
+    rc, out = _run(DOCTOR, str(tmp_path), env={"ENGRAMORY_NOTE_WARN_BYTES": "2048"})
+    assert rc == 0 and "1 note(s) over 2.0 KB (mid.md" in out
+
+
+def test_doctor_leaky_index_line_is_info(tmp_path):
+    # one pointer followed by a paragraph = content leaked into the index
+    _note(tmp_path / "a.md", "a")
+    (tmp_path / "MEMORY.md").write_text(
+        "# Index\n- [A](a.md) — " + "prose " * 60 + "\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+    assert "1 index line(s) carry over 200 B of prose" in out and "line 2 (" in out
+
+
+def test_doctor_pointer_heavy_line_is_not_leaky(tmp_path):
+    # six pointers with one-word hooks: long as a line, small as prose -> silent
+    for i in range(6):
+        _note(tmp_path / f"note-{i}-with-a-long-slug-name.md", f"note-{i}-with-a-long-slug-name")
+    line = " · ".join(f"[N{i}](note-{i}-with-a-long-slug-name.md) hook" for i in range(6))
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text("# Index\n- " + line + "\n", encoding="utf-8")
+    assert len(line.encode()) > 250  # long by raw byte count
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "carry over" not in out
+
+
+def test_doctor_wikilink_counts_as_pointer_not_prose(tmp_path):
+    _note(tmp_path / "a.md", "a")
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text("# Index\n- [A](a.md) — see " + " ".join(f"[[slug-{i}-long-forward-ref]]" for i in range(8)) + "\n",
+                   encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "carry over" not in out

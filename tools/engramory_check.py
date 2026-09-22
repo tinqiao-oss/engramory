@@ -84,6 +84,15 @@ def main(argv):
         print("usage: engramory_check.py <path-to-index (MEMORY.md)>")
         return 64  # EX_USAGE — a misuse must not read as OK (exit 0) to a caller
     path = argv[1]
+    # A directory answers getsize() with its own entry size (48 KB for a big one on
+    # NTFS), which sails past the byte cap and prints a confident OVER about an index
+    # that was never read. Caught in the field: the caller passed the memory/ dir
+    # instead of memory/MEMORY.md and acted on a fabricated 48 KB verdict. Misuse must
+    # look like misuse, so this is EX_USAGE, not a size answer.
+    if os.path.isdir(path):
+        print(f"usage: {path} is a directory; pass the index file itself "
+              f"(e.g. {os.path.join(path, 'MEMORY.md')})")
+        return 64
     hard = _envint("ENGRAMORY_HARD", 200)
     warn = _envint("ENGRAMORY_WARN", 150)
     hard_b = _envint("ENGRAMORY_HARD_BYTES", 25600)

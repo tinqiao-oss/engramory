@@ -451,3 +451,63 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+# --- 0.12.0: per-line prose budget (nudge only, never deny) ---
+
+def _leaky(n=1):
+    # n index lines with one pointer and ~300 B of prose each
+    return "\n".join("- [A](a.md) — " + "prose " * 55 for _ in range(n))
+
+
+def test_adding_a_leaky_line_nudges_within_caps(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=10)
+    rc, out = _run(idx, _w(idx, "\n".join(["- [x](x.md) h"] * 10) + "\n" + _leaky()))
+    assert rc == 0 and _nudges(out)
+    assert "leaking into the index" in out["additionalContext"]
+    assert "1 index line" in out["additionalContext"]
+
+
+def test_leaky_line_nudge_never_denies(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=10)
+    rc, out = _run(idx, _w(idx, _leaky(5)))
+    assert rc == 0 and _decision(out) not in ("deny", "allow")
+
+
+def test_rewriting_an_already_leaky_index_is_silent(tmp_path):
+    # compaction rewrites / unrelated edits must not be nagged for pre-existing leaks
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text(_leaky(3) + "\n- [b](b.md) h", encoding="utf-8")
+    rc, out = _run(idx, _w(idx, _leaky(3) + "\n- [b](b.md) h\n- [c](c.md) h"))
+    assert rc == 0 and out is None
+
+
+def test_removing_a_leaky_line_is_silent(tmp_path):
+    idx = tmp_path / "MEMORY.md"
+    idx.write_text(_leaky(3), encoding="utf-8")
+    rc, out = _run(idx, _w(idx, _leaky(2)))
+    assert rc == 0 and out is None
+
+
+def test_pointer_heavy_long_line_is_not_leaky(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=5)
+    line = " · ".join(f"[N{i}](note-{i}-with-a-long-slug-name.md) hook" for i in range(6))
+    assert len(line.encode()) > 250
+    rc, out = _run(idx, _w(idx, "- " + line))
+    assert rc == 0 and out is None
+
+
+def test_leaky_line_note_rides_along_with_warn_nudge(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=40)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 160) + "\n" + _leaky()))  # >150 lines warn
+    assert rc == 0 and _nudges(out)
+    ctx = out["additionalContext"]
+    assert "lines >" in ctx and "leaking into the index" in ctx
+
+
+def test_leaky_line_budget_env_override(tmp_path):
+    idx = _write(tmp_path / "MEMORY.md", lines=5)
+    rc, out = _run(idx, _w(idx, "- [a](a.md) — " + "p" * 120))  # 120 B prose: under 200
+    assert rc == 0 and out is None
+    rc, out = _run(idx, _w(idx, "- [a](a.md) — " + "p" * 120), env={"ENGRAMORY_LINE_WARN_BYTES": "100"})
+    assert rc == 0 and _nudges(out) and "100 B" in out["additionalContext"]
