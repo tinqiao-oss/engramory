@@ -20,7 +20,7 @@
 > 怎么判断你所在宿主**真正**能强制什么、机器上是否已有记忆库、哪些东西绝对不能碰、
 > 以及该怎么向用户汇报 —— 都是 agent 自由发挥时最容易做错的地方。
 
-> **状态:0.12.0 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
+> **状态:0.12.1 —— 实验性。** 硬性索引上限(`PreToolUse` hook)对匹配到的直接编辑工具(`Edit|Write|MultiEdit`)确定性拦截、但**不是全局写保护**(shell 类工具——Bash、PowerShell、后台 Monitor 命令——以及 MCP 文件工具/外部编辑器/同步程序绕得过);纪律以**常驻规则**形式加载、靠模型遵守,**尽力而为、不保证每个任务都生效**(见 [SKILL.md](SKILL.md) §8)。假设**单写者/串行写入**。暂时别把它当"强制、可靠、跨 Agent"的记忆层来用。
 
 ---
 
@@ -202,7 +202,7 @@ python tools/engramory_init.py dsh --install-skill
 它把带标记的 Engramory 块写进 `$DSH_HOME/AGENTS.md`(dsh 的 `agent-instructions` 插件每会话加载硬编码的 `["AGENTS.md", "CLAUDE.md"]` 候选);把协议装到 `$DSH_HOME/skills/engramory`(dsh 的用户 skill 根;项目模式 `--project-root` 则装 `<项目>/.dsh/skills/engramory` —— 那才是 dsh 扫描的项目根,装错位置就是「装上了但永远不被发现」);另建独立的 `.engramory-memory/` 库。全局块内一律渲染**绝对路径**(dsh 的文件工具按 session cwd 解析相对路径)。这些步骤给到的上限是规则 + `engramory_check.py`,**不是**确定性 deny hook —— [`adapters/dsh/plugin/`](adapters/dsh/plugin/)(`dsh-engramory`)已用 `ctx.tools.guard()` 实现了确定性 cap(单调拒绝)——请装 **0.2.1 及以上**:上游「装不上第三方插件」的预览版 bug 已修复,而 0.2.0 装上也永远激活不了(issue #8,旧版 Cordis 的 `inject` 写法),安装一旦可行就被首个真实安装当场暴露,0.2.1 已修。接线与模型行为已对着 `deepseek-v4-flash` 真机 dogfood(块以 `<system-reminder>` 到达;只能靠库内笔记回答的问题,模型会主动打开对应笔记)。详见 [adapters/dsh/README.md](adapters/dsh/README.md)。
 
 ### 任何其他智能体(Hermes、Cursor、Cline、Windsurf……)
-Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录(**仅当那是你自己掌控的普通文件目录**;对自带记忆管理器的宿主——Codex、OpenClaw、Hermes——请另用一个独立目录,别去接管它),并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里 Claude Code 的写好、实测且**在运行**;dsh 的 shim([adapters/dsh/plugin/](adapters/dsh/plugin/),`dsh-engramory` 0.2.1+)在当前 dsh 上装得上、也激活得了(0.2.0 永远激活不了 —— issue #8);部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
+Engramory 与模型无关(DeepSeek、GPT、Llama……),骑在宿主自己的记忆库上。完整接线见 **[PORTING.md](PORTING.md)**;简言之:把 [`rules-snippet.md`](rules-snippet.md) 贴进宿主的**常驻加载**规则里(让纪律常驻生效,而不只是按相关性加载的 skill),若宿主支持 skill 再导入 [`SKILL.md`](SKILL.md),把 `<MEMORY_ROOT>` 指向宿主自己的记忆目录(**仅当那是你自己掌控的普通文件目录**;对自带记忆管理器的宿主——Codex、OpenClaw、Hermes——请另用一个独立目录,别去接管它),并按宿主能支持的最强档位接好尺寸上限:PreToolUse hook → 每次写索引后跑 `tools/engramory_check.py` → 模型纪律,再用 `tools/engramory_doctor.py` 做周期兜底。确定性的 cap 需要一个 pre-write 的 *deny* hook:这里 Claude Code 的写好、实测且**在运行**;dsh 的 shim([adapters/dsh/plugin/](adapters/dsh/plugin/),`dsh-engramory` 0.2.1+)装得上、也激活得了 —— 最近一次是 2026-09-24 在 Windows 上对 4 个 dsh 版本(0.1.5-rc.3 和 0.1.7 系列)端到端重验,每个通过的版本都逐个写在它的 `package.json` 里(0.2.0 永远激活不了 —— issue #8);部分其他宿主也暴露了等效 hook(Hermes;Cursor 不过较新、不太稳),所以 cap 可移植——但每个宿主要各自改一层薄 I/O shim 并自行验证,而 OpenClaw 只能靠 `before_tool_call` 插件拦截、有些宿主则完全没有。各宿主详情见 [PORTING.md](PORTING.md)。没有这类 hook 的宿主(或纯聊天)上,cap 退化为尽力而为的纪律(见 [SKILL.md](SKILL.md) §9)。
 
 把**已有的存量记忆库**首次接入严格 `doctor` 会报一堆机械问题(缺 `created`/`updated`、Why/How 还没用规范标签)——别盲修,见 **[PORTING.md](PORTING.md)** 的「Adopting an existing store」:先 `--no-schema` 过结构、用片段批量补日期、再手写 Why/How。
 

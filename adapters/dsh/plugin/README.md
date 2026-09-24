@@ -115,6 +115,16 @@ newline, so an index sitting exactly at the cap stays writable.
   skill registry). The test mock now mirrors the reflective-context access rules, and
   the guard's decision table stays covered by `node --test` (28 cases, run in
   Engramory's CI).
+- **Checked against the dsh you are likely running, not only the one it was written
+  on.** `tests/dsh_e2e/run.py` in the Engramory repo installs a dsh release into a
+  throwaway prefix, adds this plugin with `dsh plugin add`, and drives one headless
+  task against a scripted stand-in for the DeepSeek API: a 260-line write and an edit
+  past the cap must come back refused by this guard with nothing reaching the disk, a
+  small write must land byte for byte, the skill must be advertised, every tool dsh
+  offers must already be classified (a new one could write past the cap), and removal
+  must leave a profile that still boots. The releases it passed on are listed in
+  `package.json` under `dsh.compatibility.dshReleases`; a unit test rejects a
+  `compatible` there without a recorded run of the same plugin version and code.
 - dsh is a developer preview and its plugin API can change. This plugin deliberately
   touches only `ctx.tools.guard()` and a reactive `ctx.inject(['skills'], …)` child
   that registers the skill, so it stays cheap to fix.

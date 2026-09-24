@@ -29,7 +29,7 @@ itself stays git-ignored).
 > already exists, what you must not touch, and what to tell the user — the parts
 > agents reliably get wrong when improvising.
 
-> **Status: 0.12.0 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.12.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
@@ -347,8 +347,10 @@ wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
 pre-write *deny* hook. Claude Code's is written, tested, and RUNNING here; dsh's shim
-(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+) installs and activates on current dsh
-builds — 0.2.0 never activated (issue #8); some other hosts
+(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+) installs and activates — last
+re-checked end to end on Windows on 2026-09-24 against four dsh releases (0.1.5-rc.3
+and three from the 0.1.7 line), each one declared in its `package.json` — while 0.2.0 never activated
+(issue #8); some other hosts
 expose an equivalent seam too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
 a per-host I/O shim you write and verify yourself — while OpenClaw can only block via a
 `before_tool_call` plugin and some hosts have none. See [PORTING.md](PORTING.md) for the

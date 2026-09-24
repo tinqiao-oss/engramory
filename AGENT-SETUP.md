@@ -317,7 +317,10 @@ rung honestly, including when the answer is "this host cannot have a determinist
 A deterministic pre-write deny is implemented, tested, and RUNNING in this repo for
 **one** host (Claude Code). A second implementation runs on dsh
 (`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+) — caught failing in the field
-(issue #8: 0.2.0 never activated) and re-verified end to end on a live rc.7 profile;
+(issue #8: 0.2.0 never activated) and re-verified end to end on a live rc.7 profile,
+then again on four later dsh releases, on Windows, by `tests/dsh_e2e/` (2026-09-24; the list is
+`dsh.compatibility.dshReleases` in the plugin's `package.json`, and a dsh newer than
+that list is unverified until a run says otherwise);
 written is not running, and only running counts. For anything else, the correct
 report is that the cap is
 best-effort discipline — not

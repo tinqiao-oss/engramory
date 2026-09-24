@@ -4,6 +4,50 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.12.1 — 2026-09-24
+
+- **"Installs and activates on current dsh builds" had last been checked on rc.7.**
+  The sentence was true when it was written, in August, against dsh 0.1.0-rc.7. dsh
+  then shipped nineteen releases — somewhere along the way its model traffic moved
+  from OpenAI chat completions to the Anthropic Messages API — and nobody ran the
+  plugin on any of them. It still works; the point is that nobody knew. The one
+  directory that asks for proof acted on the gap: DSH-Store (dsh.store) delisted
+  dsh-engramory on 2026-09-21 because no exact compatibility record covered any of
+  dsh's three newest releases. Re-checked end to end on dsh 0.1.5-rc.3 (npm
+  `latest`), 0.1.7-alpha.1, 0.1.7-alpha.2 and 0.1.7-rc.1 (Windows): installed with
+  `dsh plugin add`, the `engramory` row present in the composed profile, the skill
+  advertised to the model, a 260-line write and an edit past the cap refused by the
+  guard through dsh's real tool pipeline with nothing reaching the disk, a 3-line
+  write landing byte for byte, every tool dsh offers accounted for, and a clean
+  `dsh plugin remove`.
+- **The check is now a script, and a compatibility claim now needs it.**
+  `tests/dsh_e2e/run.py` does all of the above for any list of dsh releases with no
+  API key: dsh goes into a throwaway npm prefix and `$DSH_HOME`, and the model's side
+  is `fake_llm.py`, a scripted stand-in for the DeepSeek API that speaks both wire
+  formats. The disk is read after every step, so a host that printed the refusal and
+  wrote anyway could not hide it behind the next write; a tool dsh adds that nobody
+  has classified fails the run until someone decides whether it can write past the
+  cap. `--record` writes the outcome to `tests/dsh_e2e/results.json` with a digest of
+  what dsh loads (code, bundle patch, loading fields). The releases that passed are
+  declared in the plugin's `package.json` under `dsh.compatibility.dshReleases` — the
+  exact-record field DSH-Store reads — and `tests/test_dsh_plugin.py` refuses a
+  `compatible` there unless a passing run of the same plugin version *and the same
+  digest* is on record, and refuses an empty map: neither a version bump nor a quiet
+  code change can carry the claim forward. What it cannot see is dsh shipping newer
+  releases; the harness README says when to re-run. Not in CI: every release is an
+  `npm install` of ~500 packages.
+- **The peer dependency that only ever produced a warning is gone.** dsh-engramory
+  declared `@deepseek-ai/dsh-tools >=0.0.1-rc.1` as a peer. Nothing imports it and no
+  profile carries it as a direct dependency, so every `dsh plugin add` ended with
+  pnpm's "Issues with peer dependencies found". The range directories display moved to
+  `dsh.compatibility.dsh`, which DSH-Store reads before falling back to peers:
+  `>=0.1.0-rc.7 <0.2.0-0`, a display range: its floor is the first build any 0.2.1+
+  ever activated on, its ceiling keeps every 0.2 build — prereleases included — out
+  until a run says otherwise, and only `dshReleases` is a claim that something was run. A test pins the
+  plugin to `node:` imports and no dependency fields.
+- dsh-engramory **0.2.5**. The guard and the skill are untouched: same caps, same
+  refusal, same decision table.
+
 ## 0.12.0 — 2026-09-23
 
 - **The store had a size rule for the index and none for anything else.** Found by

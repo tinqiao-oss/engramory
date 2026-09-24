@@ -103,6 +103,13 @@ dsh plugin --profile <名字> add dsh-engramory
   内置的 `@deepseek-ai/cordis` 解析器验过(注册表存在、不存在、以及晚挂载三种情况下的激活)。
   测试用的 mock 现在会照着反射式上下文的访问规则来,守卫的判决表则由 `node --test`
   持续覆盖(28 个用例,在 Engramory 的 CI 里跑)。
+- **验的是你大概率正在用的 dsh,不只是写它时的那一版。** Engramory 仓库里的
+  `tests/dsh_e2e/run.py` 会把指定的 dsh 版本装进临时目录,用 `dsh plugin add` 装上本插件,
+  再对着一个脚本化的 DeepSeek API 替身跑一次 headless 任务:260 行的整文件写入、把索引撑过
+  上限的 edit,都必须被本守卫拒绝,而且磁盘上什么都没变;小写入必须逐字节落盘;skill 必须出现
+  在发给模型的技能目录里;dsh 提供的每个工具都必须已经归过类(没归类的新工具可能绕过上限写文件);卸载后
+  profile 必须还能启动。通过的版本逐个写在 `package.json` 的 `dsh.compatibility.dshReleases`
+  里;没有同一插件版本、同一份代码的通过记录,单元测试就不接受把它标成 `compatible`。
 - dsh 目前是开发者预览版,插件 API 可能变化。本插件刻意只碰 `ctx.tools.guard()` 和一个
   注册 skill 的响应式 `ctx.inject(['skills'], …)` 子上下文,所以要跟着改也很便宜。
 

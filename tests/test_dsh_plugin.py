@@ -153,6 +153,96 @@ def test_dsh_plugin_ships_a_bundle_manifest():
     assert os.path.isfile(os.path.join(PLUGIN, patch.lstrip("./")))
 
 
+def test_dsh_plugin_depends_on_nothing_but_node():
+    """The plugin imports only `node:` builtins, so it declares no dependencies at all.
+
+    Up to 0.2.4 it declared a peer on `@deepseek-ai/dsh-tools` (`>=0.0.1-rc.1`). It
+    never did anything: nothing imports that package, and a dsh profile never carries
+    it as a direct dependency, so pnpm printed an unmet-peer warning on every
+    `dsh plugin add`. The dsh range the directories display now lives in
+    `dsh.compatibility.dsh` (DSH-Store reads that before falling back to peers), so
+    re-adding the peer "for discoverability" buys nothing but the warning back.
+    """
+    import json
+    import re
+
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        pkg = json.load(fh)
+    # devDependencies stay allowed: they never reach an installing user.
+    for field in ("dependencies", "optionalDependencies", "peerDependencies",
+                  "peerDependenciesMeta", "bundleDependencies", "bundledDependencies"):
+        assert field not in pkg, "package.json declares %s" % field
+    with open(os.path.join(PLUGIN, "index.js"), encoding="utf-8") as fh:
+        src = fh.read()
+    static = re.findall(r"^\s*import\s+(?:[^'\";]+?\s+from\s+)?['\"]([^'\"]+)['\"]", src, re.M)
+    assert static, "no import statements found - did the module format change?"
+    specs = static + re.findall(r"^\s*export\s+[^'\";]*?\s+from\s+['\"]([^'\"]+)['\"]", src, re.M)
+    specs += re.findall(r"\b(?:import|require)\s*\(\s*['\"]([^'\"]+)['\"]", src)
+    assert all(s.startswith("node:") for s in specs), specs
+    assert not re.search(r"\b(?:import|require)\s*\(\s*[^'\"\s)]", src), (
+        "a dynamic import/require with a computed specifier cannot be checked")
+
+
+def test_declared_dsh_compatibility_is_backed_by_a_recorded_run():
+    """Every dsh release declared `compatible` has a passing end-to-end run on record
+    for THIS plugin version.
+
+    DSH-Store reads `dsh.compatibility.dshReleases` from this package.json and keeps
+    the plugin listed only while one of dsh's newest releases is declared compatible;
+    exact per-release records are the only evidence it accepts. The failure pinned
+    here is the one that got the plugin delisted: "installs and activates on current
+    dsh builds" was true the day it was written (rc.7) and then never re-checked while
+    dsh shipped a dozen releases and changed its model wire format. The record comes
+    from `tests/dsh_e2e/run.py --record`, and it is tied to the code as well as the
+    version: a run counts only if its runtime digest (index.js, the bundle patch, and
+    the package.json fields that decide loading) matches the tree. Change the code or
+    bump the version and every declaration needs a fresh run, or goes back to
+    `unknown`. At least one release must stay declared: an empty map is the delisted
+    state, and "installs and activates" with nothing verified is not a claim to ship.
+    """
+    import json
+
+    e2e = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dsh_e2e")
+    sys.path.insert(0, e2e)
+    try:
+        from evidence import SEMVER, load_runs, runtime_digest
+    finally:
+        sys.path.remove(e2e)
+
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        pkg = json.load(fh)
+    compat = pkg["dsh"].get("compatibility") or {}
+    assert isinstance(compat.get("dsh"), str) and compat["dsh"].strip(), (
+        "dsh.compatibility.dsh (the range directories display) is missing")
+    releases = compat.get("dshReleases")
+    assert isinstance(releases, dict), "dsh.compatibility.dshReleases is missing"
+    for version, status in releases.items():
+        assert SEMVER.fullmatch(version), "not a full SemVer: %r" % version
+        assert status in ("compatible", "incompatible", "unknown"), (version, status)
+    claimed = sorted(v for v, s in releases.items() if s == "compatible")
+    assert claimed, (
+        "no dsh release is declared compatible - run `python tests/dsh_e2e/run.py "
+        "--record <dsh version>` and declare what passed")
+
+    digest = runtime_digest(PLUGIN)
+    mine = [r for r in load_runs(os.path.join(e2e, "results.json"))
+            if r.get("plugin") == pkg["version"]]
+    passed = {r.get("dsh") for r in mine if r.get("result") == "pass" and r.get("runtime") == digest}
+    stale = {r.get("dsh") for r in mine if r.get("result") == "pass" and r.get("runtime") != digest}
+    failed = {r.get("dsh") for r in mine if r.get("result") == "fail" and r.get("runtime") == digest}
+    unbacked = [v for v in claimed if v not in passed]
+    assert not unbacked, (
+        "declared compatible without a passing run of plugin %s at this code on record: "
+        "%s%s - run `python tests/dsh_e2e/run.py --record %s`, or declare them unknown"
+        % (pkg["version"], ", ".join(unbacked),
+           " (a run exists, but the plugin's code has changed since)"
+           if set(unbacked) & stale else "", " ".join(unbacked)))
+    contradicted = [v for v in claimed if v in failed]
+    assert not contradicted, (
+        "declared compatible but a recorded run of plugin %s failed: %s"
+        % (pkg["version"], ", ".join(contradicted)))
+
+
 # --- direct runner (no pytest) ---
 
 def _main():
