@@ -316,7 +316,7 @@ rung honestly, including when the answer is "this host cannot have a determinist
 
 A deterministic pre-write deny is implemented, tested, and RUNNING in this repo for
 **one** host (Claude Code). A second implementation runs on dsh
-(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.6+) — caught failing in the field
+(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.7+) — caught failing in the field
 (issue #8: 0.2.0 never activated) and re-verified end to end on a live rc.7 profile,
 then again on eleven dsh releases from 0.1.5-rc.3 to 0.2.2-alpha.2, on Windows, by `tests/dsh_e2e/` (2026-10-29; the list is
 `dsh.compatibility.dshReleases` in the plugin's `package.json`, and a dsh newer than

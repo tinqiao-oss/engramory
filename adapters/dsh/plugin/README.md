@@ -24,10 +24,12 @@ because the index loads every session and everything past the cap silently stops
 recalled. On most hosts that limit is rules plus a checker the agent has to remember to
 run. dsh exposes `ctx.tools.guard()` — a synchronous, **monotonic** refusal: once a guard
 returns a reason, no later listener can turn it back into an allow. So here the limit is
-enforced, not requested. Use **0.2.6 or later**: 0.2.0 shipped before profile installs
+enforced, not requested. Use **0.2.7 or later**: 0.2.0 shipped before profile installs
 worked upstream and carried an `inject` declaration this Cordis does not accept — it
 installed but never activated (issue #8) — and up to 0.2.5 an edit could slip past the
-cap on a CRLF index, or on dsh 0.2 through a relative path after a cd (see Known limits). Outside Claude Code, dsh is the first host with
+cap on a CRLF index, or on dsh 0.2 through a relative path after a cd, and up to 0.2.6
+through a symlink under another name — or a FIFO named like the index could hang the host
+(#20, #21; see Known limits). Outside Claude Code, dsh is the first host with
 the shim actually written (a few others expose equivalent pre-write seams — see
 PORTING.md — but have no shim yet).
 
@@ -67,10 +69,10 @@ supplies the protocol; it does not create the store.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `indexName` | `MEMORY.md` | Basename treated as the memory index (case-insensitive; both `file_path` and `str_replace_editor`'s `path` are checked). An empty or non-string value falls back to the default. Nothing else is inspected. |
+| `indexName` | `MEMORY.md` | Basename treated as the memory index (case-insensitive; both `file_path` and `str_replace_editor`'s `path` are checked) — the name a write is called by, or the name of the file it lands on, so a symlink under another name is caught too. An empty or non-string value falls back to the default. |
 | `maxLines` | `200` | Hard line cap. Non-positive or non-finite values fall back to the default. |
 | `maxBytes` | `25600` | Hard UTF-8 byte cap (25 KB). |
-| `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity (symlinks and `..` resolved; case-folded on Windows only), and a path that does not exist yet still has its first write guarded. |
+| `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity — the file the write lands on, whatever it is called (symlinks and `..` resolved; case-folded on Windows only) — and a path that does not exist yet still has its first write guarded. |
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 
@@ -81,13 +83,15 @@ supplies the protocol; it does not create the store.
 | `write` (or `str_replace_editor` `create`) ending within caps | allow |
 | `write`/`create` that GROWS the index past a cap | **deny**, naming the numbers and what to compact |
 | `write`/`create` that SHRINKS or keeps an over-cap index | allow — incremental compaction (210 → 205 → 198) must stay possible |
-| Edit carrying `old_str`/`new_str`: result simulated | judged by the RESULT, same grow/shrink rule as a write |
+| Edit carrying `old_str`/`new_str`: result simulated | judged by the RESULT, same grow/shrink rule as a write — sized before it is built, so a `replace_all` whose result would be too long to build is refused by its size alone |
 | Unsimulable partial (e.g. `insert`) on an over-cap index | **deny**, telling the agent a shrinking whole-file write passes |
 | Unsimulable partial on a healthy index | allow |
 | `read`, `view`, or any unknown tool | allow — recall must never be blocked, even over cap |
 | Any write to any other file | allow — not the guard's business |
 | Missing/unreadable current index on a whole-file write | treated as EMPTY (mirrors the Python guard) — a within-caps write passes, an over-cap first write is refused |
 | Missing/unreadable index on a partial edit | allow — a guard must never block work over a path it cannot read |
+| A FIFO, device, or directory under the index's name | never read — counts as unreadable (a read there would hang or flood the host, which runs guards on its main thread) |
+| An index past the read limit (1 MiB, or 4× `maxBytes`, at most 16 MiB) | not read whole: a whole-file write is judged on bytes against the filesystem's size (every shrink passes; its line count is unknown, so lines are not capped there), and an edit passes unmeasured, as on an unreadable index |
 | Malformed execution (no arguments, non-string path/content) | allow — not recognisably a write |
 
 The deny rule mirrors `hooks/engramory_index_guard.py` exactly: refuse only a result
@@ -114,7 +118,7 @@ newline, so an index sitting exactly at the cap stays writable.
   failure byte for byte; 0.2.1 boots and serves) and against the vendored
   `@deepseek-ai/cordis` resolver (activation with, without, and with a late-mounted
   skill registry). The test mock now mirrors the reflective-context access rules, and
-  the guard's decision table stays covered by `node --test` (37 cases, run in
+  the guard's decision table stays covered by `node --test` (47 cases, run in
   Engramory's CI).
 - **A relative path is measured where dsh writes it.** dsh 0.2 gives every session its
   own working directory (moved by its `working_directory` tool) and resolves a

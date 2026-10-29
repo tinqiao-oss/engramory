@@ -9,6 +9,7 @@
  * (issue #8), so the mock now enforces the same access rules the real host does.
  */
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -213,7 +214,7 @@ test('an edit is sized as dsh writes it back: no BOM, and no doubled CR at a sea
   const { guard } = mount()
   // dsh decodes with TextDecoder, which drops the BOM, and writes the edit back
   // without it: 3 bytes the guard must not count against the result.
-  writeFileSync(path, `﻿HEAD\n${'x'.repeat(25590)}`, 'utf8') // 25598 bytes on disk
+  writeFileSync(path, `\uFEFFHEAD\n${'x'.repeat(25590)}`, 'utf8') // 25598 bytes on disk
   assert.equal(guard({
     name: 'edit', arguments: { file_path: path, old_string: 'HEAD', new_string: 'HEADabcde' },
   }), undefined, 'dsh writes 25600 bytes, which is at the cap, not over it')
@@ -326,7 +327,7 @@ test('an unpinned refusal tells the user how to stop guarding the wrong file', (
   assert.doesNotMatch(pinnedReason, /indexPath/)
 })
 
-test('a pinned index under a symlinked ancestor keeps its identity once created', () => {
+test('a pinned index under a symlinked ancestor keeps its identity once created', (t) => {
   // The dangerous pairing is "does not exist yet" + "symlinked ancestor". Keying the
   // pin with a plain resolve() fallback stored the ALIAS path at config time, while
   // every later call - the file now existing - resolved to the link's TARGET. The two
@@ -340,7 +341,8 @@ test('a pinned index under a symlinked ancestor keeps its identity once created'
     // 'junction' works without elevation on Windows; 'dir' elsewhere.
     symlinkSync(realDir, aliasDir, process.platform === 'win32' ? 'junction' : 'dir')
   } catch {
-    return // no symlink privilege here; the assertions below need a real link
+    t.skip('no symlink privilege here; the assertions need a real link')
+    return
   }
 
   const pinned = join(aliasDir, 'MEMORY.md')
@@ -485,6 +487,183 @@ test('a process cwd that is gone never makes the guard throw', () => {
   } finally {
     process.cwd = real
   }
+})
+
+/** A file symlink, or null where this platform/user cannot make one (Windows without the privilege). */
+function fileLink(target, link) {
+  try {
+    symlinkSync(target, link, 'file')
+    return link
+  } catch {
+    return null
+  }
+}
+
+test('a symlink under another name still writes the index, so it is still the index', (t) => {
+  // #20: dsh follows a symlink, so `idx.md -> MEMORY.md` writes the index; a guard
+  // that decided on the name it was called by let 300 lines through, pinned or not.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-alias-'))
+  const real = join(dir, INDEX)
+  writeFileSync(real, big(150), 'utf8')
+  const alias = fileLink(real, join(dir, 'idx.md'))
+  if (alias === null) return t.skip('no symlink privilege here')
+  const grow = { name: 'edit', arguments: { file_path: alias, old_string: '- line 0', new_string: big(300) } }
+  for (const config of [{}, { indexPath: real }]) {
+    const { guard } = mount(config)
+    assert.match(guard(write(alias, big(300))), /300 lines > 200/, JSON.stringify(config))
+    assert.match(guard(grow), /lines > 200/, JSON.stringify(config))
+  }
+  assert.equal(mount().guard(write(join(dir, 'other.md'), big(300))), undefined,
+    'a file that is not a link to the index is still none of its business')
+})
+
+/**
+ * Run guard calls in a child node and report each as allow/deny, so a hang or a heap
+ * blow-up fails the test with a reason instead of hanging or killing the runner.
+ * `calls` is JS source evaluating to an array of executions, built inside the child.
+ */
+function guardInChild(calls, nodeArgs = []) {
+  const script = `
+    import { apply } from ${JSON.stringify(new URL('./index.js', import.meta.url).href)}
+    let guard
+    apply({ tools: { guard: (g) => { guard = g } }, inject: () => {} })
+    console.log((${calls}).map((exec) => guard(exec) === undefined ? 'allow' : 'deny').join(','))`
+  const run = spawnSync(process.execPath, [...nodeArgs, '--input-type=module', '-e', script],
+    { encoding: 'utf8', timeout: 15_000 })
+  assert.equal(run.error?.code, undefined, 'the guard did not return in time')
+  assert.equal(run.status, 0, run.stderr.slice(-400))
+  return run.stdout.trim()
+}
+
+/** A write past the cap, a small write, an edit — against one path, in the child. */
+const threeCalls = (path) => `[
+  { name: 'write', arguments: { file_path: ${JSON.stringify(path)}, content: Array.from({ length: 300 }, (_, i) => '- ' + i).join('\\n') } },
+  { name: 'write', arguments: { file_path: ${JSON.stringify(path)}, content: '- x' } },
+  { name: 'edit', arguments: { file_path: ${JSON.stringify(path)}, old_string: 'a', new_string: 'b' } },
+]`
+
+test('a FIFO named like the index cannot hang the host', (t) => {
+  // #21: the read runs inside a synchronous guard, on the host's main thread, and a
+  // FIFO blocked it forever. Unreadable counts as empty: past the cap is refused, a
+  // small write passes, an edit passes.
+  if (process.platform === 'win32') return t.skip('no FIFOs on Windows')
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-fifo-'))
+  const fifo = join(dir, INDEX)
+  if (spawnSync('mkfifo', [fifo]).status !== 0) return t.skip('mkfifo unavailable')
+  assert.equal(guardInChild(threeCalls(fifo)), 'deny,allow,allow')
+})
+
+test('a symlink to a device, named like the index, cannot flood the host', (t) => {
+  // #21: a cloned repo's `MEMORY.md -> /dev/zero` grew the host past a gigabyte.
+  if (process.platform === 'win32') return t.skip('no /dev/zero on Windows')
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-zero-'))
+  const zero = fileLink('/dev/zero', join(dir, INDEX))
+  if (zero === null) return t.skip('no symlink privilege here')
+  assert.equal(guardInChild(threeCalls(zero), ['--max-old-space-size=64']), 'deny,allow,allow')
+})
+
+test('an index too large to read whole is still capped on bytes, and can still be compacted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-huge-'))
+  const path = join(dir, INDEX)
+  const size = 1024 * 1024 + 4096 // past the read limit
+  writeFileSync(path, `${'x'.repeat(99)}\n`.repeat(size / 100 + 1), 'utf8')
+  const { guard } = mount()
+  assert.equal(guard(write(path, 'y'.repeat(size - 1000))), undefined, 'a shrinking rewrite passes')
+  assert.match(guard(write(path, 'y'.repeat(size + 200_000))), /bytes > 25600/, 'growth is refused')
+  // An edit's result cannot be simulated without the whole text, and refusing it blind
+  // would refuse the compacting edits with the rest: it passes, as on an unreadable index.
+  const edit = (old_string, new_string) =>
+    guard({ name: 'edit', arguments: { file_path: path, old_string, new_string } })
+  assert.equal(edit(`${'x'.repeat(99)}\n`, ''), undefined, 'a compacting edit passes')
+  assert.equal(edit('x', 'y'), undefined)
+})
+
+test('a `..` after a symlinked directory is walked the way dsh walks it', (t) => {
+  // #20, second shape: dsh keeps `link/../idx.md` as spelled and lets the OS walk it,
+  // so it reaches the parent of the link's TARGET. Resolving it lexically named the
+  // parent of the LINK instead — another file than the one written.
+  if (process.platform === 'win32') return t.skip('Windows resolves `..` lexically, as dsh does there')
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'engramory-dotdot-')))
+  const [a, b] = [join(base, 'a'), join(base, 'b')]
+  mkdirSync(a)
+  mkdirSync(join(b, 'sub'), { recursive: true })
+  for (const dir of [a, b]) {
+    writeFileSync(join(dir, INDEX), big(150), 'utf8')
+    if (fileLink(join(dir, INDEX), join(dir, 'idx.md')) === null) return t.skip('no symlink privilege here')
+  }
+  symlinkSync(join(b, 'sub'), join(a, 'link'), 'dir')
+  const spelled = join(a, 'link') + '/../idx.md' // lands on b/MEMORY.md
+  assert.match(mount().guard(write(spelled, big(300))), /300 lines/, 'unpinned')
+  assert.match(mount({ indexPath: join(b, INDEX) }).guard(write(spelled, big(300))), /300 lines/,
+    'pinned to the file it lands on')
+  assert.equal(mount({ indexPath: join(a, INDEX) }).guard(write(spelled, big(300))), undefined,
+    'pinned elsewhere: not this index, so not refused')
+})
+
+test('an edit is sized before it is built, so replace_all cannot make the guard allocate', () => {
+  // replace_all multiplies new_string by every match: a kilobyte of `x`, each replaced
+  // with 64 KB, is a 64 MB result, and with a megabyte a gigabyte — past V8's string
+  // limit, which threw out of the guard. Building either just to measure it is the
+  // allocation #21 is about, reached through an edit's arguments instead of the disk;
+  // a heap-exhausted host aborts, and no catch survives that. Both are refused by
+  // their size alone, in a child whose heap could not hold the first.
+  // The fourth is a 4 MB new_string of nothing but CRLF: normalising it to measure it
+  // was a copy (and a rope of two million pieces) that exhausted the same heap.
+  const path = join(mkdtempSync(join(tmpdir(), 'engramory-sized-')), INDEX)
+  writeFileSync(path, `${'x'.repeat(1024)}HEAD`, 'utf8')
+  const p = JSON.stringify(path)
+  const calls = `[
+    { name: 'edit', arguments: { file_path: ${p}, old_string: 'x', new_string: 'y'.repeat(65536), replace_all: true } },
+    { name: 'edit', arguments: { file_path: ${p}, old_string: 'x', new_string: 'y'.repeat(1048576), replace_all: true } },
+    { name: 'edit', arguments: { file_path: ${p}, old_string: 'x', new_string: '$&$&', replace_all: true } },
+    { name: 'edit', arguments: { file_path: ${p}, old_string: 'HEAD', new_string: '\\r\\n'.repeat(2097152) } },
+  ]`
+  assert.equal(guardInChild(calls, ['--max-old-space-size=32']), 'deny,deny,allow,deny',
+    'and a `$&` in new_string is literal text, not a pattern')
+})
+
+test('an edit too long to build is sized in UTF-8, whatever the configured cap', () => {
+  // Past the read limit the result is judged on lower bounds of its size. Counting
+  // UTF-16 units there undercounts what dsh writes — an emoji is two units and four
+  // bytes — so with a cap above the 16 MiB read limit an over-cap edit passed.
+  const path = join(mkdtempSync(join(tmpdir(), 'engramory-sized-')), INDEX)
+  writeFileSync(path, 'HEAD', 'utf8')
+  const emoji = String.fromCodePoint(0x1F600).repeat(8_600_000) // 17.2 M units, 34.4 MB
+  const { guard } = mount({ maxBytes: 20 * 1024 * 1024 })
+  assert.match(guard({ name: 'edit', arguments: { file_path: path, old_string: 'HEAD', new_string: emoji } }),
+    /at least 34400000 bytes > 20971520/)
+})
+
+test('a lone surrogate cannot inflate the size bound into a false refusal', () => {
+  // UTF-8 sizes add up only for well-formed text: a lone low and a lone high surrogate
+  // each count three bytes, but meeting at a replacement seam they are one four-byte
+  // pair. Summed per replacement, this edit's bound was 16777228 bytes against a
+  // result of exactly 16777226 — the cap — and it was refused.
+  const path = join(mkdtempSync(join(tmpdir(), 'engramory-surrogate-')), INDEX)
+  writeFileSync(path, 'xx', 'utf8')
+  const lo = String.fromCharCode(0xDC00)
+  const hi = String.fromCharCode(0xD800)
+  const exec = {
+    name: 'edit',
+    arguments: { file_path: path, old_string: 'x', new_string: `${lo}${'a'.repeat(8388608)}${hi}`, replace_all: true },
+  }
+  assert.equal(mount({ maxBytes: 16777226 }).guard(exec), undefined)
+  assert.match(mount({ maxBytes: 16777000 }).guard(exec), /at least \d+ bytes > 16777000/,
+    'and the length bound still refuses what is truly over')
+})
+
+test('a guard that hits something unexpected lets the call through instead of throwing', () => {
+  const { guard } = mount()
+  const hostile = { name: 'write', get arguments() { throw new Error('boom') } }
+  assert.equal(guard(hostile), undefined)
+})
+
+test('a directory named like the index is never read', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-dir-'))
+  mkdirSync(join(dir, INDEX))
+  const { guard } = mount()
+  assert.match(guard(write(join(dir, INDEX), big(300))), /300 lines/)
+  assert.equal(guard(write(join(dir, INDEX), big(3))), undefined)
 })
 
 test('malformed executions are ignored rather than thrown on', () => {

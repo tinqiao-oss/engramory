@@ -4,6 +4,64 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.12.3 — 2026-10-29
+
+Both fixes answer reports by @LarryE135 (#20, #21, filed 2026-10-20 with reproducers,
+for an independent plugin review). The relative-path half of #20 is the bug 0.12.2
+fixed — reported nine days before we found it ourselves, in an issue we had not yet
+read.
+
+- **A symlink under another name wrote the index past the cap** (#20). dsh follows a
+  symlink, so a write to `idx.md -> MEMORY.md` lands on the index; the guard decided
+  on the name it was called by and let 300 lines through — pinned to `indexPath` or
+  not, although the README promised a pinned index is "compared by identity". The
+  guard now decides on the file the write lands on: pinned, by identity with no name
+  check first; unpinned, by the name of the path or of the file it resolves to. The
+  path resolution this costs is paid by write-type tools only. Cross-review found a
+  second shape of the same bug: on Linux/macOS dsh walks `link/../idx.md` physically,
+  to the parent of the link's target, while the guard collapsed the `..` lexically
+  first (Node's `realpathSync` resolves before it walks) and named a different file —
+  so a write could still slip through, and a pinned guard could refuse an unrelated
+  one. Paths are now resolved with the OS's own realpath there.
+- **A FIFO or a device under the index's name could hang or flood the host** (#21).
+  Guards run synchronously on the host's main thread, and the guard read whatever
+  answered to the name with an unbounded `readFileSync`: a FIFO blocked it forever, a
+  symlink to `/dev/zero` grew the process past a gigabyte. Only a regular file is read
+  now: a stat first, so a device is not even opened (some drivers block in open
+  itself), then a non-blocking open (POSIX), a check on the open descriptor, and
+  bounded chunked reads. Anything else counts as unreadable, which the guard already
+  treated as "nothing to measure". Reads stop at 1 MiB (or 4× `maxBytes`, capped at
+  16 MiB): an index past that is sized by the filesystem, so a whole-file write is
+  still refused for growing it in bytes and always passes for shrinking it. Its line
+  count is unknown and is not guessed — a low guess would refuse a shrinking rewrite —
+  so past the read limit only bytes are capped. An edit of such an index cannot be
+  simulated without the whole text and passes, as on any index the guard cannot read.
+- **An edit is sized before it is built, and the guard can no longer throw.** The
+  same allocation as #21, reached through an edit's arguments instead of the disk:
+  `replace_all` multiplies `new_string` by every match, and the guard built the whole
+  result just to measure it — a kilobyte index with each character replaced by 64 KB
+  is 64 MB, by a megabyte a gigabyte, past V8's string limit, where the `RangeError`
+  escaped the guard and broke the host's tool call (and a heap-exhausted host aborts,
+  which no catch survives). The result is now sized from the match count first —
+  `new_string` measured as it will be once CRLF is normalised, without normalising it,
+  since that copy alone exhausted a small heap for a 4 MB argument of nothing but
+  CRLF — and one too long to build is judged on lower bounds of its UTF-8 bytes and
+  lines, by the same grow-past-the-cap rule (with a lone surrogate anywhere, the byte
+  bound falls back to the length: two of them meeting at a seam are one 4-byte pair,
+  so per-replacement sums could over-estimate and refuse falsely). Unexpected
+  exceptions let the call through, as the Python guard does, and nothing builds an
+  array of a text's lines any more. All found by cross-review.
+- dsh-engramory **0.2.7**. Tests: symlink alias (pinned and not), `link/../`
+  (pinned to the landing file, pinned elsewhere, unpinned), FIFO and `/dev/zero` in a
+  child process with a deadline (a hang would otherwise hang the test runner too), an
+  over-limit index, a directory under the index's name, `replace_all` and all-CRLF
+  edits in a child whose 32 MB heap could not hold the result, an emoji edit under a
+  20 MiB cap, lone surrogates meeting at a seam — 47 cases. On macOS all 47 pass, and
+  the 0.2.6 code fails the seven that pin these fixes (the FIFO one by its deadline,
+  the `/dev/zero` and `replace_all` ones by exhausting the child's heap); on Windows,
+  which has no FIFOs and lets this user make no file symlinks, 43 pass and four are
+  reported as skipped rather than counted as passes.
+
 ## 0.12.2 — 2026-10-29
 
 - **On dsh 0.2, an edit through a relative path could grow the index past the cap.**

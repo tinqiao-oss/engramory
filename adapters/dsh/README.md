@@ -87,11 +87,12 @@ Paths above are for the user-global install. A `--project-root` install puts the
 >
 > Profile installs work — rc.6's `ERR_PNPM_FETCH_404` on `@deepseek-ai/dsh-type-meta`
 > was fixed upstream in rc.7 — though `dsh plugin` still shells out to a `pnpm` you
-> must have on PATH. Install **`dsh-engramory` 0.2.6 or later**: 0.2.0 installed but
+> must have on PATH. Install **`dsh-engramory` 0.2.7 or later**: 0.2.0 installed but
 > never activated (issue #8 — a stale-Cordis `inject` declaration left it pending
 > forever), which the very first field install caught; and up to 0.2.5 an edit could
 > slip past the cap on a CRLF index (every dsh release), or on dsh 0.2 through a
-> relative path after a `working_directory` cd. Verified end to end on a live rc.7 web
+> relative path after a `working_directory` cd; up to 0.2.6, through a symlink under
+> another name, and a FIFO named like the index could hang the host (#20, #21). Verified end to end on a live rc.7 web
 > profile at the time (0.2.0 reproduces the boot failure byte for byte, 0.2.1 boots
 > and serves), and re-checked on Windows on 2026-10-29 against eleven dsh releases from
 > 0.1.5-rc.3 to 0.2.2-alpha.2 with [`tests/dsh_e2e/`](../../tests/dsh_e2e/): install,

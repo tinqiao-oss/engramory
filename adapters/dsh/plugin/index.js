@@ -23,7 +23,7 @@
  *
  * Zero dependencies, no build step: plain ESM, node: builtins only.
  */
-import { readFileSync, realpathSync } from 'node:fs'
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 export const name = 'engramory'
@@ -41,6 +41,16 @@ export const inject = ['tools']
 const DEFAULT_INDEX_NAME = 'MEMORY.md'
 const DEFAULT_MAX_LINES = 200
 const DEFAULT_MAX_BYTES = 25600
+
+/**
+ * The most the guard reads to measure the current index (#21). Guards run on the host's
+ * main thread, so an unbounded read of whatever answers to the index's name — a symlink
+ * to /dev/zero, a multi-gigabyte file — stalls or exhausts the host. Past this the index
+ * is long since over the cap, and its byte size comes from the filesystem instead.
+ * The ceiling holds even against an absurd `maxBytes` (4 × 1e308 is Infinity).
+ */
+const MIN_READ_LIMIT = 1024 * 1024
+const MAX_READ_LIMIT = 16 * 1024 * 1024
 
 /** Tools that replace a file wholesale, so the post-write text is in the arguments. */
 const WHOLE_FILE_WRITES = new Set(['write'])
@@ -78,6 +88,7 @@ export function apply(ctx, config = {}) {
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
+  settings.readLimit = Math.min(MAX_READ_LIMIT, Math.max(MIN_READ_LIMIT, 4 * settings.maxBytes))
 
   // dsh 0.2 resolves a relative file path against the calling SESSION's working
   // directory, which its `working_directory` tool moves away from the process's own
@@ -105,7 +116,16 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  ctx.tools.guard((exec) => refuseOversizedIndex(exec, settings, sessionCwd))
+  // A guard that throws breaks the host's tool call; only an UNEXPECTED exception can
+  // get here (an edit whose simulated result exceeds V8's string limit, say), and like
+  // the Python guard it fails open — the host could not perform such an edit either.
+  ctx.tools.guard((exec) => {
+    try {
+      return refuseOversizedIndex(exec, settings, sessionCwd)
+    } catch {
+      return undefined
+    }
+  })
 
   // The skill registry is optional AND may activate after this plugin — fiber order
   // between unrelated providers is not guaranteed, so a one-shot probe here would
@@ -147,31 +167,26 @@ export function apply(ctx, config = {}) {
 /**
  * The cap itself. Returning a string denies the call; `undefined` lets it through.
  *
- * Guards are synchronous by contract, so this stays cheap: one basename comparison
- * rejects the overwhelming majority of calls before anything is measured, and the
- * only I/O is a single read of the index on a gated write.
+ * Guards are synchronous by contract, so this stays cheap: every tool that cannot
+ * write leaves on string compares; a write pays a path resolution, and a write to the
+ * index one bounded read of it.
  */
 function refuseOversizedIndex(exec, settings, sessionCwd) {
   const args = exec?.arguments
   if (!args || typeof args !== 'object') return undefined
 
   // dsh's file tools carry the target as `file_path`; `str_replace_editor` calls it
-  // `path`. Compare basenames case-INsensitively: on the case-insensitive
-  // filesystems most stores live on (Windows/macOS), `memory.md` IS the guarded
-  // index, and an exact compare let that spelling through. (Same trade-off as the
-  // Python guard: on a case-sensitive FS this can gate an unrelated lowercase twin —
-  // rename it, or point `indexName` elsewhere.)
+  // `path`.
   const filePath = typeof args.file_path === 'string' ? args.file_path
     : typeof args.path === 'string' ? args.path
       : undefined
   if (filePath === undefined) return undefined
-  if (basename(filePath).toLowerCase() !== settings.matchName) return undefined
 
   const tool = typeof exec.name === 'string' ? exec.name : ''
 
-  // Nothing below can refuse a read, a view, or an unknown tool, so leave before the
-  // pinned-path check: pathKey() touches the filesystem and a guard runs on EVERY tool
-  // call. Ordering it here keeps the common case a pair of string compares.
+  // Nothing below can refuse a read, a view, or an unknown tool, so leave before
+  // anything touches the filesystem: a guard runs on EVERY tool call, and this keeps
+  // the common case a few string compares.
   const gated = WHOLE_FILE_WRITES.has(tool)
     || PARTIAL_WRITES.has(tool)
     || (tool === 'str_replace_editor'
@@ -185,19 +200,27 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
   } catch {
     return undefined // a relative path and no cwd left to resolve it (deleted under us)
   }
-  // If the guard is pinned to one file, this is where an unrelated same-named file in
-  // another project drops out.
-  if (settings.indexKey !== undefined && pathKey(target) !== settings.indexKey) {
-    return undefined
-  }
+  // Is this the index? Decided on the file the write lands on, not the name it was
+  // called by: dsh follows a symlink, so `idx.md -> MEMORY.md` writes the index (#20).
+  // Pinned, that is identity — which is also where an unrelated same-named file in
+  // another project drops out. Unpinned, the name of the path or of what it resolves
+  // to, compared case-INsensitively: on the case-insensitive filesystems most stores
+  // live on (Windows/macOS), `memory.md` IS the guarded index. (Same trade-off as the
+  // Python guard: on a case-sensitive FS this can gate an unrelated lowercase twin —
+  // rename it, or pin `indexPath`.)
+  const named = (p) => basename(p).toLowerCase() === settings.matchName
+  const isIndex = settings.indexKey !== undefined
+    ? pathKey(target) === settings.indexKey
+    : named(filePath) || named(pathKey(target))
+  if (!isIndex) return undefined
 
   if (WHOLE_FILE_WRITES.has(tool)) {
     if (typeof args.content !== 'string') return undefined
-    return verdict(args.content, readIfPossible(target), filePath, settings)
+    return verdict(args.content, readIndex(target, settings.readLimit), filePath, settings)
   }
   if (tool === 'str_replace_editor' && args.command === 'create') {
     if (typeof args.file_text !== 'string') return undefined
-    return verdict(args.file_text, readIfPossible(target), filePath, settings)
+    return verdict(args.file_text, readIndex(target, settings.readLimit), filePath, settings)
   }
 
   const partial = PARTIAL_WRITES.has(tool)
@@ -205,12 +228,28 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
       && (args.command === 'str_replace' || args.command === 'insert'))
   if (!partial) return undefined // read / view / list / unknown: never refused
 
-  const currentBuf = readIfPossible(target)
-  if (currentBuf === undefined) return undefined
+  // Unreadable, or past the read limit: an edit's result cannot be simulated without
+  // the whole text, and refusing it blind would refuse the compacting ones too. Let it
+  // through, as for any index the guard cannot read; whole-file writes stay measured.
+  const currentBuf = readIndex(target, settings.readLimit)
+  if (currentBuf === undefined || !Buffer.isBuffer(currentBuf)) return undefined
   const current = currentBuf.toString('utf8')
-  const simulated = simulateEdit(current, args)
-  if (simulated !== undefined) {
+  const simulated = simulateEdit(current, args, settings.readLimit)
+  if (typeof simulated === 'string') {
     return verdict(simulated, currentBuf, filePath, settings)
+  }
+  if (simulated !== undefined) {
+    // Too long to build: judged on lower bounds of its size, by the same grow-past-the-
+    // cap rule as verdict(). A bound that clears both tests refuses only what the full
+    // result would; one that does not lets the edit through unmeasured.
+    const over = []
+    if (simulated.newlines > settings.maxLines && simulated.newlines > countLines(current)) {
+      over.push(`at least ${simulated.newlines} lines > ${settings.maxLines}`)
+    }
+    if (simulated.bytes > settings.maxBytes && simulated.bytes > currentBuf.length) {
+      over.push(`at least ${simulated.bytes} bytes > ${settings.maxBytes}`)
+    }
+    return over.length ? capRefusal(over, filePath, settings) : undefined
   }
 
   // The edit's result genuinely cannot be reconstructed from its arguments. Honest,
@@ -233,6 +272,8 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
  * cap AND grew past the current file, so a shrinking/keeping write on an over-cap
  * index always passes and incremental compaction stays possible. A missing or
  * unreadable current file counts as empty — a first write past the cap is refused.
+ * One too large to read (see readIndex) is sized by the filesystem, with a line count
+ * no write can exceed: only its byte growth can be refused, and every shrink passes.
  */
 function verdict(text, currentBuf, filePath, settings) {
   const lines = countLines(text)
@@ -242,8 +283,10 @@ function verdict(text, currentBuf, filePath, settings) {
   // bad byte becomes a 3-byte U+FFFD), which made a genuinely growing write look
   // like a shrink and pass. Newlines survive a lossy decode, so the line count may
   // use the decoded text.
-  const curLines = currentBuf === undefined ? 0 : countLines(currentBuf.toString('utf8'))
-  const curBytes = currentBuf === undefined ? 0 : currentBuf.length
+  const unread = currentBuf !== undefined && !Buffer.isBuffer(currentBuf)
+  const curLines = currentBuf === undefined ? 0
+    : unread ? Infinity : countLines(currentBuf.toString('utf8'))
+  const curBytes = currentBuf === undefined ? 0 : unread ? currentBuf.bytes : currentBuf.length
   const over = []
   if (lines > settings.maxLines && lines > curLines) {
     over.push(`${lines} lines > ${settings.maxLines}`)
@@ -251,7 +294,10 @@ function verdict(text, currentBuf, filePath, settings) {
   if (bytes > settings.maxBytes && bytes > curBytes) {
     over.push(`${bytes} bytes > ${settings.maxBytes}`)
   }
-  if (!over.length) return undefined
+  return over.length ? capRefusal(over, filePath, settings) : undefined
+}
+
+function capRefusal(over, filePath, settings) {
   return (
     `This write would put ${basename(filePath)} over the Engramory index cap ` +
     `(${over.join(', ')}). The index is loaded every session and the host only reads ` +
@@ -293,7 +339,8 @@ function notMyIndexHint(settings) {
  * Mirrors the Python guard's Edit simulation: replace the unique occurrence, or all
  * of them under a replace-all flag; an absent or ambiguous old-string means the
  * real tool errors and changes nothing, so the current text is the honest
- * prediction. Returns undefined when the shape isn't recognised.
+ * prediction. Returns undefined when the shape isn't recognised, and `{ bytes, newlines }`
+ * — lower bounds of the result's size — when it is too long to build.
  *
  * Matching happens on LF-normalised text and the result goes back in the file's own
  * line endings, as dsh's local backend does it (`applyLiteralEdit` /
@@ -301,28 +348,67 @@ function notMyIndexHint(settings) {
  * index — common on Windows — read every LF `old_string` as "not found", predict no
  * change, and pass an edit dsh then applied.
  */
-function simulateEdit(current, args) {
+function simulateEdit(current, args, limit) {
   const oldRaw = firstString(args.old_str, args.old_string)
   if (oldRaw === undefined || oldRaw === '') return undefined
-  const oldStr = lf(oldRaw)
-  const newStr = lf(firstString(args.new_str, args.new_string) ?? '')
+  const newRaw = firstString(args.new_str, args.new_string) ?? ''
   // dsh decodes with TextDecoder, which drops a leading BOM — from the text it
   // matches, from the sample it detects line endings on, and from what it writes back.
-  const decoded = current.startsWith('﻿') ? current.slice(1) : current
+  const decoded = current.startsWith('\uFEFF') ? current.slice(1) : current
+  // Normalising CRLF at most halves a string, so an old_string over twice the text's
+  // length cannot be in it: the real tool errors, nothing changes. Checked before it
+  // is normalised, so an argument the size of the heap is never copied (#21).
+  if (oldRaw.length > 2 * decoded.length) return current
   const text = lf(decoded)
+  const oldStr = lf(oldRaw)
   const first = text.indexOf(oldStr)
   if (first === -1) return current // the real tool errors: nothing changes
-  let edited
-  if (args.replace_all === true || args.replaceAll === true) {
-    edited = text.split(oldStr).join(newStr)
-  } else {
-    const second = text.indexOf(oldStr, first + oldStr.length)
-    if (second !== -1) return current // ambiguous: the real tool errors, nothing changes
-    edited = text.slice(0, first) + newStr + text.slice(first + oldStr.length)
+  const all = args.replace_all === true || args.replaceAll === true
+  if (!all && text.indexOf(oldStr, first + oldStr.length) !== -1) {
+    return current // ambiguous: the real tool errors, nothing changes
   }
+  const matches = all ? occurrences(text, oldStr) : 1
+  // Sized before it is built: replace_all multiplies new_string by every match, and
+  // building the result just to measure it could cost the host gigabytes — or abort it
+  // outright on heap exhaustion, which no catch survives. new_string is measured as it
+  // will be once normalised, without normalising it: each CRLF in it loses its CR.
+  const crlfs = occurrences(newRaw, '\r\n')
+  const length = text.length + matches * (newRaw.length - crlfs - oldStr.length)
+  if (length > limit) {
+    // Exact for the LF text, and so lower bounds for what dsh writes: restoring CRLF
+    // only adds bytes, and never changes the line count. UTF-8 sizes add up only for
+    // well-formed text: a lone surrogate counts three bytes, but two meeting at a
+    // replacement seam encode as one four-byte pair. With one anywhere, fall back to
+    // the length — every UTF-16 unit is at least one byte, paired or not.
+    const wellFormed = !LONE_SURROGATE.test(text) && !LONE_SURROGATE.test(newRaw)
+      && !LONE_SURROGATE.test(oldStr)
+    return {
+      bytes: wellFormed
+        ? Buffer.byteLength(text)
+          + matches * (Buffer.byteLength(newRaw) - crlfs - Buffer.byteLength(oldStr))
+        : length,
+      newlines: occurrences(text, '\n')
+        + matches * (occurrences(newRaw, '\n') - occurrences(oldStr, '\n')),
+    }
+  }
+  const newStr = lf(newRaw) // no longer than the result, so within the limit
+  // A function replacer, so a `$&` in new_string stays literal.
+  const edited = all
+    ? text.replaceAll(oldStr, () => newStr)
+    : text.slice(0, first) + newStr + text.slice(first + oldStr.length)
   // Normalised once more before expanding, as dsh's restoreLineEndings does: a lone
   // `\r` meeting an inserted `\n` at the seam is one CRLF, not `\r\r\n`.
-  return crlfDominates(decoded) ? lf(edited).split('\n').join('\r\n') : edited
+  return crlfDominates(decoded) ? lf(edited).replaceAll('\n', '\r\n') : edited
+}
+
+/** A high surrogate with no low after it, or a low with no high before it. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/** Non-overlapping occurrences of `needle`, counted rather than split out. */
+function occurrences(text, needle) {
+  let n = 0
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) n++
+  return n
 }
 
 function lf(text) {
@@ -353,23 +439,53 @@ function measure(text, { maxLines, maxBytes }) {
   return over.length ? over.join(', ') : null
 }
 
-/** Trailing-newline-insensitive, matching how the Python guard counts. */
+/**
+ * Trailing-newline-insensitive, matching how the Python guard counts. Counted, not
+ * split: the text is whatever a tool call carried, and an array of its lines would
+ * cost a second copy of it.
+ */
 function countLines(text) {
   if (!text) return 0
-  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+  return occurrences(text, '\n') + 1 - (text.endsWith('\n') ? 1 : 0)
 }
 
 /**
  * A missing or unreadable index is not a breach: the guard's job is to stop an
  * oversized index, never to block work because a path could not be read. Returns the
  * RAW buffer — byte comparisons must use on-disk bytes (see verdict), decode at the
- * call sites that need text.
+ * call sites that need text — or `{ bytes }` for a regular file past `limit`.
+ *
+ * Only a regular file is read, and never more than `limit + 1` bytes (#21). The read
+ * runs on the host's main thread, and a plain readFileSync would block forever on a
+ * FIFO (opening one waits for a writer, hence O_NONBLOCK — absent on Windows, which has
+ * no FIFOs on disk) or keep allocating on a symlink to /dev/zero. Anything that is not
+ * a regular file counts as unreadable. A stat comes first, so a device is never even
+ * opened (some drivers block in open itself); the descriptor is checked again, since
+ * the path can be swapped between the two.
  */
-function readIfPossible(filePath) {
+function readIndex(filePath, limit) {
+  let fd
   try {
-    return readFileSync(filePath)
+    if (!statSync(filePath).isFile()) return undefined
+    fd = openSync(filePath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+    const stat = fstatSync(fd)
+    if (!stat.isFile()) return undefined
+    const chunks = []
+    let total = 0
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(Math.min(65536, limit + 1 - total))
+      const got = readSync(fd, chunk, 0, chunk.length, null)
+      if (got === 0) return Buffer.concat(chunks, total)
+      chunks.push(chunk.subarray(0, got))
+      total += got
+      if (total > limit) return { bytes: Math.max(stat.size, total) }
+    }
   } catch {
     return undefined
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd) } catch { /* nothing left to do */ }
+    }
   }
 }
 
@@ -408,13 +524,22 @@ function hostPath(cwd, p) {
  * Windows only, mirroring `os.path.normcase` in the Python guard — folding it on Linux
  * would make an unrelated `memory.md` collide with the pinned index. (Known limit:
  * `toLowerCase` is not NTFS's exact case-folding table, same as the Python guard.)
+ *
+ * On POSIX an absolute spelling is kept as written and walked by the OS
+ * (`realpathSync.native` is realpath(3)): Node's JS realpathSync resolve()s first, which
+ * collapses a `..` after a symlinked segment lexically — to the parent of the LINK,
+ * where dsh, walking it physically, reaches the parent of its TARGET. `link/../idx.md`
+ * then named another file than the one written (#20). Windows resolves `..` lexically
+ * anyway, as dsh does there, so it keeps the JS form.
  */
 function pathKey(p) {
-  let head = resolve(p)
+  const posix = process.platform !== 'win32'
+  const real = posix ? realpathSync.native : realpathSync
+  let head = posix && isAbsolute(p) ? p : resolve(p)
   const tail = []
   for (;;) {
     try {
-      head = realpathSync(head)
+      head = real(head)
       break
     } catch {
       const parent = dirname(head)
