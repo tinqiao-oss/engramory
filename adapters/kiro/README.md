@@ -1,15 +1,9 @@
 # Kiro adapter
 
-[Kiro](https://kiro.dev) is AWS's agentic IDE (and CLI), built on Code OSS. It is a
-strong Engramory host: it has a real **always-loaded rules channel** (steering files
-with `inclusion: always`), the agent can **read/write workspace markdown** on its own,
-and — unusually — it has a genuine **pre-tool-use deny gate** (a `PreToolUse` hook that
-can block a file write before it happens). It also has **no silent auto-memory writer**,
-so Engramory does not fight a second writer the way it does on Claude Code / Hermes.
-
-This is a **docs adapter** (Phase 1): wiring is manual — there is no
-`engramory_init.py kiro` helper yet, and the deterministic cap **hook shim is not
-shipped or verified here yet** (see "Reliability model" below).
+[Kiro](https://kiro.dev) supplies always-loaded steering and workspace file access.
+This is a manual docs adapter: there is no `engramory_init.py kiro` helper, and no
+Kiro cap shim is shipped or verified here. See [PORTING.md](../../PORTING.md) for
+host capabilities and the pre-write seam a future port would need to verify.
 
 ---
 
@@ -34,10 +28,8 @@ Correct layout:
 - **On demand:** the notes live in a **non-steering** folder (`.engramory-memory/`) and
   are opened by the agent with `read` / `#file` only when relevant.
 
-If a fan reports "Engramory blew up my context on Kiro," this is almost always the
-cause: the notes ended up in an always-loaded location. Move them out of
-`.kiro/steering/` into `.engramory-memory/` and keep only `engramory.md` (the index
-pointer) always-on.
+If notes already live under `.kiro/steering/`, move them to `.engramory-memory/`
+and keep only the `engramory.md` index pointer always-on.
 
 ---
 
@@ -81,51 +73,26 @@ works on the git-ignored `.engramory-memory/` store.
 
 ## Reliability model on Kiro
 
-Kiro **can** enforce the index cap deterministically — but that shim is **not written or
-tested here yet**, so treat the Phase-1 cap as **rules + an explicit check**
-(best-effort), exactly like the Codex and OpenClaw adapters:
+The cap is **best-effort rules + explicit check + doctor**. After editing the
+index, run:
 
-1. The always-on steering file makes the recall/write discipline visible every session.
-2. `SKILL.md` (as a `manual`/`auto` steering file) gives the full protocol on demand.
-3. After editing the index, run
-   `python <ENGRAMORY>/tools/engramory_check.py .engramory-memory/MEMORY.md` and
-   compact if it prints `OVER`; `engramory_doctor.py` is the occasional full health
-   check. **`<ENGRAMORY>` is wherever you cloned this repo — no step here copies
-   `tools/` into the Kiro workspace**, so a bare `python tools/…` will not resolve.
-   Keep the repo reachable from the machine running Kiro, or treat the cap as
-   discipline only.
+```sh
+python <ENGRAMORY>/tools/engramory_check.py .engramory-memory/MEMORY.md
+```
 
-> **Protocol version.** The steering file in this adapter carries the protocol rules
-> in condensed form (at most one live `project` note per unfinished task, updated in
-> place; the flat active layout with `archive/` as its one reserved subdirectory;
-> settled-fact vs. current-state, optional `scope`, root-confined recall, the
-> task-completion checkpoint, the pre-transition sync). It is a standing
-> rules file, so it states each rule in one line where `SKILL.md` spends a
-> paragraph — `SKILL.md` remains the authority, and the steering file points at it.
-> If you copy an older steering file forward, re-sync it against `SKILL.md` rather
-> than assuming it still matches.
->
-> ⚠️ The Kiro hook notes below were checked on 2026-07-26 against the then-current
-> docs. Kiro's IDE and CLI hook formats have already diverged across versions
-> (`toolArgs` vs `tool_input`), so treat any cited bug or schema as version-bound:
-> re-check the current official docs and verify on your own install.
+Compact if it prints `OVER`; periodically run:
 
-> **Why no deterministic cap shipped here yet (Phase 2).** Kiro genuinely supports a
-> pre-write deny gate: a **CLI `PreToolUse` hook** with `matcher: fs_write` can inspect
-> the write and **exit 2 to block it** (stderr is returned to the agent as the reason) —
-> the same shape as Engramory's Claude Code `hooks/engramory_index_guard.py`. So a
-> deterministic Kiro cap is possible. But it needs its own shim (Kiro's hook JSON/exit
-> contract differs from Claude Code's), and two open caveats must be verified first:
-> - **Kiro IDE** `preToolUse` `runCommand` hooks have been reported to receive empty
->   `toolArgs` (`{}`) while the **CLI** passes full context (GitHub issue #7375) — so a
->   content/path-based write deny is only reliable in the **CLI**, degraded in the IDE.
-> - **Kiro CLI `PreToolUse` has been reported broken on Windows 11** (GitHub issue
->   #8264) — verify the hook actually fires on your platform before relying on it.
->
-> Per Engramory's honesty rule, the deterministic guarantee is only claimed where it is
-> actually written and tested (today: Claude Code). On Kiro it is **possible** but
-> **not yet shipped** — use rung 2 (the check script) until the shim lands and is
-> verified.
+```sh
+python <ENGRAMORY>/tools/engramory_doctor.py .engramory-memory
+```
+
+`<ENGRAMORY>` is wherever you cloned this repo: no step here copies `tools/` into
+the Kiro workspace. Keep that repo reachable or the cap is discipline only.
+The [reliability ladder](../../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook)
+distinguishes a possible port from an implemented, verified guard.
+
+The steering file condenses [`SKILL.md`](../../SKILL.md), which remains the
+protocol authority. Re-sync copied steering files against it when upgrading.
 
 ---
 

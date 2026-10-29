@@ -570,6 +570,8 @@ Three layers, different guarantees:
   loaded. It is deterministic for those direct-edit tools, but NOT a global
   write guard: shell tools (`Bash`, `PowerShell`, background `Monitor`), MCP file
   tools, external editors, sync clients, and host-internal writes bypass it.
+- The **dsh-engramory plugin** (>= 0.2.7) is the same kind of guard on dsh, through
+  `ctx.tools.guard()`, for the file-tool edits it can measure; the same bypasses apply.
 - The optional **Codex lifecycle hooks** (`SessionStart`, `UserPromptSubmit`,
   `PreCompact`) provide recall/sync reminders, dirty/reconcile bookkeeping, and a
   manual-compaction gate. Automatic compaction fails open. These hooks do not
@@ -606,8 +608,9 @@ store and instruction mechanism your host already has. Full per-host setup is in
 hook; use the strongest rung the host supports:
 
 1. **Pre-write deny hook** — `hooks/engramory_index_guard.py` enforces the cap on
-   every matching edit (deterministic for those tools). Written and tested for Claude
-   Code only. Some other hosts expose a pre-write deny too (Hermes's `pre_tool_call` —
+   every matching edit (deterministic for those tools) on Claude Code, and the
+   `dsh-engramory` plugin (>= 0.2.7) does the same on dsh for the edits it can
+   measure. Those two are written, tested, and running. Some other hosts expose a pre-write deny too (Hermes's `pre_tool_call` —
    though it has a reported non-firing bug in some worker contexts, issue #25204; Cursor,
    though its hook is newer and less proven), so the cap is portable with a per-host I/O
    shim you write and verify yourself — but OpenClaw can only block via a `before_tool_call`
@@ -621,7 +624,7 @@ hook; use the strongest rung the host supports:
    to catch an over-cap index, broken index pointers, and orphan notes.
 
 Honest limit: a *deterministic* guarantee is shipped and tested only for Claude Code
-(the adapter in this repo); other hosts expose the hook API so the cap is portable,
+and dsh (the two adapters in this repo); other hosts expose the hook API so the cap is portable,
 but you build and verify that shim yourself. If a host
 writes its memory internally (e.g. Letta, or Codex's managed local Memories) — not
 via a tool an agent step or hook can see — even the step-2 check can't intercept it;

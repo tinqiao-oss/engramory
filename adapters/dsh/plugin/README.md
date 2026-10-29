@@ -4,11 +4,10 @@
 
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-<sub>`C2` is the level `manifest.bundle.patch` puts every mountable dsh plugin at (74.6% of the scanned ecosystem); it is the only flag on this card — no `exec`, `eval`, install script, outbound domain, or environment read.</sub>
-
 Curated, file-based long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) —
-plain markdown notes you can open with anything, one store shared across every host you
-use, and an index cap that is a **real refusal** rather than a request. (If the store
+plain markdown notes you can open with anything,
+[one writer and many readers](../../reader/README.md) across hosts, and a pre-write
+index guard for matched file tools. (If the store
 lives inside a project's git repo it must be git-ignored — memories carry machine-local
 detail; see SKILL.md §1. A *dedicated private* repo for the store itself is fine.)
 
@@ -19,19 +18,12 @@ Part of [Engramory](https://github.com/tinqiao-oss/engramory).
 The block does carry the discipline, and for recall that is enough. Two things it cannot
 do:
 
-**The cap becomes deterministic.** Engramory keeps its index under 200 lines / 25 KB
-because the index loads every session and everything past the cap silently stops being
-recalled. On most hosts that limit is rules plus a checker the agent has to remember to
-run. dsh exposes `ctx.tools.guard()` — a synchronous, **monotonic** refusal: once a guard
-returns a reason, no later listener can turn it back into an allow. So here the limit is
-enforced, not requested. Use **0.2.7 or later**: 0.2.0 shipped before profile installs
-worked upstream and carried an `inject` declaration this Cordis does not accept — it
-installed but never activated (issue #8) — and up to 0.2.5 an edit could slip past the
-cap on a CRLF index, or on dsh 0.2 through a relative path after a cd, and up to 0.2.6
-through a symlink under another name — or a FIFO named like the index could hang the host
-(#20, #21; see Known limits). Outside Claude Code, dsh is the first host with
-the shim actually written (a few others expose equivalent pre-write seams — see
-PORTING.md — but have no shim yet).
+**The cap becomes deterministic for matched tools.** `ctx.tools.guard()` is a
+synchronous, **monotonic** refusal: once a guard returns a reason, later listeners
+cannot allow the call. This keeps the index within its configured growth limits
+without relying on the agent to run a checker. Use **`dsh-engramory >= 0.2.7`**;
+[PORTING.md](../../../PORTING.md) records which hosts have shipped guards, and
+[CHANGELOG.md](../../../CHANGELOG.md) holds release history.
 
 **The protocol arrives with the plugin.** The skill is registered at runtime through
 dsh's skill registry — via a reactive `ctx.inject(['skills'], …)` child, so a profile
@@ -41,11 +33,18 @@ roots dsh scans, a path that is easy to get subtly wrong and fails silently when
 
 ## Install
 
+Zero-dependency ESM with no build step; requires Node.js 18+ and `pnpm` on PATH
+for dsh's plugin command.
+
 ```sh
 dsh plugin --profile <name> add dsh-engramory
 ```
 
-That is the whole install. The package ships a `dsh.bundle` manifest pointing at its own
+Check `dsh.compatibility.dshReleases` in [`package.json`](package.json) for the
+exact compatible releases, backed by [`results.json`](../../../tests/dsh_e2e/results.json).
+Use the [E2E guide](../../../tests/dsh_e2e/README.md) to verify another release.
+
+The package ships a `dsh.bundle` manifest pointing at its own
 `cordis.patch.yml`, so the row is inserted into the profile's plugin tree for you — no
 hand-editing. To change a default, patch the EXISTING row by id in your profile's own
 patch layer — do **not** use a second `- insert:` (insert always appends, so you would
@@ -65,6 +64,12 @@ For the store itself and the always-on block, use the installer in the Engramory
 (`python tools/engramory_init.py dsh --install-skill`). This plugin enforces the cap and
 supplies the protocol; it does not create the store.
 
+To uninstall:
+
+```sh
+dsh plugin --profile <name> remove dsh-engramory
+```
+
 ## Configuration
 
 | Field | Default | Meaning |
@@ -83,7 +88,7 @@ supplies the protocol; it does not create the store.
 | `write` (or `str_replace_editor` `create`) ending within caps | allow |
 | `write`/`create` that GROWS the index past a cap | **deny**, naming the numbers and what to compact |
 | `write`/`create` that SHRINKS or keeps an over-cap index | allow — incremental compaction (210 → 205 → 198) must stay possible |
-| Edit carrying `old_str`/`new_str`: result simulated | judged by the RESULT, same grow/shrink rule as a write — sized before it is built, so a `replace_all` whose result would be too long to build is refused by its size alone |
+| Edit carrying `old_str`/`new_str`: result simulated | judged by the RESULT, same grow/shrink rule as a write — sized before it is built, so a `replace_all` whose result would be too long to build is judged on lower bounds of its bytes and lines |
 | Unsimulable partial (e.g. `insert`) on an over-cap index | **deny**, telling the agent a shrinking whole-file write passes |
 | Unsimulable partial on a healthy index | allow |
 | `read`, `view`, or any unknown tool | allow — recall must never be blocked, even over cap |
@@ -91,63 +96,30 @@ supplies the protocol; it does not create the store.
 | Missing/unreadable current index on a whole-file write | treated as EMPTY (mirrors the Python guard) — a within-caps write passes, an over-cap first write is refused |
 | Missing/unreadable index on a partial edit | allow — a guard must never block work over a path it cannot read |
 | A FIFO, device, or directory under the index's name | never read — counts as unreadable (a read there would hang or flood the host, which runs guards on its main thread) |
-| An index past the read limit (1 MiB, or 4× `maxBytes`, at most 16 MiB) | not read whole: a whole-file write is judged on bytes against the filesystem's size (every shrink passes; its line count is unknown, so lines are not capped there), and an edit passes unmeasured, as on an unreadable index |
+| An index past the read limit (`min(16 MiB, max(1 MiB, 4 × maxBytes))`) | not read whole: a whole-file write is judged on bytes against the filesystem's size (every shrink passes; its line count is unknown, so lines are not capped there), and an edit passes unmeasured, as on an unreadable index |
 | Malformed execution (no arguments, non-string path/content) | allow — not recognisably a write |
 
-The deny rule mirrors `hooks/engramory_index_guard.py` exactly: refuse only a result
-that is over a cap AND grew past the current file. The line count ignores a trailing
-newline, so an index sitting exactly at the cap stays writable.
+For measured results, deny only a dimension that is over its cap AND grew past
+the current file. The line count ignores a trailing newline, so an index exactly
+at the cap stays writable. This decision table is pinned by `node --test` in CI.
+
+Relative paths use the session's `workingDirectory` service when available,
+falling back to the process cwd. Edits match LF-normalised text and preserve the
+file's line endings when sizing the result, including CRLF bytes.
 
 ## Known limits
 
-- **An unsimulable partial that crosses the cap from under it is not caught.** `insert`
-  and friends do not carry the resulting text. The breach is caught by the next
-  whole-file write, or by `engramory_check.py`. What is guaranteed: an already-over
-  index cannot be grown further, and a shrinking write always passes.
-- **The tool roster follows dsh's documented tool-fs contract** (`write`/`edit` with
-  `file_path`, `str_replace_editor` with `path`) and is deliberately conservative:
-  unknown tools pass.
-- **0.2.0 never activated; 0.2.1 is the first version that runs.** While the rc.6
-  preview bug blocked all third-party profile installs upstream, the only coverage a
-  plugin could have was mocks — and 0.2.0's mock hid two activation bugs: an
-  older-Cordis `{ required, optional }` inject shape (read as waiting for services
-  literally named `required`/`optional`, pending forever) and a bare `ctx.skills` read
-  of an undeclared service (throws under Cordis' reflective context). The first field
-  install caught both the moment installs became possible (issue #8). 0.2.1 fixes them,
-  verified end to end on a live dsh 0.1.0-rc.7 web profile (0.2.0 reproduces the boot
-  failure byte for byte; 0.2.1 boots and serves) and against the vendored
-  `@deepseek-ai/cordis` resolver (activation with, without, and with a late-mounted
-  skill registry). The test mock now mirrors the reflective-context access rules, and
-  the guard's decision table stays covered by `node --test` (47 cases, run in
-  Engramory's CI).
-- **A relative path is measured where dsh writes it.** dsh 0.2 gives every session its
-  own working directory (moved by its `working_directory` tool) and resolves a
-  relative `file_path` against that. Up to 0.2.5 the guard resolved against the
-  process's cwd instead, so after a cd an edit of a bare `MEMORY.md` read no current
-  file and went through unmeasured — on dsh 0.2.1-rc.2 it grew the index to 253
-  lines. 0.2.6 reads the session's directory from dsh's `workingDirectory` service
-  when the profile has one, and falls back to the process's cwd when it does not
-  (every 0.1.x release).
-- **A CRLF index is edited the way dsh edits it.** dsh matches an edit on
-  LF-normalised text and writes the result back in the file's own line endings. Up
-  to 0.2.5 the guard matched the raw bytes, so on a CRLF `MEMORY.md` — the usual
-  shape on Windows — an LF `old_string` looked absent, the edit was predicted to
-  change nothing, and dsh applied it. 0.2.6 normalises the same way and sizes a CRLF
-  index in CRLF bytes.
-- **Checked against the dsh you are likely running, not only the one it was written
-  on.** `tests/dsh_e2e/run.py` in the Engramory repo installs a dsh release into a
-  throwaway prefix, adds this plugin with `dsh plugin add`, and drives one headless
-  task against a scripted stand-in for the DeepSeek API: a 260-line write and an edit
-  past the cap must come back refused by this guard with nothing reaching the disk, a
-  small write must land byte for byte, the skill must be advertised, every tool dsh
-  offers must already be classified (a new one could write past the cap), and removal
-  must leave a profile that still boots. The releases it passed on are listed in
-  `package.json` under `dsh.compatibility.dshReleases`; a unit test rejects a
-  `compatible` there without a recorded run of the same plugin version and code.
-- dsh is a developer preview and its plugin API can change. This plugin deliberately
-  touches only `ctx.tools.guard()` and two reactive `ctx.inject()` children — one
-  registers the skill, one reads each session's working directory — so it stays cheap
-  to fix.
+- **Unsimulable partial edits can cross the cap from below.** On a readable,
+  already-over-cap index they are denied; use a shrinking whole-file write to
+  compact. Missing/unreadable files and the read-limit exceptions are listed above.
+  Run `engramory_check.py` after index edits and `engramory_doctor.py` periodically.
+- **Coverage is limited to known file tools:** `write`/`edit` with `file_path`,
+  `str_replace`/`insert`, and mutating `str_replace_editor` commands with `path`.
+  Unknown tools pass. **Shell tools, MCP file tools, and external editors bypass
+  the guard.**
+- dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and two reactive
+  `ctx.inject()` children for the skill registry and session working directory;
+  a compatible-release declaration needs recorded host evidence, not just unit tests.
 
 ## License
 

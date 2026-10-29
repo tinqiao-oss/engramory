@@ -46,12 +46,10 @@ you pass `--force`; unrelated hook handlers are preserved.
 
 > **When you upgrade Engramory, re-run this with `--install-hooks --force`.**
 > `.codex/engramory/engramory_sync.py` is a COPY taken at install time, so an
-> upgraded checkout otherwise leaves the old runtime driving your hooks. It matters
-> across 0.6.3 → 0.6.4 in particular: the state lock changed from "the lock file
-> exists" to a kernel lock on an open descriptor, and the two schemes cannot see
-> each other — running both against one store can lose a state update. After
-> re-installing, re-trust the handlers in Codex's `/hooks` (their content hash
-> changed).
+> upgraded checkout otherwise leaves the old runtime driving your hooks. Do not
+> run multiple lifecycle writers against one store; see the
+> [single-writer rule](../reader/README.md). After reinstalling, re-trust the
+> handlers in Codex's `/hooks` because their content hash changed.
 
 ## Use an existing memory folder
 
@@ -67,30 +65,13 @@ outside the project, the init command does not add a `.gitignore` entry.
 
 ## Continuity model
 
-An unfinished task is resumed through an ordinary `project` note in the canonical
-store — one **flat** active directory, `MEMORY.md` plus one file per note, with
-`archive/` as its one reserved subdirectory — and not a fifth `handoff` type. A task
-keeps **at most one** such note — a
-ceiling, not a quota — updated **in place**, never a dated series and never a
-second handoff log indexed beside it. That note may contain the current goal,
-status, decisions, constraints, blockers, and next concrete step. When the task
-ends, the completion checkpoint (`SKILL.md` §5) retires its transient state; that
-checkpoint is a judgement, and these lifecycle hooks cannot perform it. `feedback` remains only
-for a reusable correction or workflow. Such a note stores only **stable**
-pointers (branch name, issue/PR number, file path) and may record a settled fact
-("2.0 shipped on 2026-01-15"), but never **current state** — the version you are
-on now, the tip commit, the current test count. Every recorded pointer must be
-checked against the live repo/environment before use.
+An unfinished task uses at most one ordinary `project` note, updated in place in
+the canonical store. Follow [`SKILL.md` §5](../../SKILL.md) for the unified sync
+before a deliberate compact, clear, or new thread, and the completion checkpoint
+that retires transient state. Re-verify stored pointers against the live repo.
 
-Before a deliberate compact, clear, or new thread, run the unified sync in
-`SKILL.md`: scan → dedup/update → project → reusable feedback → durable
-references → retire stale/completed transient state → check + doctor → cold-start
-sufficiency. On task completion, archive or delete transient status after
-promoting the durable decisions that remain useful.
-
-After the sync, report `added`, `updated`, `archived`, and `skipped` (including
-reasons; identify any deletion under `archived`), plus the index line/byte size
-and check verdict.
+After a sync, report `added`, `updated`, `archived`, and `skipped` with reasons,
+including deletions under `archived`, plus the index line/byte size and check verdict.
 
 ## Explicit sync versus assisted hooks
 
@@ -128,57 +109,42 @@ curation, create a note, or modify memory content.
 
 ### Installing is not enabling — read this before relying on the hooks
 
-Two limits are structural. Neither is a bug in this adapter, and neither can be
-fixed from here:
+This shim was implemented and measured against **Codex CLI 0.144.1**; this is
+not a minimum version or an end-to-end host certification. Measured there: under
+non-interactive `codex exec` the lifecycle hooks did not fire (even user-level
+ones, which need no project trust), and on Windows each `UserPromptSubmit` cost
+about 1.2–1.4 s, mostly process startup. Verify on yours:
+compare the [official hooks documentation](https://learn.chatgpt.com/docs/hooks)
+and confirm event/source/enabled state in `/hooks`. The Python runtime and Windows
+launch path have black-box coverage; host discovery, trust, and execution still
+need verification in your installation.
 
-1. **A freshly installed project hook does not run until you trust it.** Codex
-   disables project-local config, hooks, and exec policies "in the following
-   folders until the project is trusted", and each handler additionally carries a
-   trust state keyed to its content hash. So installation leaves the hooks
-   **inactive**: open Codex's `/hooks` view, confirm the event/source/enabled
-   state, and trust them. Because the trust is content-hashed, **re-running the
-   installer or editing the command invalidates it and you must trust again**. If
-   `/hooks` does not show the expected entry, assume the assistance is absent and
-   use explicit sync.
-2. **Non-interactive `codex exec` did not fire these lifecycle hooks when tested.**
-   Measured on **0.144.1**: a correctly-shaped, successfully-parsed config produced
-   no `SessionStart` / `UserPromptSubmit` execution under `codex exec` — including
-   at the *user* level (`~/.codex/hooks.json`, which needs no project trust) with a
-   writable sandbox, so project-trust alone does not explain it.
-
-   This is one version's observation, not a permanent property: Codex ships a
-   `--dangerously-bypass-hook-trust` flag aimed at running enabled hooks in
-   automation, and this area is moving. **Re-test on your version** rather than
-   assuming either answer. Until you have, treat the assistance as interactive-TUI
-   only and rely on explicit sync plus `engramory_check.py` /
-   `engramory_doctor.py` for scripted runs.
+1. **Trust the project and its handlers.** Project hooks run project-controlled
+   code. Review `.codex/hooks.json` and `.codex/engramory/` before trusting them;
+   handler trust is keyed to content hashes, so reinstalling or editing commands
+   requires renewed trust. If `/hooks` lacks the expected entry, use explicit sync.
+2. **Verify both interactive and non-interactive invocation modes.** Do not infer
+   that `codex exec` fires lifecycle hooks from an interactive success. Codex's
+   `--dangerously-bypass-hook-trust` flag concerns trust in automation; it is not
+   evidence that an event ran. Until execution is verified, rely on explicit sync
+   plus `engramory_check.py` / `engramory_doctor.py` for scripted runs.
 
 ### Cost per prompt
 
-`UserPromptSubmit` runs on **every** prompt and Codex 0.144.1 does not support
-async hooks ("async hooks are not supported yet"), so the cost is synchronous.
-Measured on Windows: **~1.2–1.4 s per prompt**, dominated by process startup
-(`cmd.exe` → `powershell.exe` → Python).
+`UserPromptSubmit` runs on **every** prompt. The Windows launch chain
+(`cmd.exe` → `powershell.exe` → Python) adds process-startup cost; measure it on
+your machine before enabling hooks for frequent short turns.
 
-That PowerShell layer is deliberate and should not be "optimised" away: Codex
-runs `commandWindows` through `cmd.exe /C`, which strips the outer quotes of a
-command line that *begins* with a quote — and an interpreter path containing a
-space must be quoted. The Base64 `-EncodedCommand` sidesteps that quoting trap
-entirely. A direct `cmd.exe` invocation measured far faster only because it
-failed immediately.
-
-If that per-prompt cost is not worth it for your project, do not install the
-hooks: the base three-layer adapter (AGENTS.md + skill + validators) still works,
-and explicit sync remains the semantic operation either way.
-
-Project-scoped hooks execute project-controlled code. Review them before trusting
-the project and enable them only for a trusted checkout.
+The PowerShell layer handles quoting: Codex runs `commandWindows` through
+`cmd.exe /C`, which strips outer quotes from a command beginning with a quote.
+Base64 `-EncodedCommand` protects interpreter paths containing spaces. Keep that
+layer; omit the optional hooks if their cost is not worthwhile. Standing rules,
+the skill, validators, and explicit sync still work without them.
 
 ### The generated config is machine-local
 
-Codex 0.144.1 has no project-directory variable for hook commands, so the
-interpreter, hook script, sync tool, and memory root are all written as absolute
-paths. `.codex/hooks.json` therefore **cannot be shared** across machines or
+The installer writes the interpreter, hook script, sync tool, and memory root
+as absolute paths. `.codex/hooks.json` therefore **cannot be shared** across machines or
 operating systems: a Linux-generated file has no `commandWindows`, and a
 Windows-generated one carries Windows paths in both fields.
 
@@ -187,10 +153,6 @@ and deliberately does **not** when the file also holds someone else's handler
 (that file is a normal shared Codex surface). Use `--hook-python` to pick the
 interpreter that gets baked in — the default is whatever Python ran the
 installer, which is the wrong choice if that is a throwaway virtualenv.
-
-The installer writes the managed hook configuration to `.codex/hooks.json` and
-managed scripts under `.codex/engramory/`. It preserves unrelated hook handlers;
-review both locations before granting project trust.
 
 On its first event, the hook creates
 `<MEMORY_ROOT>/.engramory-codex-state.json`, plus an empty
@@ -206,16 +168,6 @@ dirty/synced generations, timestamps, reconciliation state, and the index
 hash/size. It never stores a prompt, transcript, or memory-note body. Deleting
 it resets the hook's knowledge of pending synchronization; it does not delete
 semantic memory.
-
-This shim was implemented against and source-checked against the **Codex CLI
-0.144.1** command-hook schema and behavior. The Python lifecycle runtime and the
-generated `cmd.exe`/PowerShell launch path have black-box coverage; project hook
-discovery, trust, and execution inside a real Codex host still need to be
-confirmed with `/hooks`. This is an implementation target, not a claimed
-minimum version or end-to-end host certification. On any other version, compare
-the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks),
-then use `/hooks` to verify the installed entries; if unavailable or
-incompatible, fall back to explicit sync.
 
 ## Chat bridges and other one-session-per-message entry points
 
@@ -246,23 +198,10 @@ you want that.
 
 ## Reliability model on Codex
 
-The base Codex adapter uses three layers:
-
-1. `AGENTS.md` makes the recall/write discipline visible at the start of each
-   Codex run.
-2. `.agents/skills/engramory/SKILL.md` gives Codex the full protocol on demand.
-3. `tools/engramory_check.py` and `tools/engramory_doctor.py` are the portable
-   backstops for index size and store health.
-
-With `--install-hooks`, a fourth lifecycle-assistance layer adds bounded recall
-navigation and dirty/compact bookkeeping. It still delegates semantic curation
-to the agent.
-
-This is useful, but not a hard global write guard. The Claude Code
-`PreToolUse` hook in `hooks/` is not a Codex hook. Until a Codex-specific
-pre-write hook shim is written and tested, the index cap on Codex is enforced by
-rules plus explicit checks, not by a deterministic deny hook. Optional lifecycle
-hooks described above improve timing and visibility, not semantic correctness.
+The cap is **best-effort rules + explicit check + doctor**; no Codex pre-write
+deny shim is shipped or verified here. Optional lifecycle hooks improve sync
+timing and visibility, not cap enforcement or semantic correctness. See the
+[host reliability ladder](../../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook).
 
 ## Commands Codex can run
 

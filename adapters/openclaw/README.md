@@ -47,30 +47,16 @@ marked Engramory block in `AGENTS.md`, and keeps an existing skill copy unless y
 
 ## Reliability model on OpenClaw
 
-The index-size cap on OpenClaw is **rules + an explicit check**, not a deterministic
-deny hook:
-
-1. `AGENTS.md` makes the discipline visible every session.
-2. `.agents/skills/engramory/SKILL.md` gives the full protocol on demand.
-3. After editing the index, run
-   `python .agents/skills/engramory/tools/engramory_check.py .engramory-memory/MEMORY.md`
-   and compact if it reports `OVER`; `engramory_doctor.py` is the occasional full
-   health check.
-
-> **Why no deterministic cap here yet.** Engramory's hard cap
-> (`hooks/engramory_index_guard.py`) is a **Claude-Code-format Python shell hook**.
-> OpenClaw's pre-write deny mechanism is a **`before_tool_call` *plugin* hook**
-> (TypeScript, returns `block: true`) — a different interface, so the Python hook does
-> **not** drop in. A real deterministic cap on OpenClaw would mean writing a
-> `before_tool_call` plugin that runs the same line/byte check and blocks the write.
-> That plugin is **not shipped or verified here** — until it is, treat the OpenClaw cap
-> as best-effort (rules + `engramory_check.py`). This matches Engramory's honesty rule:
-> the deterministic guarantee is only claimed where it's actually written and tested
-> (today, Claude Code and dsh — `dsh-engramory` 0.2.1+, issue #8).
+The cap is **best-effort rules + explicit check + doctor**; no OpenClaw deny
+plugin is shipped or verified here. Its `before_tool_call` seam would need its
+own implementation, not the Claude Code Python hook. The two running guards
+(Claude Code and `dsh-engramory >= 0.2.7`) and porting requirements are documented
+in [PORTING.md](../../PORTING.md); dsh's exact compatibility record is in
+[`dsh.compatibility.dshReleases`](../dsh/plugin/package.json).
 
 ## Commands the agent can run
 
-After editing the index:
+After editing the index, run the check and compact if it reports `OVER`:
 
 ```sh
 python .agents/skills/engramory/tools/engramory_check.py .engramory-memory/MEMORY.md

@@ -24,139 +24,109 @@ the host's **always-loaded** instructions:
 | Hermes (Nous) | `AGENTS.md` / `.hermes.md` (rules) — **not** `SOUL.md` (persona slot) | yes (skills system) |
 | Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
 | Trae | `.trae/rules/project_rules.md` or `AGENTS.md` | yes (`.agents/skills`, enable in settings) |
-| Cline / Windsurf | their rules / system-prompt file | varies |
+| Cline / Windsurf | `.clinerules` / `.windsurfrules`, or their rules directories | varies |
 
 Paste [`rules-snippet.md`](rules-snippet.md) into that always-loaded file. If the
 host also supports skills, additionally import [`SKILL.md`](SKILL.md) for the full
-protocol — the always-loaded snippet guarantees the behaviour fires; the skill
-carries the detail.
+protocol — the snippet keeps the rules in context; the skill carries the detail.
+
+### Read-only host wiring
+
+The [reader adapter](adapters/reader/README.md) wires a host to an existing store
+without making it a writer. Its host-specific destinations and evidence are:
+
+| Host (`<host>-reader`) | Rules file it writes | Verified here? |
+|---|---|---|
+| `codex-reader` | `AGENTS.md` | dogfooded end-to-end |
+| `dsh-reader` | `AGENTS.md` | dogfooded end-to-end |
+| `claude-reader` | `CLAUDE.md` | unverified wiring |
+| `openclaw-reader` / `hermes-reader` | `AGENTS.md` | unverified wiring |
+| `cline-reader` | `.clinerules` | unverified wiring |
+| `windsurf-reader` | `.windsurfrules` | unverified wiring |
+| `cursor-reader` | `.cursor/rules/engramory-recall.mdc` (`alwaysApply: true`) | unverified wiring |
+| `kiro-reader` | `.kiro/steering/engramory-recall.md` (`inclusion: always`) | unverified wiring |
+
+The Codex reader was exercised with `codex exec -s read-only`: it read the index,
+opened the relevant note, and returned the fact. A live dsh reader did the same;
+its captured model request confirmed the rules were injected. Other rows follow
+documented formats but have no host run here; the installer prints that caveat.
+Submit real-host evidence before changing their verification status.
+
+If Cline or Windsurf does not pick up the single-file rules, move the generated
+block into `.clinerules/*.md` or `.windsurf/rules/*.md` respectively; use Windsurf's
+always-on activation mode. Verify the rules load on your installed host.
 
 ## 2. Choose one canonical `<MEMORY_ROOT>` — and make Engramory its authority
 
-Don't create a second handoff store or another Engramory writer. Reuse the memory
-directory the host already loads when it is editable and suitable:
-- Claude Code → its auto-memory dir (the `MEMORY.md` it injects each session).
+Use [one writer and many readers](adapters/reader/README.md); do not create a
+second handoff store. Reuse an editable host store only when Engramory can be its
+authority: for Claude Code, use the auto-memory directory and put the discipline
+in `CLAUDE.md` so its writes follow the same protocol.
 
-⚠️ Hosts that **auto-write** their memory (Claude, Hermes) have their own house
-style, which fights Engramory's structure (one-file-one-fact, pointer-only index,
-four types). Resolve it by making Engramory's rules the **authority** for that
-store — put the SKILL / snippet where it shapes how the host writes memory
-(Claude Code: `CLAUDE.md`; Hermes: `AGENTS.md` / `.hermes.md`, **not** `SOUL.md`,
-which is the persona/identity slot), so one store follows one set of rules instead
-of two writers fighting in the same file.
+Keep generated or managed memory separate: Codex native Memories, Letta's memory
+blocks, OpenClaw's auto-written store, and Hermes's native `memory`-tool files are
+not Engramory stores. On Hermes, leave `~/.hermes/memories/MEMORY.md` and `USER.md`
+under the host's manager; use a separate plain-file store with rules in `AGENTS.md`
+or `.hermes.md`, not the persona slot `SOUL.md`. The init commands below wire
+separate stores for Codex and OpenClaw.
 
-⚠️ **Hermes is a special case — don't try to take over its native memory.** Its
-built-in `memory` tool writes a *frozen-snapshot* `MEMORY.md` + `USER.md`
-(`~/.hermes/memories/`) that are **already hard-capped in code** (2,200 / 1,375 chars
-≈ 1,300 tokens total) with error back-pressure + exact-duplicate rejection — so
-Engramory's index cap is redundant there, and its files-plus-index *recall*
-model doesn't fit a single always-injected file. What that native store *lacks* — the
-typed ontology, required **Why:** / **How to apply:**, and the negative-scope rule — is
-exactly Engramory's value-add. So on Hermes, run Engramory as a **separate plain-file
-store** (like the Codex adapter) with the discipline injected via `AGENTS.md`; keep it
-distinct from the managed `memory`-tool store.
+Hermes's native frozen-snapshot files have their own code-enforced size limits,
+error back-pressure, and exact-duplicate rejection. They do not implement
+Engramory's files-plus-index recall or its typed notes, Why/How, and negative scope.
 
-⚠️ But some hosts treat their memory as **generated / managed state not meant for
-hand-editing** (Letta's memory blocks; OpenAI Codex's local Memories). You cannot
-make Engramory the authority over a store like that — there is no agent-visible
-file to curate, and editing it fights the host's manager. There, apply the
-discipline via the host's **rules** (`AGENTS.md`, etc.) and keep the Engramory
-store **separate** (a plain folder you control); don't try to take over the managed
-store. For Codex, `tools/engramory_init.py codex --project-root <repo>
---install-skill` performs that wiring and points `AGENTS.md` at the separate
-store.
-
-⚠️ **Kiro — keep the notes OUT of `.kiro/steering/` or you will blow up the context.**
-Kiro's always-loaded channel is steering, and a steering file with no `inclusion`
-front-matter **defaults to `inclusion: always`** — so dumping the whole store into
-`.kiro/steering/` (or adding `file://.kiro/steering/**/*.md` to a custom agent's
-`resources`) loads **every note into every request** and overflows the window. Put only
-**one** always-on steering file (`.kiro/steering/engramory.md`, `inclusion: always`)
-that pulls in the index via a live `#[[file:.engramory-memory/MEMORY.md]]` reference, and
-keep the notes in a **non-steering** `.engramory-memory/` folder the agent opens on
-demand. `.gitignore` the store but commit the steering pointer; do NOT add the store to
-`.kiroignore` (that would stop the agent reading its own memory). Full wiring +
-ready-to-copy template: [adapters/kiro/README.md](adapters/kiro/README.md).
+On Kiro, keep notes outside steering and load only the index through one steering
+pointer; follow the [manual layout and ignore-file instructions](adapters/kiro/README.md).
 
 ## 3. Wire continuity sync — explicit first, hooks optional
 
-Task continuity stays in an ordinary `project` note in the canonical store:
-current goal, status, decisions, constraints, blockers, and next concrete step.
-A task keeps **at most one** such note, updated in place — never a dated series.
-When a task ends, the completion checkpoint (`SKILL.md` §5) decides what survives;
-it is a judgement a host can prompt but never perform.
-`feedback` is only for a correction or workflow reusable beyond the task. A
-resumed agent must re-check any branch, file, commit, command, or test-result
-pointer against the live environment.
+Every host with rules and file access can run the explicit continuity sync in
+[`SKILL.md` §5](SKILL.md): curate the canonical store, validate it, and confirm a
+cold-started agent could continue before a deliberate compact, clear, or new thread.
 
-Every host with rules plus file access can support **explicit sync** before a
-deliberate compact, clear, or new thread:
-
-1. scan the task;
-2. dedup/update existing notes;
-3. refresh project state;
-4. promote only reusable feedback and durable reference pointers;
-5. archive/delete stale or completed transient state;
-6. run `engramory_check.py` plus `engramory_doctor.py`;
-7. confirm a cold-started agent could continue from the repo and store alone;
-8. report added/updated/archived/skipped (with reasons), index size, and verdict.
-
-Lifecycle hooks are only an assisted trigger layer. For Codex, the intended
-contract is: `SessionStart` reminds recall; `UserPromptSubmit` marks continuity
-dirty; a manual `PreCompact` gates while dirty until explicit sync; an automatic
-`PreCompact` must fail open with a warning and retain `needs_reconcile` so it
-cannot deadlock compaction. A missing/unknown trigger also fails open with a
-visible warning and marks `needs_reconcile` when dirty.
-Hooks do not understand the conversation or generate a guaranteed semantic
-summary. Install the Codex shim with `engramory_init.py codex --install-hooks`;
-`--mode explicit` is the default, while `--mode assisted` adds proactive
-milestone reminders but still depends on an agent-run semantic sync.
-
-Project hooks execute project-controlled code: review and trust the checkout,
-then use Codex `/hooks` to verify event/source/enabled state. On another host,
-map the same semantics only to lifecycle events whose payload and blocking
-behavior you have verified; otherwise use explicit sync alone.
+Lifecycle hooks only prompt that work; they cannot perform semantic curation.
+The [Codex adapter](adapters/codex/README.md) defines the shipped lifecycle contract
+and install commands, including `--mode explicit` and optional `--mode assisted`.
+For another host, verify event payloads, trust requirements, and blocking behavior
+before mapping the contract. Automatic or unknown compaction must fail open with
+a warning and retain reconciliation state; otherwise use explicit sync alone.
 
 ## 4. Enforce the size cap — the degradation ladder (no PreToolUse hook)
 
 The cap stops the index growing past the host's load window. Strongest → softest:
 
-1. **Pre-write deny hook:** `hooks/engramory_index_guard.py` runs on every matching
-   edit-tool call (`Edit|Write|MultiEdit`) and can DENY one that would grow the index
-   past the cap — deterministic for those tools, not for other write channels
-   (SKILL.md §8). It's written for **Claude Code's** hook format. Other hosts' pre-write deny mechanisms vary and
-   are **not interchangeable**, so each needs its own shim.
+1. **Pre-write deny:** exactly two implementations here are **written, tested,
+   and running**: the [Claude Code hook](hooks/INSTALL.md)
+   (`hooks/engramory_index_guard.py`, matching `Edit|Write|MultiEdit`) and the
+   [dsh plugin](adapters/dsh/plugin/README.md) (`dsh-engramory >= 0.2.7`). Each
+   refuses index growth past a cap that it can measure before the write — whole-file
+   writes and edits it can simulate. The dsh plugin cannot simulate an `insert`-style
+   partial edit, so on a healthy index such an edit can cross the cap from below; see
+   its guide for configuration and simulation limits. dsh compatibility is the `compatible` set in
+   [`dsh.compatibility.dshReleases`](adapters/dsh/plugin/package.json), backed by
+   [recorded E2E evidence](tests/dsh_e2e/results.json).
 
-   > ⚠️ **The per-host notes below are a snapshot, last checked 2026-07-26, and
-   > carry no version guarantee.** Hook APIs on these hosts are young and move
-   > fast — Kiro's CLI, for one, has already reorganised hooks across a major
-   > version. Treat each entry as a starting point: **check the host's current
-   > official docs, then verify on the real host** before relying on any of it.
-   > A claim here that has quietly gone stale is exactly the kind of drift this
-   > project tells you not to trust in a memory note.
-   - **Hermes** — a `pre_tool_call` shell hook can block a tool call; matcher
-     `write_file|patch` catches the agent's *file* writes (an Engramory separate-store
-     index), but **not** Hermes's native `memory` tool — which is already code-capped, so
-     it needs no hook. Caveat: `pre_tool_call` shell hooks have a reported non-firing bug
-     in some worker/dispatch contexts (issue #25204) — verify it fires before relying on it.
-   - **Cursor** — a generic `preToolUse` hook can deny `Edit|Write` (newer, and
-     reported flaky on Windows in 2026 — verify before relying on it).
-   - **Kiro** — a CLI `PreToolUse` hook with `matcher: fs_write` can `exit 2` to deny a
-     write (stderr returned to the agent), the same shape as the Claude Code guard. But
-     the IDE may pass empty `toolArgs` (issue #7375, so a content/path deny is CLI-only)
-     and the CLI hook is reported broken on Windows 11 (issue #8264) — verify it fires
-     first. Until that shim is written and tested, use rung 2. See
-     [adapters/kiro/README.md](adapters/kiro/README.md).
-   - **OpenClaw** — blocks via a `before_tool_call` *plugin* (TypeScript, `block: true`),
-     **not** a shell hook, so the Python guard does not drop in.
-   - **Trae** — has **no** pre-write deny (only post-write review/undo), so the cap
-     can't be deterministic there; use rung 2.
+   | Host | Pre-write seam | Engramory enforcement here |
+   |---|---|---|
+   | Claude Code | `PreToolUse` | shipped, tested, running hook |
+   | dsh | `ctx.tools.guard()` | shipped, tested, running plugin |
+   | Hermes | `pre_tool_call`, matching `write_file\|patch` | rules + check + doctor; no shim |
+   | Cursor | `preToolUse` for file edits | rules + check + doctor; no shim |
+   | Kiro CLI | `PreToolUse`, `matcher: fs_write`, `exit 2` | rules + check + doctor; no shim |
+   | OpenClaw | TypeScript `before_tool_call` plugin, `block: true` | rules + check + doctor; no shim |
+   | Codex | no index-deny shim here; lifecycle assistance is separate | rules + check + doctor |
+   | Trae | post-write review/undo, no pre-write deny | rules + check + doctor |
+   | Other hosts | verify the host's interface | rules + check + doctor where tools are available |
 
-   So the cap is portable *in principle* on hosts with a real pre-write deny — and
-   **two shims here are written, tested, AND running**: the Claude Code hook and the
-   dsh plugin (`adapters/dsh/plugin/`, `dsh-engramory` 0.2.7+ — 0.2.0 never
-   activated, issue #8); for the others you write
-   and verify the shim yourself. See `hooks/INSTALL.md`.
+   Hermes, Cursor, OpenClaw, and Kiro CLI are **portable in principle, not written
+   or verified here**. Check current official host documentation and demonstrate
+   an actual deny on your host before claiming a port works. Kiro IDE and CLI
+   interfaces must be checked separately. Hermes's file-write seam does not cover
+   its native `memory` tool. Third-party reports worth testing for first (they may
+   be fixed by now): Hermes `pre_tool_call` shell hooks not firing in some worker
+   contexts (issue #25204); Cursor's hook flaky on Windows; Kiro IDE passing empty
+   `toolArgs` (issue #7375, so a path/content deny is CLI-only) and the Kiro CLI hook
+   not firing on Windows 11 (issue #8264).
+
 2. **Agent-invoked check (any host with a shell):** after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact if it says `OVER`.
    Add that instruction to the rules. Hermes / Cursor / Cline / Codex all have
@@ -171,18 +141,12 @@ The cap stops the index growing past the host's load window. Strongest → softe
    checks and run structure-only (handy on a store that isn't in strict Engramory
    format yet, e.g. a host-native auto-memory store).
 
-**Honest limit.** A *deterministic* guarantee is shipped and tested only for the
-host whose adapter lives in this repo — today **Claude Code**
-(`hooks/engramory_index_guard.py`). The same pattern ports to hosts with a real
-pre-write deny (Hermes and Cursor; OpenClaw only via a TypeScript `before_tool_call`
-plugin), but those shims are not written or verified here — portable in principle,
-build and verify your own. Hosts with no pre-write deny at all (e.g. Trae) get rung 2. If a host writes its memory
-**internally** — not through a tool that an agent step or hook can see (e.g. Letta)
-— even the step-2 check can't intercept that write; there the cap is pure
-discipline. So the cap is deterministic on the handful of hosts with such a hook,
-and best-effort discipline everywhere else. This is why Engramory is 0.x /
-experimental: set expectations accordingly and don't sell the cap as guaranteed on
-a host without a pre-write deny hook.
+**Honest limit.** A seam alone is not a working guard. Only the Claude Code and
+dsh implementations above provide deterministic pre-write denial for their
+matched tools. **Shell tools, MCP file tools, and external editors bypass every
+guard.** All other hosts use best-effort rules + `engramory_check.py` + doctor;
+internal host-managed writes cannot be intercepted by an agent-invoked check.
+Where file or shell access is unavailable, only model discipline remains.
 
 ## Adopting an existing store
 
@@ -241,14 +205,10 @@ python tools/engramory_init.py openclaw                       --install-skill   
 python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
 ```
 
-See [adapters/codex/README.md](adapters/codex/README.md),
-[adapters/openclaw/README.md](adapters/openclaw/README.md) and
-[adapters/dsh/README.md](adapters/dsh/README.md) for the exact behavior and
-limitations (all three enforce the cap by rules + `engramory_check.py`, not a
-deterministic hook; dsh additionally has a deterministic guard plugin, `dsh-engramory` —
-use 0.2.7+: 0.2.1 is the first version that activates on a real profile (issue #8),
-0.2.6 the first that measures a CRLF index and a relative path the way dsh writes them,
-and 0.2.7 the first that follows a symlink under another name and never reads a FIFO or device).
+See the [Codex](adapters/codex/README.md),
+[OpenClaw](adapters/openclaw/README.md), and [dsh](adapters/dsh/README.md) adapters
+for setup and limits; the dsh deterministic guard is installed separately as
+[`dsh-engramory >= 0.2.7`](adapters/dsh/plugin/README.md).
 
 Kiro has no init helper yet — wire it manually (one always-on steering file + a
 non-steering `.engramory-memory/` store) per

@@ -1,19 +1,14 @@
-# Installing Engramory
+# Installing Engramory on Claude Code
 
-Engramory is a memory **protocol**, not a skill — its discipline must fire on
-*every* task, so it loads primarily as **standing rules**, with `SKILL.md` as the
-full reference (optionally registered as a skill) and a hook for the hard cap.
+Install the standing rules for recall and curation, optionally register the full
+protocol as a skill, and add the Claude Code hook for the index cap. The general
+setup model and host capabilities live in [PORTING.md](../PORTING.md).
 
 ## 1. Load the discipline as standing rules (primary)
 
-Paste [`rules-snippet.md`](../rules-snippet.md) into your host's **always-loaded**
-rules so the protocol applies on every task (not just when a skill happens to load
-by relevance):
-
-- **Claude Code:** `%USERPROFILE%\.claude\CLAUDE.md` (Windows) / `~/.claude/CLAUDE.md`
-  (macOS / Linux) for all projects, or the project's `CLAUDE.md`.
-- **Codex:** `AGENTS.md` (global `~/.codex/AGENTS.md` or per-project).
-- **Cursor / Cline / Windsurf:** `.cursor/rules` / `.clinerules` / `.windsurfrules`.
+Paste [`rules-snippet.md`](../rules-snippet.md) into Claude Code's always-loaded
+rules: `%USERPROFILE%\.claude\CLAUDE.md` on Windows, `~/.claude/CLAUDE.md` on
+macOS / Linux, or the project's `CLAUDE.md` for project-only use.
 
 ## 2. (Optional) Register the full spec as a skill — Claude Code
 
@@ -39,14 +34,11 @@ set. Claude reads the `description` to decide when to load the skill.
 
 ## 3. The hard-cap hook (deterministic enforcement)
 
-The standing rules' 150/200 behavior is model-followed; the hook is the
-*deterministic backstop* for the matched edit tools (`Edit|Write|MultiEdit`) — the
-model cannot skip it on those calls, but writes outside them (a shell command, an
-MCP file tool) are not intercepted (SKILL.md §8). It's written and tested for Claude
-Code only. Some other hosts expose a pre-write deny you can adapt the shim to (Hermes —
-whose `pre_tool_call` has a reported non-firing bug in some worker contexts, #25204;
-Cursor, though its is newer/flaky); OpenClaw blocks only via a `before_tool_call` plugin,
-and some hosts have none — see PORTING.md (coverage varies by host and version — you verify it).
+The hook deterministically denies matched over-cap growth through
+`Edit|Write|MultiEdit`; the defaults are in the configuration table below. Shell
+commands, MCP file tools, and external editors bypass it. For the two shipped
+implementations and other hosts' best-effort limits, see
+[the reliability ladder](../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook).
 
 1. Open your settings file (`%USERPROFILE%\.claude\settings.json` for all
    projects, or `.claude/settings.json` for one project).
@@ -57,8 +49,7 @@ and some hosts have none — see PORTING.md (coverage varies by host and version
    or on Windows.
 3. Put the absolute path to `engramory_index_guard.py` in `args`.
 4. Set `"command"` to the Python that should run it:
-   - **macOS / Linux:** `python3` (a bare `python` frequently does not exist here — the
-     old shell-form snippet failed silently on such systems).
+   - **macOS / Linux:** `python3` (a bare `python` may not exist here).
    - **Windows:** `python`.
    - **Most robust on any OS:** the absolute interpreter path from
      `python -c "import sys; print(sys.executable)"` (e.g. `C:\Python312\python.exe`),
@@ -100,104 +91,18 @@ systems).
 
 ## 4. Point `<MEMORY_ROOT>` at your memory directory
 
-Tell the agent where memory lives. You may reuse the host's native memory
-directory **only when it is a plain directory of files you control** (Claude
-Code). If the host *manages* its own memory — Codex's native Memories,
-OpenClaw's auto-written store, Hermes's managed files — point Engramory at a
-**separate folder** instead; two writers with different house styles will fight
-over the same files (SKILL.md §0).
-If it's inside a git repo, confirm it is `.gitignore`d — memories often hold
-machine-local detail (server IPs, ssh paths, serial numbers). Never write a
-secret's *value* into memory at all (keys, tokens, passwords) — see SKILL.md §5.
+Point `<MEMORY_ROOT>` at Claude Code's plain-file auto-memory directory and make
+Engramory its curation authority. Use [one writer with read-only readers](../adapters/reader/README.md)
+when sharing it. If the store is inside a git repo, confirm it is `.gitignore`d:
+memories may hold machine-local detail. Never save secret values (keys, tokens,
+passwords); see [`SKILL.md` §5](../SKILL.md).
 
-## 5. Other agents (Cursor, Cline, Codex, OpenClaw, Windsurf, …)
+## 5. Other hosts
 
-Step 1 already covers them: paste [`rules-snippet.md`](../rules-snippet.md) (or the
-body of [`SKILL.md`](../SKILL.md)) into the agent's always-loaded rules. The
-150/200 guard then applies via the instructions; for the deterministic cap, adapt
-the hook to the host's pre-write deny hook or run `tools/engramory_check.py` after
-each index write. Full per-host wiring is in [PORTING.md](../PORTING.md).
-
-For **Codex**, **OpenClaw** and **dsh**, prefer the init helper instead of manually pasting:
-
-```sh
-python tools/engramory_init.py codex    --project-root <repo> --install-skill
-python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
-python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
-```
-
-Each creates the memory template, adds a marked block to `AGENTS.md`, optionally
-copies the skill into the root that host actually scans (Codex/OpenClaw:
-`.agents/skills/engramory`; dsh: `$DSH_HOME/skills/engramory` globally,
-`<project>/.dsh/skills/engramory` in a project), and keeps the Engramory store
-separate from the host's own memory. See
-[adapters/codex/README.md](../adapters/codex/README.md),
-[adapters/openclaw/README.md](../adapters/openclaw/README.md) and
-[adapters/dsh/README.md](../adapters/dsh/README.md).
-
-To let a host **recall** (read-only) from a store another agent owns and writes — e.g.
-Claude Code's native memory — use a `<host>-reader` host (it creates no store and never
-writes; `--memory-root` must be an existing store; it lands in that host's own rules file):
-
-```sh
-python tools/engramory_init.py codex-reader --project-root ~/.codex \
-  --memory-root ~/.claude/projects/<project>/memory
-```
-
-Reader hosts: `codex-reader` and `dsh-reader` (dogfooded) plus `claude-reader`, `cursor-reader`,
-`kiro-reader`, `cline-reader`, `windsurf-reader`, `openclaw-reader`, `hermes-reader` (wired
-from documented formats, printed with an "unverified" note). See
-[adapters/reader/README.md](../adapters/reader/README.md).
-
-## 6. Optional Codex lifecycle assistance
-
-This is separate from the Claude Code index-size hook above. Install the managed
-Codex project hooks with:
-
-```sh
-python tools/engramory_init.py codex --project-root <repo> \
-  --install-skill --install-hooks --mode explicit
-```
-
-`explicit` is the default. `--mode assisted` additionally asks the agent to sync
-at meaningful milestones; it still does not write a semantic summary in the
-background. The installed hook contract is:
-
-| Codex event | Lifecycle-hook behavior |
-|---|---|
-| `SessionStart` | Remind the agent to recall from the canonical `MEMORY.md`; surface `needs_reconcile` if an earlier automatic transition could not be synced. |
-| `UserPromptSubmit` | Conservatively mark continuity `dirty`. Do not infer, classify, or write a memory from the prompt alone. |
-| `PreCompact` (manual) | If dirty/unreconciled, gate manual compaction until the explicit unified sync and `mark-synced` complete, then retry. |
-| `PreCompact` (automatic, missing, or unknown trigger) | **Fail open** with a visible warning; when dirty, keep/set `needs_reconcile`. Never loop-deny a non-manual compact. |
-
-The explicit sync — scan, dedup/update, project, reusable feedback, references,
-retirement, check+doctor, and cold-start sufficiency — is performed by the agent.
-A hook can schedule or apply back-pressure to that work; it cannot truthfully
-claim that it generated a complete semantic summary.
-
-Once that semantic sync and its checks genuinely finish, run the exact
-`mark-synced` command emitted by the hook. It checks that `MEMORY.md` exists,
-stays inside the store, is not a symlink, and is within the hard line/byte caps,
-then records the clean generation/index hash. It does not run semantic curation,
-edit a note, or summarize memory.
-
-Project-scoped hooks run project-controlled code. Inspect them before trusting
-the checkout, trust only projects whose hook code you accept, and use `/hooks` in
-Codex to verify the registered event, source, and enabled state. Re-check
-`/hooks` after configuration changes. If the expected entry is absent or reports
-an error, fall back to explicit sync and the commands documented in the Codex
-adapter.
-
-The installer manages `.codex/hooks.json` plus scripts under
-`.codex/engramory/`, while preserving unrelated handlers. Review both before
-granting project trust.
-
-The shim was implemented against and source-checked against the **Codex CLI
-0.144.1** command-hook schema and behavior. The Python lifecycle runtime and the
-generated `cmd.exe`/PowerShell launch path have black-box coverage; project hook
-discovery, trust, and execution inside a real Codex host still need to be
-confirmed with `/hooks`. This is an implementation target, **not** a claimed
-minimum version or end-to-end host certification. For another version, compare
-the [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
-and use `/hooks` to verify the installed entries; if they are missing or
-incompatible, degrade to explicit sync.
+Use [PORTING.md](../PORTING.md) for host capabilities and the degradation ladder,
+and the [Codex](../adapters/codex/README.md),
+[dsh](../adapters/dsh/README.md), [OpenClaw](../adapters/openclaw/README.md), or
+[Kiro](../adapters/kiro/README.md) guide for setup. Codex lifecycle assistance is
+configured and verified separately in its adapter; it does not enforce the cap.
+Read-only access to another agent's store uses the
+[reader adapter](../adapters/reader/README.md).

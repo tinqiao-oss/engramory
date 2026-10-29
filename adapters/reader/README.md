@@ -38,33 +38,10 @@ python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
 
 ## Supported reader hosts
 
-| Host (`<host>-reader`) | Rules file it writes | Verified here? |
-|---|---|---|
-| `codex-reader` | `AGENTS.md` | ✅ dogfooded end-to-end |
-| `dsh-reader` | `AGENTS.md` | ✅ dogfooded end-to-end |
-| `claude-reader` | `CLAUDE.md` | ⚠️ unverified wiring |
-| `openclaw-reader` | `AGENTS.md` | ⚠️ unverified wiring |
-| `hermes-reader` | `AGENTS.md` | ⚠️ unverified wiring |
-| `cline-reader` | `.clinerules` | ⚠️ unverified wiring |
-| `windsurf-reader` | `.windsurfrules` | ⚠️ unverified wiring |
-| `cursor-reader` | `.cursor/rules/engramory-recall.mdc` (`alwaysApply: true`) | ⚠️ unverified wiring |
-| `kiro-reader` | `.kiro/steering/engramory-recall.md` (`inclusion: always`) | ⚠️ unverified wiring |
-
-**"Verified here"** means the wiring was dogfooded on a real machine: a `codex exec -s
-read-only` run read the index, opened the relevant note, and returned the fact; for
-`dsh-reader`, a live `deepseek-v4-flash` session did the same, and the request dsh sent was
-captured to confirm the block had actually been injected. The
-"unverified" rows are written from each host's **documented** rules-file format (the same
-per-host facts in [PORTING.md](../../PORTING.md)) but have not been run on that host —
-Engramory does not claim a host works until it is dogfooded. The tool prints this caveat when
-you init one. If you verify one on a real host, please open a PR to flip it.
-
-> **Cline / Windsurf — file vs. directory.** These use the single-file form (`.clinerules`,
-> `.windsurfrules`), which current versions still read. Newer versions also support a rules
-> **directory** (`.clinerules/*.md`, `.windsurf/rules/*.md`, the latter with an "always-on"
-> activation mode). If your version doesn't pick up the single file, move the generated block
-> into that directory. (`codex-reader` and `dsh-reader` are the wirings dogfooded here — see
-> above.)
+The [host wiring and verification table](../../PORTING.md#read-only-host-wiring)
+is maintained in PORTING.md, including the Cline / Windsurf directory fallback.
+Only `codex-reader` and `dsh-reader` have real-host verification here; the installer
+labels the other wirings unverified.
 
 ## What the reader is told
 
@@ -81,5 +58,4 @@ learns something durable, surface it to the user instead of writing it.
 - **Data egress.** A reader sends what it reads to its model provider. If the store holds
   sensitive project detail, be deliberate about which agent you point at it, and scope
   `--memory-root` to a store (or curated subset) you're comfortable sending off-machine.
-- The deterministic index-size hook (`hooks/`) is Claude-Code-only and is a *writer* concern;
-  it is irrelevant to a reader.
+- Index-size guards are a writer concern; see the [host reliability ladder](../../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook).

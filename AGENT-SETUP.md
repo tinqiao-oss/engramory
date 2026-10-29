@@ -203,8 +203,8 @@ Then settle two things explicitly, because both are load-bearing:
 - **Ownership.** Will *you* write this store, or does another agent own it and you only
   recall from it? Engramory assumes **one writer, many readers**, and there is no lock.
   Installing a second writer onto someone else's store is a corruption bug, not a
-  configuration preference. Read-only wiring is the `<host>-reader` family in
-  [`README.md`](README.md).
+  configuration preference. Read-only wiring is the `<host>-reader` family in the
+  [reader guide](adapters/reader/README.md).
 - **Separation.** If the host *manages its own* memory (Codex native Memories,
   OpenClaw's auto-written store, Hermes's managed files), Engramory must point at a
   **separate folder** — two writers with different house styles will fight over the
@@ -315,15 +315,11 @@ Place the host on the degradation ladder in [`PORTING.md`](PORTING.md) §4 and r
 rung honestly, including when the answer is "this host cannot have a deterministic cap".
 
 A deterministic pre-write deny is implemented, tested, and RUNNING in this repo for
-**one** host (Claude Code). A second implementation runs on dsh
-(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.7+) — caught failing in the field
-(issue #8: 0.2.0 never activated) and re-verified end to end on a live rc.7 profile,
-then again on eleven dsh releases from 0.1.5-rc.3 to 0.2.2-alpha.2, on Windows, by `tests/dsh_e2e/` (2026-10-29; the list is
-`dsh.compatibility.dshReleases` in the plugin's `package.json`, and a dsh newer than
-that list is unverified until a run says otherwise);
-written is not running, and only running counts. For anything else, the correct
-report is that the cap is
-best-effort discipline — not
+exactly **two** hosts: Claude Code (`hooks/engramory_index_guard.py`) and dsh
+(`dsh-engramory` >= 0.2.7 — the releases it has been verified on are
+`dsh.compatibility.dshReleases` in the plugin's `package.json`, and a dsh release not
+listed there is unverified). Written is not running, and only running counts. For
+anything else, the correct report is that the cap is best-effort discipline — not
 that it is "supported". Overstating this is the single most damaging thing you can do
 in this runbook, because the user will then trust a guarantee they do not have.
 
@@ -448,22 +444,22 @@ only worth touching if you happen to be editing that note anyway.
 missing:
 
 ```
-Engramory is installed but NOT actually doing anything.
+Engramory is installed, but its main job isn't being done.
 
 The rules that tell me how to keep your memory tidy were never added to your
 CLAUDE.md, so they don't load. The storage and the size guard are both fine —
 it's the discipline itself that's missing, which is why notes have been piling
 up without the required structure.
 
-Fix is one paste into CLAUDE.md. Want me to do it? (I'd be adding ~40 lines to
-that file and changing nothing else.)
+Fix is one paste into CLAUDE.md. Want me to do it? (I'd be adding the rules
+block to that file and changing nothing else.)
 ```
 
 **Not installed yet:**
 
 ```
-Not installed here. I can set it up — you're on Claude Code, which is the one
-host that gets the strongest protection (a write that would blow the size limit
+Not installed here. I can set it up — you're on Claude Code, one of the two
+hosts that get the strongest protection (a write that would blow the size limit
 is refused outright, not just warned about).
 
 I'd change 2 files: ~/.claude/settings.json and your CLAUDE.md.
