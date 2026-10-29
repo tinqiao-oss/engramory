@@ -109,12 +109,41 @@ makes a memory effectively invisible. Write it as the hook that would make
 Link related memories in the body with `[[other-slug]]`. A link to a slug that
 does not exist yet is fine — it marks something worth writing later.
 
+### 1.1 Language
+
+A host can be set to write the store in Chinese (the dsh plugin's `language: zh`).
+Three things change; the rest of the format does not:
+
+| | English | Chinese |
+|---|---|---|
+| note name (= filename without `.md` = `name:`) | `founder-profile` | `主人生日` |
+| index type headings | `## user` `## feedback` `## project` `## reference` (`## life`, §2.2) | `## 用户` `## 反馈` `## 项目` `## 参考` (`## 人生`) |
+| reasoning labels (§2) | `**Why:**` `**How to apply:**` | `**为什么：**` `**怎么用：**` |
+
+Frontmatter keys, the `type:` values, dates, and the index filename stay as they are,
+so every host and tool reads the store whichever language wrote it, and a store that
+mixes both is valid. The validators accept both label pairs in any store.
+
+Names, in either language:
+
+- **Unique and specific.** The store is one flat namespace and the type is not part
+  of the name, so `主人生日` rather than `生日`, `deploy-checklist` rather than
+  `checklist`.
+- **Plain characters.** No spaces, no `# | ( ) ? [ ] / \ : * " < >`, no
+  percent-encoding — an index pointer or a `[[link]]` cannot carry them.
+- **Short.** A name is a handle, not a description: about 40 characters at most.
+
+Headings: add a pointer under the heading its type already has, in whichever
+language it is written; start a heading in your own language only when the type has
+none yet. Never keep two headings for one type.
+
 ---
 
 ## 2. The four types
 
 The type tells you how to treat the memory: whether it carries an action, whether
-it goes stale, and when to recall it.
+it goes stale, and when to recall it. A store that a companion character writes may
+also use a fifth, `life` (§2.2).
 
 ### `user` — who the user is
 Stable facts about the person: role, expertise, durable preferences, identity.
@@ -219,6 +248,47 @@ its line:
 `user` notes are global by nature (a person does not change per project), so the
 label adds nothing there. Keep `scope` out of `MEMORY.md`: it governs curation,
 not recall, and index lines are under a hard budget (§3).
+
+### 2.2 `life` — a companion's own life (optional fifth type)
+
+Only for a host that runs a companion character — a persona the user chats with,
+such as the dsh plugin's companion mode (大肥鱼模式). A store without one never needs
+it, and the four types keep their meaning alongside it: who the user is stays
+`user`; how they want to be addressed, or what never to say, stays `feedback`.
+
+`life` holds what the character has lived:
+
+- a moment shared with the user, with its date — "2026-10-12, first live stream
+  together";
+- something coming up in the user's life that is worth asking about later — "job
+  interview on 2026-10-31";
+- a change in the character itself — a new liking, a catchphrase it picked up.
+
+One moment or one change per file, named with its date when it has one
+(`2026-10-12-first-stream`, `2026-10-12第一次直播`). Index heading `## life` (`## 人生`
+in a Chinese store).
+
+Its lifecycle is not `project`'s:
+
+- **Many are expected.** A life is a sequence of moments; the one-live-note ceiling of
+  `project` does not apply.
+- **Kept, not retired as stale.** A past moment cannot go stale. When the index nears
+  the cap, fold the oldest month: move its `life` notes to `archive/`, list them in
+  `archive/life-2026-10.md`, and leave one pointer line to that list (§6) — still on
+  disk, opened when a conversation reaches back that far.
+- **Something coming up is the exception.** Once it has happened, rewrite it as what
+  happened ("2026-10-31, the interview went well") or retire it, the next time it
+  comes up — never leave it to wait for the cap.
+- **Deleted only when the user asks to forget it** — from the archive too. A wrong
+  detail is corrected in place; that is an update, not a forgetting.
+- `**Why:**` / `**How to apply:**` are not required — a moment is not a rule — though
+  a line on why it mattered helps the next recall.
+
+In a companion conversation the reporting rule of §5 still holds, spoken in
+character: say what was remembered, corrected, forgotten, or not saved, and never let
+the user believe something was kept when it was not. Line counts and check results
+only when the user asks. ID numbers, card numbers, and passwords are never written,
+even when the user asks.
 
 ---
 
@@ -354,6 +424,8 @@ session. Before writing, run the checks in this order:
 5. **Delete when wrong.** If a memory turns out to be false or obsolete, delete
    the file (or move it to `archive/`) and remove its index line. Forgetting is a
    first-class operation — a store full of stale facts is worse than a small one.
+   A companion's `life` note is the exception (§2.2): a wrong detail is corrected in
+   place, and the note is deleted only when the user asks to forget it.
 
 ### Task-completion checkpoint
 
@@ -404,6 +476,8 @@ After any memory write or sync, report exactly what was **added**, **updated**,
 **archived**, and **skipped** (with a reason), plus the index line/byte size and
 check result. If transient state was deleted rather than retained, name it under
 `archived` as deleted. Report an empty category as `none`; do not silently write.
+In a companion conversation the report is spoken in character, and the index size
+and check result are given only when the user asks (§2.2).
 
 This sync is a semantic curation pass. A lifecycle hook may remind, mark work
 dirty, or gate a manual compact, but it does not itself understand the
@@ -463,6 +537,9 @@ judgment are your job either way.
    doctor deliberately skips it, so those notes become undiscoverable — kept on
    disk, but effectively deleted. If you will not write the pointer file, delete
    the notes outright and say so; silently stranding them is the worse outcome.
+   A companion's `life` notes are folded by month instead, never deleted (§2.2):
+   the oldest month's notes move into `archive/`, `archive/life-YYYY-MM.md` lists
+   them, and one pointer line to that list stays in the index.
 4. **Split a bloated note into conclusion + history.** For a note that has grown
    into a timeline (see the size note above), keep the slug and rewrite it as the
    *conclusion layer* — invariants, decisions, pitfalls, how to resume — and move

@@ -522,6 +522,69 @@ def test_doctor_feedback_with_whyhow_clean(tmp_path):
     assert rc == 0 and "clean" in out
 
 
+def test_doctor_chinese_labels_and_filename_clean(tmp_path):
+    # SKILL.md §1.1: a Chinese note keeps the same two labels, in Chinese
+    _note(tmp_path / "称呼老大.md", "称呼老大", ntype="feedback",
+          body="叫主人「老大」。\n\n**为什么：** 全名听着像挨骂。\n**怎么用：** 每次都叫老大。")
+    (tmp_path / "MEMORY.md").write_text("# 索引\n## 反馈\n- [称呼](称呼老大.md) — 叫老大\n",
+                                        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_chinese_prose_is_not_a_label(tmp_path):
+    # a line that merely opens with 为什么 / 怎么用 is prose, not the label
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="为什么会这样，没人知道。\n怎么用都行。")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "missing-why-how" in out and "without its colon" not in out
+
+
+def test_doctor_chinese_label_without_colon_gets_hint(tmp_path):
+    _note(tmp_path / "fb.md", "fb", ntype="feedback",
+          body="**为什么**\n理由在这\n**怎么用**\n做法在这")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [F](fb.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and out.count("without its colon") == 2
+
+
+def test_doctor_life_is_a_valid_type_without_why_how(tmp_path):
+    # SKILL.md §2.2: a companion's moments, many per store, folded by month
+    _note(tmp_path / "2026-10-12第一次直播.md", "2026-10-12第一次直播", ntype="life",
+          body="和主人第一次一起直播。")
+    (tmp_path / "archive").mkdir()
+    (tmp_path / "archive" / "life-2026-09.md").write_text("- 九月的事\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text(
+        "# 索引\n## 人生\n- [第一次直播](2026-10-12第一次直播.md) — 10-12\n"
+        "- [九月](archive/life-2026-09.md) — 更早的回忆\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out
+
+
+def test_doctor_name_matches_filename_across_unicode_normalisation(tmp_path):
+    import unicodedata
+    nfc = unicodedata.normalize("NFC", "café-notes")
+    _note(tmp_path / f"{nfc}.md", unicodedata.normalize("NFD", nfc))
+    (tmp_path / "MEMORY.md").write_text(f"# Index\n- [C]({nfc}.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "filename slug" not in out
+
+
+def test_doctor_nfc_nfd_twins_are_duplicate_slugs(tmp_path):
+    # two normalisations of one name: two files on Linux/NTFS, one file on macOS
+    import unicodedata
+    nfc, nfd = (unicodedata.normalize(f, "café") for f in ("NFC", "NFD"))
+    _note(tmp_path / f"{nfc}.md", nfc)
+    _note(tmp_path / f"{nfd}.md", nfd)
+    if len([n for n in os.listdir(tmp_path) if n.endswith(".md")]) != 2:
+        return  # a normalising filesystem (macOS) already made them one file
+    (tmp_path / "MEMORY.md").write_text(f"# Index\n- [C]({nfc}.md) — hook\n- [D]({nfd}.md) — hook\n",
+                                        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "Unicode normalisation" in out
+
+
 def test_doctor_missing_dates_is_issue(tmp_path):
     (tmp_path / "a-note.md").write_text("---\nname: a-note\ndescription: x\ntype: reference\n---\nbody\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text("# Index\n- [A](a-note.md) — hook\n", encoding="utf-8")

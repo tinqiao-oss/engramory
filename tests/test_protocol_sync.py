@@ -37,6 +37,25 @@ class ContinuityProtocolTests(unittest.TestCase):
             r"type:\s*[^\n]*\|\s*handoff(?:\s|\|)",
         )
 
+    def test_life_is_an_optional_fifth_type_with_its_own_lifecycle(self):
+        """§2.2 and the rules it overrides must agree: §5 deletes what is wrong,
+        §6 archives cold notes, and the report contract names sizes — a `life`
+        note is corrected in place, folded by month, and reported in character."""
+        section = self.skill.split("### 2.2 `life`", 1)[1].split("\n---", 1)[0]
+        for phrase in ("Many are expected", "Deleted only when the user asks to forget it",
+                       "archive/life-2026-10.md", "are not required"):
+            self.assertIn(phrase, section)
+        self.assertIn("A companion's `life` note is the exception (§2.2)", self.skill)
+        self.assertIn("`life` notes are folded by month instead, never deleted (§2.2)", self.skill)
+        self.assertIn("In a companion conversation the report is spoken in character, and the index size\n"
+                      "and check result are given only when the user asks (§2.2)", self.skill)
+
+    def test_language_section_keeps_types_and_labels_paired(self):
+        section = self.skill.split("### 1.1 Language", 1)[1].split("\n## 2.", 1)[0]
+        for phrase in ("**为什么：**", "**怎么用：**", "`## 用户`", "Never keep two headings for one type",
+                       "the `type:` values"):
+            self.assertIn(phrase, section)
+
     def test_sync_order_and_cold_start_gate_are_explicit(self):
         sync = self.skill.split("### Unified continuity sync", 1)[1]
         sync = sync.split("\n---", 1)[0]

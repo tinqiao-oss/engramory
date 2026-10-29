@@ -4,6 +4,59 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.13.0 — 2026-10-30
+
+- **A store can be written in Chinese** (SKILL.md §1.1). Note names, the index's type
+  headings (`## 用户` / `## 反馈` / `## 项目` / `## 参考`) and the reasoning labels
+  (`**为什么：**` / `**怎么用：**`) change; frontmatter keys, `type:` values, dates and
+  the index filename do not, so every host and tool reads the store whichever language
+  wrote it, and a mixed store is valid. Naming rules for both languages: unique and
+  specific (the store is one flat namespace), no characters a pointer or `[[link]]`
+  cannot carry, about 40 characters at most; a type keeps one heading. On dsh,
+  `language: zh` (or a regional form, `zh-CN`) puts the skill, its trigger text and the
+  injected index in Chinese, rule for rule.
+- **The doctor reads Chinese stores.** It accepts the Chinese labels — anchored like
+  the English ones, so a sentence that opens with 为什么 is not a label — names them in
+  its errors only for a note written in Chinese, and compares filenames, pointers,
+  wikilinks and names without case or Unicode form: macOS can return NFD where an
+  editor wrote NFC, and two normalisations of one name are now a duplicate slug.
+- **A fifth, optional type: `life`** (SKILL.md §2.2), for a companion character the
+  user chats with — the community's 大肥鱼, or any persona. It holds the character's
+  own life: dated moments shared with the user, things coming up in the user's life
+  worth asking about, changes in the character itself. Many are expected; they are kept,
+  folded by month into `archive/` when the index fills, corrected in place, and deleted
+  only when the user asks to forget. No Why/How. The other four types keep their
+  meaning; §5, §6 and the report contract name the exception.
+- **dsh companion mode (大肥鱼模式).** `companionPresets` names the persona preset(s);
+  a session running one — the preset it runs now, read from dsh's `agentPreset`
+  projection — is a companion conversation, and coding sessions in the same profile are
+  untouched. The user's own companion conversations (`ownerSessions`, ids from the
+  session menu's *Copy Session ID*, `prefix*` allowed) get the index plus companion
+  rules: recall on any message, a greeting included; speak of memory in character;
+  never claim a save that did not happen; never write ID numbers, card numbers or
+  passwords. Any other companion conversation — chat bridges open one per contact or
+  group in the same profile — gets no index, a note saying so, and file tools that may
+  name files only: a directory is refused (grep, glob and directory views walk trees
+  that may hold a store), and so is any path into a store, by path segment as written
+  and as the OS resolves it — links, case, Unicode form, 8.3 short names, a store not
+  created yet — and at the real location of a store relocated through a link or
+  junction (the global one, those from the session's directory up, the pinned one).
+  A subagent takes its parent's role, the parent looked up among dsh's
+  live agents when this process has not seen it; a fork is judged on its own id. It
+  fails closed — no session, a parent neither seen nor live (unless the subagent's own
+  id is listed), a failed preset lookup, a path over 64 segments, a network path — and
+  it is best-effort, not access control: a shell tool reads any file (SECURITY.md).
+  With companion mode on, the skill every session shares gains its companion section;
+  coding sessions keep their index, their guard and their recall rules.
+- **Defaults are unchanged.** With companion mode off and English, the skill, the
+  injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
+  compared). Two rounds of cross-review (GPT and DeepSeek) found, before release, a
+  stranger planting a store that did not exist yet, forks inheriting the owner's role,
+  case / 8.3 aliases past the filter, a tree search over another project's store, a
+  stray argument standing in for a search root, a failed preset lookup trusting the
+  header, subagents stranded after a restart, unbounded sync I/O on long paths, and the
+  skill telling a companion conversation that a greeting gets no recall.
+
 ## 0.12.4 — 2026-10-29
 
 - **On dsh, the index is now in context without a read.** Recall used to depend on

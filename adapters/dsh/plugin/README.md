@@ -79,6 +79,40 @@ To uninstall:
 dsh plugin --profile <name> remove dsh-engramory
 ```
 
+## Companion mode (大肥鱼模式)
+
+For a persona the user chats with — the community's 大肥鱼, or any other character run
+from a dsh agent preset, often wired to WeChat, Douyin or Bilibili through a bridge
+plugin. Turn it on by naming the preset(s) in `companionPresets`; a session running one
+of them is a companion conversation. Coding sessions in the same profile keep their index,
+guard and recall rules; the skill they share only gains a companion section.
+
+- **A fifth type, `life`** ([SKILL.md §2.2](../../../SKILL.md)): shared moments with
+  their dates, things coming up in the user's life, changes in the character itself.
+  Kept, folded into a monthly archive when the index fills, deleted only when the user
+  asks to forget. The other four types keep their meaning.
+- **Recall in character.** A companion conversation is told that any message, a greeting
+  included, may call for recall, and to speak of what it remembered — or failed to save
+  — in character, without naming files or tools.
+- **Only the user's own conversations get the memory.** A bridge usually opens one
+  session per contact or group in the same profile, so a stranger's conversation runs
+  the same preset. Copy each of your own sessions' ids (the session menu's
+  *Copy Session ID*) into `ownerSessions`; a companion conversation not listed there
+  gets no index, a note saying so, and its file tools may name files only: a
+  directory is refused (so grep, glob and directory views are — any tree may hold a
+  store), and so is any path into a store, however it is spelled or linked, including
+  a store that does not exist yet, so none can be planted for you. A subagent takes the
+  role of the conversation that spawned it, looked up among dsh's live agents when this
+  process has not seen it (a subagent you listed yourself counts as yours even when
+  its parent cannot be found); a forked conversation is judged on its own id. A call
+  with no session, or a network path, counts as a stranger's. Listing a group chat lets everyone in it reach the
+  memory.
+
+This keeps the user's memory out of a stranger's context by the routes dsh's own file
+tools take. It is **not** a security boundary: a shell tool reads any file, and a
+different profile on the same account can still read the store's files. Keeping
+strangers away from the store needs filesystem permissions or a sandbox.
+
 ## Configuration
 
 | Field | Default | Meaning |
@@ -89,6 +123,9 @@ dsh plugin --profile <name> remove dsh-engramory
 | `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity — the file the write lands on, whatever it is called (symlinks and `..` resolved; case-folded on Windows only) — and a path that does not exist yet still has its first write guarded. |
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
 | `injectIndex` | `true` | Put the memory index into dsh's runtime context on every step (see above). Set `false` to recall by reading the file instead. |
+| `language` | `en` | `zh` writes the store in Chinese (SKILL.md §1.1): Chinese note names, `## 用户` / `## 反馈` / `## 项目` / `## 参考` headings, `**为什么：**` / `**怎么用：**` labels, and the skill and the injected index in Chinese. Frontmatter keys and `type:` values stay English, so every host still reads the store. The cap's refusals stay English. `zh` and its regional forms (`zh-CN`, `zh-TW`, …) select Chinese; any other value falls back to `en`. |
+| `companionPresets` | none | Agent preset ids whose sessions are companion conversations (companion mode, above). One id may be written as a plain string. Empty: companion mode is off. |
+| `ownerSessions` | none | Session ids of the user's own companion conversations; `prefix*` matches by prefix. A companion conversation not listed gets no memory. `*` alone opens every companion conversation to it. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 
 ## What the guard actually does
@@ -136,10 +173,12 @@ file's line endings when sizing the result, including CRLF bytes.
   from `$DSH_HOME`, resolved the way dsh resolves it. What is injected is framed as notes,
   not instructions, that may be stale; a host without runtime context
   (no `ctx.systemPrompt.context`) goes without it.
-- dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and three reactive
-  `ctx.inject()` children for the skill registry, the session working directory, and
-  the prompt registry; a compatible-release declaration needs recorded host evidence,
-  not just unit tests.
+- dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and reactive
+  `ctx.inject()` children for the skill registry, the session working directory, the
+  prompt registry, and — in companion mode — the session projections that hold each
+  session's current preset; a compatible-release declaration needs recorded host
+  evidence, not just unit tests. Companion mode is checked against dsh's types and a
+  mock, not yet end to end.
 
 ## License
 

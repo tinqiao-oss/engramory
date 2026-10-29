@@ -15,7 +15,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent 吗?** 先读 **[AGENT-SETUP.md](AGENT-SETUP.md)**,判断宿主能力、已有记忆库、安全安装方式,以及哪些功能确实可以汇报为已启用。
 
-> **状态:0.12.4 —— 实验性。** Claude Code 的 `PreToolUse` hook 为匹配的直接编辑工具(`Edit|Write|MultiEdit`)提供硬性索引上限;`dsh-engramory` 插件是第二个,管 dsh 的文件工具。shell 工具(Bash、PowerShell、后台 Monitor 命令)、MCP 文件工具、外部编辑器和同步程序都能绕过防护。策展仍靠模型遵守规则,只能尽力而为;这还不是强制、可靠的跨 agent 记忆层。见[宿主覆盖范围](PORTING.md)和[协议局限](SKILL.md)。
+> **状态:0.13.0 —— 实验性。** Claude Code 的 `PreToolUse` hook 为匹配的直接编辑工具(`Edit|Write|MultiEdit`)提供硬性索引上限;`dsh-engramory` 插件是第二个,管 dsh 的文件工具。shell 工具(Bash、PowerShell、后台 Monitor 命令)、MCP 文件工具、外部编辑器和同步程序都能绕过防护。策展仍靠模型遵守规则,只能尽力而为;这还不是强制、可靠的跨 agent 记忆层。见[宿主覆盖范围](PORTING.md)和[协议局限](SKILL.md)。
 
 ---
 
@@ -28,7 +28,7 @@ markdown 加索引的模式、类型化笔记都是前人工作。Engramory 的�
 ## 真正的差异点
 
 1. **小索引,详情按需打开。** `MEMORY.md` 只放指针,不抄笔记正文。每次会话通过宿主注入或显式读取取得索引:Codex 需要实际读取;dsh 上由插件自动注入(不装插件时 dsh 也需要读取)。限制索引大小既控制持续的上下文开销,也避免超过宿主的加载窗口。
-2. **经过策展、可落实的笔记。** 类型是 `user | feedback | project | reference`。程序性的 `feedback` 保存可复用纠错,带 **Why:**(为什么)和 **How to apply:**(怎么落实)。agent 写前查重、更新已有笔记、清理错误或过时事实,不重复记录 git、代码或项目指令已有的内容。这些规则靠模型遵守。
+2. **经过策展、可落实的笔记。** 类型是 `user | feedback | project | reference`,陪伴角色另有记录自己经历的 `life`(SKILL.md §2.2)。记忆库可以用中文写(§1.1)。程序性的 `feedback` 保存可复用纠错,带 **Why:**(为什么)和 **How to apply:**(怎么落实)。agent 写前查重、更新已有笔记、清理错误或过时事实,不重复记录 git、代码或项目指令已有的内容。这些规则靠模型遵守。
 3. **已实现宿主上的写前尺寸兜底。** 硬上限默认 200 行 / 25 KB,任一维度都能触发。防护拒绝它能测量到的、把索引扩到上限之外的写入,允许压缩(dsh 插件测量不了 `insert` 这类局部编辑)。Claude Code 也可能提供写后警报;Engramory 的 hook 在写入之前生效。配置与覆盖范围见 [hooks/INSTALL.md](hooks/INSTALL.md)、[dsh 插件指南](adapters/dsh/plugin/README.zh-CN.md)和 [PORTING.md](PORTING.md)。
 
 ## 不另建 handoff 库的任务续接

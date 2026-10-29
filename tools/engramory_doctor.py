@@ -37,10 +37,13 @@ PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — e
 note must have well-formed frontmatter (no malformed lines, unclosed or malformed
 quotes, or a missing closing fence) carrying a non-empty `name`, `description`, a
 valid `type`
-(user|feedback|project|reference), and real-calendar `created` + `updated` dates;
-feedback/project notes must carry `Why:` + `How to apply:`; an optional `scope`
+(user|feedback|project|reference, or a companion's `life`, SKILL.md §2.2), and
+real-calendar `created` + `updated` dates;
+feedback/project notes must carry `Why:` + `How to apply:` (or the Chinese labels
+`为什么：` + `怎么用：`, SKILL.md §1.1); an optional `scope`
 must be `global` or `repo` when present. Soft hygiene is INFO (exit 0): a `name`
-not matching the filename slug (tolerating `-`/`_`/case), a feedback/project note
+not matching the filename slug (tolerating `-`/`_`/case/Unicode normalisation), a
+feedback/project note
 with no `scope` (its reach is then unstated; unlabelled beats guessed — SKILL.md
 §2.1), and a note reachable
 only via a `[[wikilink]]` (not in the index, so it won't load at session start).
@@ -77,8 +80,12 @@ import datetime
 import os
 import re
 import sys
+import unicodedata
 
-VALID_TYPES = {"user", "feedback", "project", "reference"}
+# `life` is the optional fifth type a companion character writes (SKILL.md §2.2).
+# Valid in every store — a store is shared across hosts, and only some of them run a
+# companion — and like `user`/`reference` it needs no Why/How: a moment is not a rule.
+VALID_TYPES = {"user", "feedback", "project", "reference", "life"}
 # `scope` (optional) answers "does this still hold in another repo?" — orthogonal to
 # `type`. Absent stays VALID: the field postdates existing stores, and an unlabelled
 # reach beats a guessed one. feedback/project get an INFO nudge, nothing harder,
@@ -92,13 +99,25 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # incidental prose ("...the Why: is below") doesn't satisfy it, and the FULL
 # "How to apply" label is still required — a bare "How:" drops the deliberate
 # "what do I concretely do next" cue and stays an ISSUE. See SKILL.md §1/§2.
+# 为什么 / 怎么用 are the same two labels in Chinese (SKILL.md §1.1), accepted
+# whatever language the writing host uses — a store is shared across hosts. Same
+# anchoring: prose that merely opens with 为什么 does not count, only the label and
+# its colon.
 _LABEL = r"^[ \t#>*\-]*\*{0,2}\s*"
-_WHY_RE = re.compile(_LABEL + r"Why\s*\*{0,2}\s*[:：]", re.I | re.M)
-_HOW_RE = re.compile(_LABEL + r"How\s+to\s+apply\s*\*{0,2}\s*[:：]", re.I | re.M)
+_WHY_RE = re.compile(_LABEL + r"(?:Why|为什么)\s*\*{0,2}\s*[:：]", re.I | re.M)
+_HOW_RE = re.compile(_LABEL + r"(?:How\s+to\s+apply|怎么用)\s*\*{0,2}\s*[:：]", re.I | re.M)
 # Near-miss detectors: only to enrich the error message (guide the fix) when the
 # strict label above is absent — a 'Why'/'How' line that looks like a label attempt.
+# A Chinese attempt is the bare label alone on its line or closed in bold
+# (`**为什么**`): Chinese has no word boundary, and a sentence opening with 为什么 is
+# not an attempt at the label.
 _WHY_NEAR = re.compile(_LABEL + r"Why\b", re.I | re.M)
 _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
+_WHY_NEAR_ZH = re.compile(_LABEL + r"为什么\s*(?:\*{2}|$)", re.M)
+_HOW_NEAR_ZH = re.compile(_LABEL + r"怎么用\s*(?:\*{2}|$)", re.M)
+# A note written in Chinese gets the Chinese label named in its error; others do not
+# (an English console would print it as escapes).
+_CJK_RE = re.compile(r"[一-鿿]")
 # Index pointer target `](path.md)`: lazy + a real terminator after `.md` so a backup
 # like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
 # a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
@@ -257,6 +276,15 @@ def _within(path, root_abs):
     return _contained(os.path.realpath(path), root_abs)
 
 
+def _fold(name):
+    # The key two spellings of one filename share wherever a filesystem may open them
+    # as the same file: case (macOS/Windows) and Unicode normalisation (macOS can
+    # return NFD where an editor wrote NFC — 'café.md' arrives either way). Common
+    # Chinese characters are identical in both forms; Japanese kana with dakuten,
+    # Hangul and accented Latin are not. For comparison only: nothing is renamed.
+    return unicodedata.normalize("NFC", name).lower()
+
+
 def _real_basename(full, notes):
     # Map a resolved, EXISTING pointer target to its real note-dict key. os.path.realpath
     # canonicalises filename CASE only on Windows — on macOS (also case-insensitive) it
@@ -268,9 +296,9 @@ def _real_basename(full, notes):
     base = os.path.basename(full)
     if base in notes:
         return base
-    low = base.lower()
+    low = _fold(base)
     for nk in notes:
-        if nk.lower() == low:
+        if _fold(nk) == low:
             return nk
     return base
 
@@ -283,9 +311,9 @@ def _ci_note_match(cand, notes):
     # same way. On a case-insensitive FS (Windows/macOS) `[[Foo]]` really does open
     # `foo.md`, so folding is correct; on a case-sensitive FS (Linux) the probe fails
     # and the link stays correctly broken. Returns the real notes key, or None.
-    low = cand.lower()
+    low = _fold(cand)
     for nk, npath in sorted(notes.items()):
-        if nk != cand and nk.lower() == low:
+        if nk != cand and _fold(nk) == low:
             if os.path.isfile(os.path.join(os.path.dirname(npath), cand)):
                 return nk
     return None
@@ -484,10 +512,12 @@ def main(argv):
             # Case-only slug collision: `foo.md` and `FOO.md` can coexist on a case-
             # sensitive FS (Linux) but collide when the store moves to a case-insensitive
             # FS (macOS/Windows). Report it as a portability defect (duplicate-slug bucket).
-            lkey = f.lower()
+            # Two Unicode normalisations of one name (NFC vs NFD) are the same defect:
+            # distinct files on Linux, one file on macOS.
+            lkey = _fold(f)
             if lkey in seen_ci and seen_ci[lkey] != f:
-                issues.append(f"duplicate note slug up to case: '{seen_ci[lkey]}' vs '{f}' "
-                              f"collide on a case-insensitive filesystem (macOS/Windows) — rename one")
+                issues.append(f"duplicate note slug up to case or Unicode normalisation: "
+                              f"'{seen_ci[lkey]}' vs '{f}' collide on macOS/Windows — rename one")
             else:
                 seen_ci.setdefault(lkey, f)
             if f in notes:
@@ -661,8 +691,8 @@ def main(argv):
                 # (e.g. Claude Code) and case; also tolerate a leading type-prefix the
                 # host adds to filenames (CC: name 'audit-methodology' vs file
                 # 'feedback_audit_methodology'). Only flag a real mismatch (soft).
-                nslug = slug.replace("_", "-").lower()
-                nname = name.replace("_", "-").lower()
+                nslug = _fold(slug.replace("_", "-"))
+                nname = _fold(name.replace("_", "-"))
                 for pre in ("feedback-", "project-", "reference-", "user-"):
                     if nslug.startswith(pre) and not nname.startswith(pre):
                         nslug = nslug[len(pre):]
@@ -679,15 +709,24 @@ def main(argv):
             if t in ("feedback", "project"):
                 # scan the BODY only — a Why:/How to apply: line in the frontmatter
                 # doesn't count as the required reflection.
+                zh = _CJK_RE.search(body) is not None
                 if not _WHY_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'Why:' line"
+                    if zh:
+                        msg += " (or '为什么：')"
                     if _WHY_NEAR.search(body):
                         msg += " (found a 'Why' label without the 'Why:' form — add a colon, e.g. **Why:**)"
+                    elif _WHY_NEAR_ZH.search(body):
+                        msg += " (found a '为什么' label without its colon — e.g. **为什么：**)"
                     issues.append(msg)
                 if not _HOW_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'How to apply:' line"
+                    if zh:
+                        msg += " (or '怎么用：')"
                     if _HOW_NEAR.search(body):
                         msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
+                    elif _HOW_NEAR_ZH.search(body):
+                        msg += " (found a '怎么用' label without its colon — e.g. **怎么用：**)"
                     issues.append(msg)
 
     if bloated:
@@ -754,7 +793,7 @@ def main(argv):
             "duplicate-slug": "rename one of the clashing note files so each slug is unique",
             "orphan": "link it from the index or another note, or move it under archive/",
             "missing-date": "add 'created:'/'updated:' (YYYY-MM-DD) to each note's frontmatter",
-            "missing-why-how": "add a 'Why:' / 'How to apply:' line to the note (SKILL.md §2)",
+            "missing-why-how": "add a 'Why:' / 'How to apply:' line to the note (SKILL.md §2; Chinese labels in §1.1)",
             "other": "see the ISSUE lines above",
         }
         summary = ", ".join(f"{buckets[b]} {b}" for b in order if b in buckets)

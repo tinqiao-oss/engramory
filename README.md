@@ -23,7 +23,7 @@ The files are human-readable and editable; the live store stays git-ignored.
 > **[AGENT-SETUP.md](AGENT-SETUP.md)** to assess the host, existing stores, safe
 > setup, and what you can honestly report as active.
 
-> **Status: 0.12.4 — experimental.** Claude Code's `PreToolUse` hook provides the
+> **Status: 0.13.0 — experimental.** Claude Code's `PreToolUse` hook provides the
 > hard index cap for matched direct-edit tools (`Edit | Write | MultiEdit`); the
 > `dsh-engramory` plugin is the second, for dsh's file tools. Shell tools (Bash, PowerShell, background Monitor commands), MCP file tools,
 > external editors, and sync clients bypass the guards. Model-followed curation
@@ -52,7 +52,9 @@ is, how the agent should behave, and what a project needs next.
    it (without the plugin, dsh needs the read too). Bounding the
    index controls recurring context cost and avoids exceeding a host's load window.
 2. **Curated, actionable notes.** The types are
-   `user | feedback | project | reference`. Procedural `feedback` records reusable
+   `user | feedback | project | reference`, plus `life` for a companion character's
+   own moments (SKILL.md §2.2). A store can be written in Chinese (§1.1). Procedural
+   `feedback` records reusable
    corrections with **Why:** and **How to apply:**. The agent checks for duplicates,
    updates existing notes, retires wrong or stale facts, and avoids copying what
    git, code, or project instructions already record. These are model-followed rules.
