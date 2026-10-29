@@ -50,7 +50,9 @@ the session's directory, not the process's.
 The disk is read as each model request arrives, because a host that printed the
 refusal *and* performed the write would otherwise be covered up by step 2. Results are
 matched to steps by tool-call id, not by position. The same run checks that the task
-and the skill reached the model, and that **every tool dsh offers is in
+and the skill reached the model; that the index of a project store seeded in the
+session's directory (`ws/.engramory-memory/MEMORY.md`) was injected into the first
+request's runtime context without being read; and that **every tool dsh offers is in
 `REVIEWED_TOOLS`**, classifying guarded writes, read-only/state operations, delegated
 agents, and documented shell bypasses. An unknown tool fails the run until reviewed;
 a new direct file writer needs guard support. A reviewed shell tool can still bypass

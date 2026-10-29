@@ -13,7 +13,14 @@
 
 ## 已经有 `AGENTS.md` 常驻块了,为什么还要插件
 
-那个常驻块确实承载了纪律,单论召回也够用了。但有两件事它做不到:
+那个常驻块承载了纪律。但有三件事它做不到:
+
+**索引已经在上下文里 —— 召回不用再读文件。** 插件在每一步都把记忆索引放进 dsh 的运行时
+上下文:项目库(`<项目>/.engramory-memory/MEMORY.md`,取会话目录到 git 根目录之间离会话最近的那个,和 dsh 找项目 `AGENTS.md` 的方式一致)和全局库
+(`$DSH_HOME/.engramory-memory/MEMORY.md`,未设 `$DSH_HOME` 时为 `~/.dsh`)—— 正是
+`tools/engramory_init.py dsh` 建库的位置;设了 `indexPath` 时则只注入它。内容一变就重新读取,
+所以写入后下一轮请求就能看到;超过上限的行会被截掉,并提示模型去压缩。用
+`injectIndex: false` 关闭。
 
 **匹配工具的上限由守卫确定性执行。** `ctx.tools.guard()` 提供同步、**单调**的否决:
 守卫一旦返回理由,后续监听器就不能再放行。索引的增长受配置上限约束,无需依赖 agent
@@ -72,6 +79,7 @@ dsh plugin --profile <名字> remove dsh-engramory
 | `maxBytes` | `25600` | 硬性 UTF-8 字节上限(25 KB)。 |
 | `indexPath` | 未设置 | 要守护的**那一个**索引的绝对路径。不设它时,守卫只按文件名匹配,于是**别的项目里一个无关的 `MEMORY.md` 也会被拦**;设了它就只有这个确切的文件会被守。比较走的是身份而非拼写 —— 看写入实际落到的那个文件,不管它叫什么名字(symlink 与 `..` 都会解析;仅在 Windows 上折叠大小写),而且即使文件尚不存在,它的第一次写入照样受守护。 |
 | `registerSkill` | `true` | 设为 `false` 则保留上限、但跳过运行时 skill。 |
+| `injectIndex` | `true` | 每一步都把记忆索引放进 dsh 的运行时上下文(见上文)。设为 `false` 则改回由 agent 读文件召回。 |
 | `skill` | 内置 | 用你自己的 markdown 替换 skill 正文。 |
 
 ## 守卫到底做了什么
@@ -106,9 +114,15 @@ edit 在统一为 LF 的文本上匹配,计算结果大小时保留文件原有�
 - **只覆盖已知文件工具:**使用 `file_path` 的 `write`/`edit`、`str_replace`/`insert`,
   以及使用 `path` 的 `str_replace_editor` 修改命令。未知工具放行。
   **Shell 工具、MCP 文件工具和外部编辑器都绕过守卫。**
-- dsh 的插件 API 可能变化。本插件使用 `ctx.tools.guard()` 和两个响应式 `ctx.inject()`
-  子上下文,分别接入 skill 注册表和会话工作目录;兼容声明需要真实宿主的运行记录,
-  不能只凭单元测试。
+- **注入只在安装器建库的位置找记忆库。** 库放在别处(`--memory-root`)时要设 `indexPath`。
+  项目根只按 dsh 默认的 `.git` 标记判断(profile 里自定义的 `projectRootMarkers` 插件看不到);
+  会话中途新建的项目库最多要十秒才会出现。真实路径跑出项目之外的项目库(比如指向仓库外的符号
+  链接)不会被读取;如果是有意为之,请把 `indexPath` 指向它。全局库的位置来自 `$DSH_HOME`,
+  解析方式与 dsh 自己一致。注入的内容被标注为"笔记而非指令、可能过时";没有运行时上下文
+  (`ctx.systemPrompt.context`)的宿主则不注入。
+- dsh 的插件 API 可能变化。本插件使用 `ctx.tools.guard()` 和三个响应式 `ctx.inject()`
+  子上下文,分别接入 skill 注册表、会话工作目录和提示词注册表;兼容声明需要真实宿主的
+  运行记录,不能只凭单元测试。
 
 ## 许可
 

@@ -56,9 +56,10 @@ These are properties of the host, not of Engramory, and each one can bite quietl
   Over budget it drops broader files first, then truncates the most specific
   one, and reports what it cut. An oversized project `AGENTS.md` can therefore shorten
   this block — keep both it and `MEMORY.md` inside their caps.
-- **Recall is not free of the index cap.** dsh loads `MEMORY.md` only when the agent reads
-  it; keep it within the [configured caps](plugin/README.md#configuration) so recall
-  stays cheap enough for every session.
+- **Recall is not free of the index cap.** With the [plugin](plugin/README.md) installed,
+  `MEMORY.md` is injected into every request, cut at the
+  [configured caps](plugin/README.md#configuration); without it, dsh loads the index only
+  when the agent reads it. Either way, a small index is what keeps recall cheap.
 
 ## Reliability model on dsh
 

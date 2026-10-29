@@ -4,6 +4,43 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.12.4 — 2026-10-29
+
+- **On dsh, the index is now in context without a read.** Recall used to depend on
+  the `AGENTS.md` block telling the agent to read `MEMORY.md` at the start of a task —
+  a step a model can skip, and one the memory plugins dsh users compare us with do not
+  ask for. The plugin now puts the index into dsh's runtime context on every step
+  (`ctx.systemPrompt.context()`, after dsh's own contexts): the project store — the
+  nearest `.engramory-memory/` between the session's directory and its git root, found
+  the way dsh finds a project's `AGENTS.md` — and the global one under `$DSH_HOME`,
+  where `engramory_init.py dsh` puts them, or `indexPath` alone when it is set. It is
+  re-read whenever it changes, so a write shows on the next request; framed as notes,
+  not instructions, that may be stale; and passed through literally (`interpolate:
+  false` — dsh's prompt interpolation throws on a malformed `{{`, which a note title
+  can contain). It is cut at the cap — 200 lines / 25 KB by default, the BOM counted as
+  the guard counts it — with a line telling the model the rest is left out of this
+  snapshot and the index needs compacting: the cap now means on dsh what it was always
+  meant to mean. `injectIndex: false` turns it off; a host whose prompt registry has no
+  runtime context keeps the guard and the skill and goes without. The built-in skill
+  says to use the injected index when it is there and to read the file when it is not.
+- **Recall cannot be turned into a read of another file.** A cloned repo chooses its
+  project store, but a store whose real path leaves the project root — a symlink out of
+  the checkout, to a credentials file say — is not read, and the check is repeated
+  whenever the file changes. The global store is the user's own and is not confined;
+  `indexPath` opts any location in.
+- **It costs about a stat per store per step.** dsh calls the context synchronously on
+  every step, so the walk up to the project root is cached per directory for ten
+  seconds, and an index is re-read only when its size or mtime changes — then only as
+  far as the cap. `$DSH_HOME` is resolved as dsh resolves it (`~` expanded, made
+  absolute), else `~/.dsh`. Cross-review (GPT and DeepSeek) found the containment gap,
+  the unconditional "already in context" in the skill, the `$DSH_HOME` mismatch and the
+  per-step reads before release.
+- **The end-to-end check covers it.** `tests/dsh_e2e/run.py` seeds a project store
+  in the session's directory and requires its marker line in the first model request
+  on any release that renders runtime context — every one checked so far, 0.1.5 to
+  0.2.2.
+- dsh-engramory **0.2.8**.
+
 ## 0.12.3 — 2026-10-29
 
 Both fixes answer reports by @LarryE135 (#20, #21, filed 2026-10-20 with reproducers,

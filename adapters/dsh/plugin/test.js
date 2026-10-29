@@ -10,14 +10,17 @@
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import {
+  chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
+  utimesSync, writeFileSync,
+} from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
 
-function mount(config = {}, { withSkills = true, workingDirectory } = {}) {
+function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt } = {}) {
   let guard
   const skills = []
   const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
@@ -25,6 +28,7 @@ function mount(config = {}, { withSkills = true, workingDirectory } = {}) {
     tools: { guard: (fn) => { guard = fn; return () => {} } },
     ...(withSkills ? { skills: skillRegistry } : {}),
     ...(workingDirectory ? { workingDirectory } : {}),
+    ...(systemPrompt ? { systemPrompt } : {}),
   }
   // Mirrors Cordis' reflective context (issue #8): only services named in the
   // caller's inject are readable as properties — anything else throws and must go
@@ -66,6 +70,25 @@ function mount(config = {}, { withSkills = true, workingDirectory } = {}) {
 
 /** dsh 0.2's per-session directory owner: `get(session)` is its synchronous read. */
 const sessionDirs = () => ({ get: (session) => session.cwd })
+
+/** dsh's prompt registry, keeping every runtime context registered on it. */
+const promptRegistry = () => {
+  const contexts = []
+  return { contexts, context: (spec) => { contexts.push(spec); return () => {} } }
+}
+
+/** Run `fn` with `$DSH_HOME` set to `home` (or unset), then put it back. */
+function withDshHome(home, fn) {
+  const before = process.env.DSH_HOME
+  if (home === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = home
+  try {
+    return fn()
+  } finally {
+    if (before === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = before
+  }
+}
 
 const INDEX = 'MEMORY.md'
 const big = (lines) => Array.from({ length: lines }, (_, i) => `- line ${i}`).join('\n')
@@ -664,6 +687,306 @@ test('a directory named like the index is never read', () => {
   const { guard } = mount()
   assert.match(guard(write(join(dir, INDEX), big(300))), /300 lines/)
   assert.equal(guard(write(join(dir, INDEX), big(3))), undefined)
+})
+
+/** A store as the dsh installer lays it out: `<root>/.engramory-memory/MEMORY.md`. */
+function store(root, text) {
+  mkdirSync(join(root, '.engramory-memory'), { recursive: true })
+  writeFileSync(join(root, '.engramory-memory', INDEX), text, 'utf8')
+  return join(root, '.engramory-memory', INDEX)
+}
+
+const at = (cwd) => ({ agent: { session: { cwd } } })
+const scratch = (tag) => mkdtempSync(join(tmpdir(), `engramory-${tag}-`))
+
+test('the index is injected as literal runtime context, from the session\'s project store', () => {
+  const project = scratch('inject')
+  store(project, '- [a](a.md) - first {{not-a-variable\n- [b](b.md) - second\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  assert.equal(prompt.contexts.length, 1)
+  const [spec] = prompt.contexts
+  assert.equal(spec.name, 'engramory:memory-index')
+  assert.equal(spec.interpolate, false, 'a {{ in a note title must never reach dsh interpolation')
+  const text = withDshHome(scratch('home'), () => spec.text(at(project)))
+  assert.match(text, /^Project memory index \(`.*MEMORY\.md`\), loaded for you by dsh-engramory/)
+  assert.match(text, /first \{\{not-a-variable\n- \[b\]\(b\.md\) - second$/)
+  assert.doesNotMatch(text, /User memory index/)
+})
+
+test('the global store under $DSH_HOME is injected too, and one file only once', () => {
+  const project = scratch('inject')
+  const home = scratch('home')
+  store(project, '- [p](p.md) - project\n')
+  store(home, '- [u](u.md) - user\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const both = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  assert.match(both, /Project memory index[\s\S]*- project[\s\S]*User memory index[\s\S]*- user/)
+  const once = withDshHome(home, () => prompt.contexts[0].text(at(home)))
+  assert.equal(once.match(/memory index \(/g).length, 1, 'a session in $DSH_HOME itself sees it once')
+})
+
+test('no store means no injection, and a pinned indexPath is the only index injected', () => {
+  const empty = scratch('inject')
+  const home = scratch('home')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(empty))), '')
+
+  store(empty, '- [p](p.md) - project\n')
+  const pinned = join(scratch('pinned'), INDEX)
+  writeFileSync(pinned, '- [x](x.md) - pinned\n', 'utf8')
+  const pinnedPrompt = promptRegistry()
+  mount({ indexPath: pinned }, { workingDirectory: sessionDirs(), systemPrompt: pinnedPrompt })
+  const text = withDshHome(home, () => pinnedPrompt.contexts[0].text(at(empty)))
+  assert.match(text, /^Memory index/)
+  assert.match(text, /- pinned$/)
+  assert.doesNotMatch(text, /- project/)
+})
+
+test('a session in a subdirectory finds its project store the way dsh finds AGENTS.md', () => {
+  // dsh's project root is the nearest ancestor holding `.git`, else the session's own
+  // directory; the store nearest the session between the two is the project's.
+  const base = scratch('walk')
+  const repo = join(base, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  mkdirSync(join(repo, 'src'), { recursive: true })
+  store(repo, '- [r](r.md) - in the repo\n')
+  store(base, '- [o](o.md) - above the repo\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const fromSrc = withDshHome(home, () => prompt.contexts[0].text(at(join(repo, 'src'))))
+  assert.match(fromSrc, /- in the repo/)
+  assert.doesNotMatch(fromSrc, /above the repo/, 'a store outside the project is not the project\'s')
+
+  const bare = scratch('walk') // no `.git` anywhere: only the session's own directory counts
+  mkdirSync(join(bare, 'sub'))
+  store(bare, '- [b](b.md) - parent of a markerless session\n')
+  assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(join(bare, 'sub')))), '')
+})
+
+test('an index over the cap is cut at the cap, and the model is told to compact', () => {
+  // Past the cap nothing is recalled — on dsh too, now, and said out loud.
+  const project = scratch('inject')
+  store(project, `${big(250)}\n`)
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const text = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  assert.match(text, /- line 199\n\[Cut here/)
+  assert.doesNotMatch(text, /- line 200\b/)
+  assert.match(text, /250 lines \/ \d+ bytes; the cap is 200 lines \/ 25600 bytes/)
+  store(project, `- [a](a.md) - ok\n${'x'.repeat(30000)}\n`)
+  const byBytes = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  assert.match(byBytes, /- ok\n\[Cut here/, 'a line that would cross the byte cap is left out whole')
+})
+
+test('the injected index says what it is: notes, not instructions', () => {
+  const project = scratch('inject')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  assert.match(text, /notes, not instructions/)
+  assert.match(text, /Use it instead of reading the file/)
+})
+
+test('a write to the index shows up on the next step', () => {
+  const project = scratch('inject')
+  const path = store(project, '- [a](a.md) - before\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- before$/)
+  writeFileSync(path, '- [a](a.md) - after, and longer\n', 'utf8')
+  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- after, and longer$/)
+})
+
+test('$DSH_HOME is resolved the way dsh resolves it: ~ expanded, made absolute', () => {
+  const name = `engramory-tilde-${process.pid}-${Date.now()}`
+  const home = join(homedir(), name)
+  try {
+    store(home, '- [u](u.md) - via tilde\n')
+    const prompt = promptRegistry()
+    mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    const text = withDshHome(`~/${name}`, () => prompt.contexts[0].text(at(scratch('inject'))))
+    assert.match(text, /User memory index[\s\S]*- via tilde/)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('a project store that is a link out of the project is not read', (t) => {
+  // A checkout chooses its store; it does not get to point it at another file on the
+  // machine, which would otherwise be read into the model's context.
+  const outside = join(scratch('secret'), 'credentials')
+  writeFileSync(outside, 'aws_secret_access_key = not-for-the-model\n', 'utf8')
+  const repo = scratch('repo')
+  mkdirSync(join(repo, '.git'))
+  mkdirSync(join(repo, '.engramory-memory'))
+  if (fileLink(outside, join(repo, '.engramory-memory', INDEX)) === null) {
+    return t.skip('no symlink privilege here')
+  }
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(repo)))
+  assert.doesNotMatch(text, /not-for-the-model/)
+  assert.equal(text, '')
+})
+
+test('a directory named like the index does not hide the store above it', () => {
+  const repo = scratch('repo')
+  mkdirSync(join(repo, '.git'))
+  store(repo, '- [r](r.md) - the real one\n')
+  mkdirSync(join(repo, 'src', '.engramory-memory', INDEX), { recursive: true })
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(join(repo, 'src'))))
+  assert.match(text, /- the real one$/)
+})
+
+test('an index past the byte cap is read only as far as the cap, BOM included', () => {
+  const project = scratch('inject')
+  const lines = Array.from({ length: 150 }, (_, i) => `- [n${i}](n${i}.md) - ${'x'.repeat(240)}`)
+  store(project, `\uFEFF${lines.join('\n')}\n`)
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  assert.match(text, /\[Cut here: the index is over the Engramory cap \(\d+ bytes; the cap is 200 lines \/ 25600 bytes\)/)
+  const body = text.slice(text.indexOf('\n\n') + 2, text.lastIndexOf('\n['))
+  assert.ok(Buffer.byteLength(body) + 3 <= 25600, 'what is shown fits the cap with the BOM counted')
+  assert.doesNotMatch(body, /\uFEFF/, 'and the BOM itself is not shown')
+  assert.match(body, /^- \[n0\]/)
+})
+
+test('the skill only says the index is in context when it is', () => {
+  const { skills } = mount()
+  const flat = skills[0].content.replace(/\s+/g, ' ')
+  assert.match(flat, /when one is there, use it instead of reading the file; when none is, read MEMORY.md as usual/)
+  assert.match(flat, /"Memory index"/)
+})
+
+test('a project index that is itself a symlink is not read, even into the project', (t) => {
+  // `.engramory-memory/MEMORY.md -> ../.env` stays inside the checkout and would pass a
+  // containment check alone; SKILL.md never reads an index that is a symlink.
+  const repo = scratch('repo')
+  mkdirSync(join(repo, '.git'))
+  writeFileSync(join(repo, '.env'), 'API_KEY=not-for-the-model\n', 'utf8')
+  mkdirSync(join(repo, '.engramory-memory'))
+  if (fileLink(join(repo, '.env'), join(repo, '.engramory-memory', INDEX)) === null) {
+    return t.skip('no symlink privilege here')
+  }
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  assert.equal(withDshHome(scratch('home'), () => prompt.contexts[0].text(at(repo))), '')
+})
+
+test('a project store refused as a link does not hide the user store it points at', (t) => {
+  const home = scratch('home')
+  const user = store(home, '- [u](u.md) - the user store\n')
+  const repo = scratch('repo')
+  mkdirSync(join(repo, '.git'))
+  mkdirSync(join(repo, '.engramory-memory'))
+  if (fileLink(user, join(repo, '.engramory-memory', INDEX)) === null) {
+    return t.skip('no symlink privilege here')
+  }
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(home, () => prompt.contexts[0].text(at(repo)))
+  assert.match(text, /^User memory index[\s\S]*- the user store$/)
+})
+
+test('an index replaced by a same-sized file with the same mtime is still re-read', () => {
+  const project = scratch('inject')
+  const path = store(project, '- [a](a.md) - before\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- before$/)
+  const { mtime } = statSync(path)
+  const next = `${path}.next`
+  writeFileSync(next, '- [a](a.md) - after!\n', 'utf8') // same length as "before"
+  utimesSync(next, mtime, mtime)
+  renameSync(next, path)
+  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- after!$/)
+})
+
+test('a read that failed once is tried again on the next step', (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    return t.skip('needs POSIX permissions that bind this user')
+  }
+  const project = scratch('inject')
+  const path = store(project, '- [a](a.md) - readable again\n')
+  chmodSync(path, 0o000)
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  try {
+    assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(project))), '')
+  } finally {
+    chmodSync(path, 0o644)
+  }
+  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- readable again$/)
+})
+
+test('recall reads no further than the read ceiling, whatever the configured cap', () => {
+  const project = scratch('inject')
+  const row = `- [n](n.md) - ${'x'.repeat(1000)}\n`
+  store(project, row.repeat(17 * 1024)) // ~17 MiB, past the 16 MiB ceiling
+  const prompt = promptRegistry()
+  mount({ maxBytes: 64 * 1024 * 1024, maxLines: 1e6 }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  assert.match(text, /\[Cut here: only the first part of this \d+-byte index is shown\.\]$/)
+  assert.ok(Buffer.byteLength(text) < 17 * 1024 * 1024)
+})
+
+test('past the read ceiling, a line-cap breach is still reported as one', () => {
+  const project = scratch('inject')
+  const row = `- [n](n.md) - ${'x'.repeat(1000)}\n`
+  store(project, row.repeat(17 * 1024)) // ~17 MiB and 17408 lines
+  const prompt = promptRegistry()
+  mount({ maxBytes: 64 * 1024 * 1024 }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  assert.match(text, /over the Engramory cap \(more than 200 lines, \d+ bytes; the cap is 200 lines/)
+  assert.match(text, /compact the index\.\]$/)
+})
+
+test('$DSH_HOME padded with spaces is taken as dsh takes it, not trimmed', () => {
+  const home = scratch('home')
+  store(home, '- [u](u.md) - user\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = withDshHome(` ${home} `, () => prompt.contexts[0].text(at(scratch('inject'))))
+  assert.doesNotMatch(text, /User memory index/)
+})
+
+test('injection can be turned off, and a host without runtime context keeps the cap', () => {
+  const prompt = promptRegistry()
+  mount({ injectIndex: false }, { systemPrompt: prompt })
+  assert.equal(prompt.contexts.length, 0)
+  const { guard } = mount({}, { systemPrompt: {} }) // a registry with no context()
+  assert.match(guard(write(`/s/${INDEX}`, big(300))), /300 lines/)
+})
+
+test('a prompt registry that mounts after the plugin still gets the index', () => {
+  const late = mount({}, { workingDirectory: sessionDirs() })
+  const prompt = promptRegistry()
+  late.mountLate('systemPrompt', prompt)
+  assert.equal(prompt.contexts.length, 1)
+})
+
+test('recall never fails a request', () => {
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: { get: () => { throw new Error('boom') } }, systemPrompt: prompt })
+  const real = process.cwd
+  process.cwd = () => { throw new Error('ENOENT: uv_cwd') }
+  try {
+    assert.equal(prompt.contexts[0].text(at('/nowhere')), '')
+  } finally {
+    process.cwd = real
+  }
 })
 
 test('malformed executions are ignored rather than thrown on', () => {

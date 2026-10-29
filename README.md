@@ -23,7 +23,7 @@ The files are human-readable and editable; the live store stays git-ignored.
 > **[AGENT-SETUP.md](AGENT-SETUP.md)** to assess the host, existing stores, safe
 > setup, and what you can honestly report as active.
 
-> **Status: 0.12.3 — experimental.** Claude Code's `PreToolUse` hook provides the
+> **Status: 0.12.4 — experimental.** Claude Code's `PreToolUse` hook provides the
 > hard index cap for matched direct-edit tools (`Edit | Write | MultiEdit`); the
 > `dsh-engramory` plugin is the second, for dsh's file tools. Shell tools (Bash, PowerShell, background Monitor commands), MCP file tools,
 > external editors, and sync clients bypass the guards. Model-followed curation
@@ -48,7 +48,8 @@ is, how the agent should behave, and what a project needs next.
 
 1. **A small index, details opened on demand.** `MEMORY.md` contains pointers,
    not prose copied from the notes. Keep it available every session through host
-   injection or an explicit read; Codex and dsh require that read. Bounding the
+   injection or an explicit read: Codex needs the read, and on dsh the plugin injects
+   it (without the plugin, dsh needs the read too). Bounding the
    index controls recurring context cost and avoids exceeding a host's load window.
 2. **Curated, actionable notes.** The types are
    `user | feedback | project | reference`. Procedural `feedback` records reusable
@@ -215,8 +216,9 @@ a separate `.engramory-memory/` store. Pass `--project-root` for a project insta
 at `<project>/.dsh/skills/engramory`. Global rules use absolute store paths;
 project rules use relative paths. Details: [adapters/dsh/README.md](adapters/dsh/README.md).
 
-The helper alone gives rules + check + doctor. For the deterministic guard,
-install **`dsh-engramory >= 0.2.7`** in the profile you use (`pnpm` must be on PATH):
+The helper alone gives rules + check + doctor. For the deterministic guard (0.2.7+)
+and the index injected into every request without a read (0.2.8+), install
+**`dsh-engramory`** in the profile you use (`pnpm` must be on PATH):
 
 ```sh
 dsh plugin --profile <name> add dsh-engramory

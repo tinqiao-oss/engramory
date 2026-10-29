@@ -62,6 +62,10 @@ PROFILE = "headless"
 TASK = "Update my memory index."
 DENIAL = "over the Engramory index cap"  # index.js verdict(): change both together
 SKILL_MARK = "Curated file-based long-term memory"  # the registered skill's description
+# A note line only the seeded project store holds: seen by the model only if the plugin
+# injected the index into its runtime context (index.js renderIndex()).
+RECALL_MARK = "- [e2e-recall-marker](e2e.md) - injected, never read"
+INDEX_HEAD = "Project memory index ("  # index.js renderIndex(): change both together
 
 # Every tool dsh has offered in a passing run, and why it cannot put the index past the
 # cap behind the guard's back. A tool missing from this table fails the run until
@@ -260,8 +264,14 @@ def check_release(version, plugin, work, node, npm):
     prefix, home, ws = (os.path.join(work, d) for d in ("prefix", "home", "ws"))
     index = os.path.join(ws, "mem", "MEMORY.md")
     crlf_index = os.path.join(ws, "crlf", "MEMORY.md")
-    for d in (prefix, home, os.path.dirname(index), os.path.dirname(crlf_index)):
+    # The store `engramory_init.py dsh --project-root ws` would create: the session starts
+    # in ws, so the plugin should inject it without being told where it is.
+    seeded = os.path.join(ws, ".engramory-memory", "MEMORY.md")
+    for d in (prefix, home, os.path.dirname(index), os.path.dirname(crlf_index),
+              os.path.dirname(seeded)):
         os.makedirs(d, exist_ok=True)
+    with open(seeded, "w", encoding="utf-8", newline="\n") as f:
+        f.write("# Memory index\n" + RECALL_MARK + "\n")
 
     code, out, err = run([npm, "install", "--prefix", prefix, "@deepseek-ai/dsh@" + version,
                           "--no-audit", "--no-fund"], cwd=work, env=dict(os.environ))
@@ -347,6 +357,12 @@ def check_release(version, plugin, work, node, npm):
     first = json.dumps(fake.main[0], ensure_ascii=False)
     check("the task reached the model", TASK in first)
     check("skill advertised to the model", "engramory" in first and SKILL_MARK in first)
+    # Every release checked so far, 0.1.5 on, carries runtime context; one that stops
+    # doing so must fail here rather than quietly stop recalling.
+    check("index injected into the runtime context",
+          INDEX_HEAD in first and RECALL_MARK in first,
+          "runtime context %s, head %s, marker %s" % (
+              "Current runtime context" in first, INDEX_HEAD in first, RECALL_MARK in first))
     # Every turn's tool list, not just the first: a host may offer more tools mid-task.
     rosters = [tool_roster(body) for body in fake.main]
     roster = {}

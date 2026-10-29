@@ -15,8 +15,17 @@ Part of [Engramory](https://github.com/tinqiao-oss/engramory).
 
 ## Why a plugin, when an `AGENTS.md` block already works
 
-The block does carry the discipline, and for recall that is enough. Two things it cannot
-do:
+The block carries the discipline. Three things it cannot do:
+
+**The index is already in context — recall needs no read.** On every step the plugin
+puts the memory index into dsh's runtime context: the project store
+(`<project>/.engramory-memory/MEMORY.md`, the nearest one between the session's
+directory and its git root — the way dsh finds a project's `AGENTS.md`) and the global one
+(`$DSH_HOME/.engramory-memory/MEMORY.md`, `~/.dsh` when `$DSH_HOME` is unset) —
+where `tools/engramory_init.py dsh` puts them — or, when set, `indexPath` alone. It is
+re-read whenever it changes, so a write shows on the next request, and cut at the cap:
+lines past it are left out, and the model is told to compact. Turn it off with
+`injectIndex: false`.
 
 **The cap becomes deterministic for matched tools.** `ctx.tools.guard()` is a
 synchronous, **monotonic** refusal: once a guard returns a reason, later listeners
@@ -79,6 +88,7 @@ dsh plugin --profile <name> remove dsh-engramory
 | `maxBytes` | `25600` | Hard UTF-8 byte cap (25 KB). |
 | `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity — the file the write lands on, whatever it is called (symlinks and `..` resolved; case-folded on Windows only) — and a path that does not exist yet still has its first write guarded. |
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
+| `injectIndex` | `true` | Put the memory index into dsh's runtime context on every step (see above). Set `false` to recall by reading the file instead. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 
 ## What the guard actually does
@@ -117,9 +127,19 @@ file's line endings when sizing the result, including CRLF bytes.
   `str_replace`/`insert`, and mutating `str_replace_editor` commands with `path`.
   Unknown tools pass. **Shell tools, MCP file tools, and external editors bypass
   the guard.**
-- dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and two reactive
-  `ctx.inject()` children for the skill registry and session working directory;
-  a compatible-release declaration needs recorded host evidence, not just unit tests.
+- **Injection finds the stores where the installer puts them.** A store elsewhere
+  (`--memory-root`) needs `indexPath`. The project root is found by dsh's default `.git`
+  marker only (a profile's custom `projectRootMarkers` are not visible to a plugin), and
+  a project store created mid-session can take up to ten seconds to appear. A project
+  store whose real path leaves the project — a symlink out of the checkout — is not
+  read; point `indexPath` at it if that is deliberate. The global store's location comes
+  from `$DSH_HOME`, resolved the way dsh resolves it. What is injected is framed as notes,
+  not instructions, that may be stale; a host without runtime context
+  (no `ctx.systemPrompt.context`) goes without it.
+- dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and three reactive
+  `ctx.inject()` children for the skill registry, the session working directory, and
+  the prompt registry; a compatible-release declaration needs recorded host evidence,
+  not just unit tests.
 
 ## License
 

@@ -283,7 +283,9 @@ start.
 
 ### Protocol
 
-1. At the start of a task, read `MEMORY.md`.
+1. At the start of a task, read `MEMORY.md` — unless your host has already put it
+   into your context (dsh with the `dsh-engramory` plugin does, under a heading ending
+   in "memory index"); then use that copy.
 2. Scan the one-line descriptions. Open only the detail files whose hooks look
    relevant to the task at hand. If continuing unfinished work, open the matching
    live `project` note. Do not bulk-read everything.
