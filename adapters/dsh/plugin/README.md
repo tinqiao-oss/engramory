@@ -24,9 +24,10 @@ because the index loads every session and everything past the cap silently stops
 recalled. On most hosts that limit is rules plus a checker the agent has to remember to
 run. dsh exposes `ctx.tools.guard()` — a synchronous, **monotonic** refusal: once a guard
 returns a reason, no later listener can turn it back into an allow. So here the limit is
-enforced, not requested. Use **0.2.1 or later**: 0.2.0 shipped before profile installs
+enforced, not requested. Use **0.2.6 or later**: 0.2.0 shipped before profile installs
 worked upstream and carried an `inject` declaration this Cordis does not accept — it
-installed but never activated (issue #8). Outside Claude Code, dsh is the first host with
+installed but never activated (issue #8) — and up to 0.2.5 an edit could slip past the
+cap on a CRLF index, or on dsh 0.2 through a relative path after a cd (see Known limits). Outside Claude Code, dsh is the first host with
 the shim actually written (a few others expose equivalent pre-write seams — see
 PORTING.md — but have no shim yet).
 
@@ -113,8 +114,22 @@ newline, so an index sitting exactly at the cap stays writable.
   failure byte for byte; 0.2.1 boots and serves) and against the vendored
   `@deepseek-ai/cordis` resolver (activation with, without, and with a late-mounted
   skill registry). The test mock now mirrors the reflective-context access rules, and
-  the guard's decision table stays covered by `node --test` (28 cases, run in
+  the guard's decision table stays covered by `node --test` (37 cases, run in
   Engramory's CI).
+- **A relative path is measured where dsh writes it.** dsh 0.2 gives every session its
+  own working directory (moved by its `working_directory` tool) and resolves a
+  relative `file_path` against that. Up to 0.2.5 the guard resolved against the
+  process's cwd instead, so after a cd an edit of a bare `MEMORY.md` read no current
+  file and went through unmeasured — on dsh 0.2.1-rc.2 it grew the index to 253
+  lines. 0.2.6 reads the session's directory from dsh's `workingDirectory` service
+  when the profile has one, and falls back to the process's cwd when it does not
+  (every 0.1.x release).
+- **A CRLF index is edited the way dsh edits it.** dsh matches an edit on
+  LF-normalised text and writes the result back in the file's own line endings. Up
+  to 0.2.5 the guard matched the raw bytes, so on a CRLF `MEMORY.md` — the usual
+  shape on Windows — an LF `old_string` looked absent, the edit was predicted to
+  change nothing, and dsh applied it. 0.2.6 normalises the same way and sizes a CRLF
+  index in CRLF bytes.
 - **Checked against the dsh you are likely running, not only the one it was written
   on.** `tests/dsh_e2e/run.py` in the Engramory repo installs a dsh release into a
   throwaway prefix, adds this plugin with `dsh plugin add`, and drives one headless
@@ -126,8 +141,9 @@ newline, so an index sitting exactly at the cap stays writable.
   `package.json` under `dsh.compatibility.dshReleases`; a unit test rejects a
   `compatible` there without a recorded run of the same plugin version and code.
 - dsh is a developer preview and its plugin API can change. This plugin deliberately
-  touches only `ctx.tools.guard()` and a reactive `ctx.inject(['skills'], …)` child
-  that registers the skill, so it stays cheap to fix.
+  touches only `ctx.tools.guard()` and two reactive `ctx.inject()` children — one
+  registers the skill, one reads each session's working directory — so it stays cheap
+  to fix.
 
 ## License
 

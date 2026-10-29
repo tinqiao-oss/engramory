@@ -21,9 +21,10 @@
 都要加载,超出的部分会**悄无声息地不再被召回**。在多数宿主上,这个限制只是"规则 + 一个
 要靠 agent 自己记得去跑的校验器"。而 dsh 暴露了 `ctx.tools.guard()` —— 一个同步的、
 **单调**的否决:守卫一旦返回理由,后面任何监听器都无法把它翻回放行。所以在这里,上限是被
-**强制执行**的,不是被请求的。请用 **0.2.1 或更高版本**:0.2.0 发布时上游的 profile 安装还
+**强制执行**的,不是被请求的。请用 **0.2.6 或更高版本**:0.2.0 发布时上游的 profile 安装还
 没打通,而且它的 `inject` 声明是这版 Cordis 不接受的写法 —— 装得上,但**永远激活不了**
-(issue #8)。在 Claude Code 之外,dsh 是第一个真正把这层垫片写出来的宿主(另有几个宿主
+(issue #8);0.2.5 及以前,在 CRLF 换行的索引上、或在 dsh 0.2 上 cd 之后用相对路径,edit
+能绕过上限(见下文「已知限制」)。在 Claude Code 之外,dsh 是第一个真正把这层垫片写出来的宿主(另有几个宿主
 同样暴露了等价的写前接缝,见 PORTING.md,但还没有垫片实现)。
 
 **协议随插件一起到达。** skill 是在运行时通过 dsh 的 skill 注册表注册的 —— 走一个响应式的
@@ -102,7 +103,16 @@ dsh plugin --profile <名字> add dsh-engramory
   profile 上端到端验证过(0.2.0 逐字节复现启动失败;0.2.1 能启动并提供服务),也对着 dsh
   内置的 `@deepseek-ai/cordis` 解析器验过(注册表存在、不存在、以及晚挂载三种情况下的激活)。
   测试用的 mock 现在会照着反射式上下文的访问规则来,守卫的判决表则由 `node --test`
-  持续覆盖(28 个用例,在 Engramory 的 CI 里跑)。
+  持续覆盖(37 个用例,在 Engramory 的 CI 里跑)。
+- **相对路径按 dsh 实际写入的位置来量。** dsh 0.2 给每个会话一个自己的工作目录(由它的
+  `working_directory` 工具切换),并按这个目录解析相对的 `file_path`。0.2.5 及以前的守卫却按
+  进程的 cwd 解析,于是 cd 之后对裸 `MEMORY.md` 的 edit 读不到当前文件、不经测量就放行 ——
+  在 dsh 0.2.1-rc.2 上它把索引撑到了 253 行。0.2.6 在 profile 提供 `workingDirectory` 服务时
+  读取会话目录,没有时(所有 0.1.x 版本)退回进程 cwd。
+- **CRLF 索引按 dsh 的方式来模拟 edit。** dsh 先把文本统一成 LF 再匹配 edit,写回时恢复文件
+  原来的换行。0.2.5 及以前的守卫按原始字节匹配,于是在 CRLF 的 `MEMORY.md` 上(Windows 上很
+  常见),LF 的 `old_string` 看起来不存在,edit 被预测成"什么都不改"而放行,dsh 却照常改了。
+  0.2.6 用同样的方式归一化,并按 CRLF 字节数计算 CRLF 索引的大小。
 - **验的是你大概率正在用的 dsh,不只是写它时的那一版。** Engramory 仓库里的
   `tests/dsh_e2e/run.py` 会把指定的 dsh 版本装进临时目录,用 `dsh plugin add` 装上本插件,
   再对着一个脚本化的 DeepSeek API 替身跑一次 headless 任务:260 行的整文件写入、把索引撑过
@@ -110,8 +120,9 @@ dsh plugin --profile <名字> add dsh-engramory
   在发给模型的技能目录里;dsh 提供的每个工具都必须已经归过类(没归类的新工具可能绕过上限写文件);卸载后
   profile 必须还能启动。通过的版本逐个写在 `package.json` 的 `dsh.compatibility.dshReleases`
   里;没有同一插件版本、同一份代码的通过记录,单元测试就不接受把它标成 `compatible`。
-- dsh 目前是开发者预览版,插件 API 可能变化。本插件刻意只碰 `ctx.tools.guard()` 和一个
-  注册 skill 的响应式 `ctx.inject(['skills'], …)` 子上下文,所以要跟着改也很便宜。
+- dsh 目前是开发者预览版,插件 API 可能变化。本插件刻意只碰 `ctx.tools.guard()` 和两个
+  响应式 `ctx.inject()` 子上下文 —— 一个注册 skill,一个读取各会话的工作目录 —— 所以要跟着改
+  也很便宜。
 
 ## 许可
 

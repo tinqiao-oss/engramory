@@ -16,13 +16,14 @@ import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
 
-function mount(config = {}, { withSkills = true } = {}) {
+function mount(config = {}, { withSkills = true, workingDirectory } = {}) {
   let guard
   const skills = []
   const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
   const services = {
     tools: { guard: (fn) => { guard = fn; return () => {} } },
     ...(withSkills ? { skills: skillRegistry } : {}),
+    ...(workingDirectory ? { workingDirectory } : {}),
   }
   // Mirrors Cordis' reflective context (issue #8): only services named in the
   // caller's inject are readable as properties — anything else throws and must go
@@ -50,16 +51,20 @@ function mount(config = {}, { withSkills = true } = {}) {
     },
   })
   apply(makeCtx(new Set(inject)), config)
-  // Simulates a skill registry whose fiber only activates after this plugin's did —
-  // fiber order between unrelated providers is not guaranteed on a real boot.
-  const mountSkillsLate = () => {
-    services.skills = skillRegistry
+  // Simulates a service whose fiber only activates after this plugin's did — fiber
+  // order between unrelated providers is not guaranteed on a real boot.
+  const mountLate = (name, service) => {
+    services[name] = service
     for (let i = pending.length - 1; i >= 0; i--) {
       if (pending[i]()) pending.splice(i, 1)
     }
   }
-  return { guard, skills, mountSkillsLate }
+  const mountSkillsLate = () => mountLate('skills', skillRegistry)
+  return { guard, skills, mountSkillsLate, mountLate }
 }
+
+/** dsh 0.2's per-session directory owner: `get(session)` is its synchronous read. */
+const sessionDirs = () => ({ get: (session) => session.cwd })
 
 const INDEX = 'MEMORY.md'
 const big = (lines) => Array.from({ length: lines }, (_, i) => `- line ${i}`).join('\n')
@@ -159,6 +164,64 @@ test('a simulable edit is judged by its RESULT: shrink passes, growth is refused
     arguments: { file_path: path, old_str: 'HEAD', new_str: big(30) },
   }
   assert.match(guard(grow), /lines > 200/, 'an edit growing an over-cap index must be refused')
+})
+
+const crlf = (text) => text.split('\n').join('\r\n')
+
+test('a CRLF index is matched the way dsh matches it: on LF-normalised text', () => {
+  // dsh's local backend collapses CRLF in the file, old_string and new_string before
+  // matching, then writes the result back as CRLF. Matching the raw text read every
+  // LF old_string on a CRLF index as "not found", predicted no change, and let a
+  // growing edit through that dsh then applied.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-crlf-'))
+  const path = join(dir, INDEX)
+  writeFileSync(path, crlf(`HEAD\n${big(190)}\n`), 'utf8')
+  const { guard } = mount()
+  const grow = {
+    name: 'edit',
+    arguments: { file_path: path, old_string: 'HEAD\n- line 0', new_string: `${big(30)}\n- line 0` },
+  }
+  assert.match(guard(grow), /lines > 200/, 'an LF old_string still finds its CRLF lines')
+  const viaCrlf = { name: 'edit', arguments: { ...grow.arguments, old_string: 'HEAD\r\n- line 0' } }
+  assert.match(guard(viaCrlf), /lines > 200/, 'and so does a CRLF one')
+  writeFileSync(path, crlf(`HEAD\n${big(210)}\n`), 'utf8')
+  const shrink = {
+    name: 'edit',
+    arguments: { file_path: path, old_string: `HEAD\n${big(20)}\n`, new_string: '' },
+  }
+  assert.equal(guard(shrink), undefined, 'a compacting edit of an over-cap CRLF index passes')
+})
+
+test('an edit of a CRLF index is sized in CRLF, the way dsh writes it back', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-crlf-'))
+  const path = join(dir, INDEX)
+  const row = (c) => c.repeat(198)
+  const current = crlf(`HEAD\n${Array.from({ length: 120 }, () => row('x')).join('\n')}`)
+  const added = Array.from({ length: 8 }, () => row('y')).join('\n')
+  const args = { file_path: path, old_string: 'HEAD', new_string: `HEAD\n${added}` }
+  // The case only means something if LF sizing fits and CRLF sizing does not.
+  const asLf = Buffer.byteLength(current.replace('HEAD', args.new_string))
+  const asCrlf = Buffer.byteLength(current.replace('HEAD', crlf(args.new_string)))
+  assert.ok(asLf <= 25600 && asCrlf > 25600, `${asLf} / ${asCrlf}`)
+  writeFileSync(path, current, 'utf8')
+  assert.match(mount().guard({ name: 'edit', arguments: args }), /bytes > 25600/)
+})
+
+test('an edit is sized as dsh writes it back: no BOM, and no doubled CR at a seam', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-crlf-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  // dsh decodes with TextDecoder, which drops the BOM, and writes the edit back
+  // without it: 3 bytes the guard must not count against the result.
+  writeFileSync(path, `﻿HEAD\n${'x'.repeat(25590)}`, 'utf8') // 25598 bytes on disk
+  assert.equal(guard({
+    name: 'edit', arguments: { file_path: path, old_string: 'HEAD', new_string: 'HEADabcde' },
+  }), undefined, 'dsh writes 25600 bytes, which is at the cap, not over it')
+  // A lone `\r` followed by an inserted `\n` is one CRLF once dsh re-normalises.
+  writeFileSync(path, `H\r\n${'x'.repeat(25592)}\rZ\r\n`, 'utf8') // 25599 bytes
+  assert.equal(guard({
+    name: 'edit', arguments: { file_path: path, old_string: 'Z', new_string: '\nZ' },
+  }), undefined, 'dsh writes 25600 bytes, not 25601')
 })
 
 test('an unsimulable partial on an over-cap index is refused, naming the open door', () => {
@@ -335,6 +398,93 @@ test('an unreadable or missing index never blocks work', () => {
   const { guard } = mount()
   const edit = { name: 'edit', arguments: { file_path: '/nope/does-not-exist/MEMORY.md' } }
   assert.equal(guard(edit), undefined)
+})
+
+test('a relative path is measured in the session\'s directory, not the process\'s', () => {
+  // dsh 0.2: after a `working_directory` cd, write/edit resolve a bare MEMORY.md
+  // against the SESSION's directory. Measured against process.cwd(), where no index
+  // lives, the growing edit read nothing and passed unmeasured, and the shrinking
+  // rewrite was judged against an empty file and refused.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-cwd-'))
+  writeFileSync(join(dir, INDEX), `HEAD\n${big(210)}`, 'utf8')
+  const { guard } = mount({}, { workingDirectory: sessionDirs() })
+  const agent = { session: { cwd: dir } }
+  const grow = {
+    name: 'edit', agent,
+    arguments: { file_path: INDEX, old_string: 'HEAD', new_string: big(30) },
+  }
+  assert.match(guard(grow), /lines > 200/, 'growth through a relative path must be refused')
+  assert.equal(guard({ name: 'write', agent, arguments: { file_path: INDEX, content: big(205) } }),
+    undefined, 'a shrinking relative rewrite of an over-cap index must pass')
+})
+
+test('a pinned index is still the index through a relative path after a cd', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-cwd-'))
+  const real = join(dir, INDEX)
+  writeFileSync(real, '- x\n')
+  const { guard } = mount({ indexPath: real }, { workingDirectory: sessionDirs() })
+  const exec = {
+    name: 'write', agent: { session: { cwd: dir } },
+    arguments: { file_path: INDEX, content: big(201) },
+  }
+  assert.match(guard(exec), /over the Engramory index cap/)
+})
+
+test('a working-directory service that mounts after the plugin is still used', () => {
+  // Same window as the late skill registry: the cap must not wait for the service,
+  // and must start using it whenever it arrives.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-cwd-'))
+  writeFileSync(join(dir, INDEX), `HEAD\n${big(210)}`, 'utf8')
+  const late = mount()
+  late.mountLate('workingDirectory', sessionDirs())
+  const grow = {
+    name: 'edit', agent: { session: { cwd: dir } },
+    arguments: { file_path: INDEX, old_string: 'HEAD', new_string: big(30) },
+  }
+  assert.match(late.guard(grow), /lines > 200/)
+})
+
+test('no session directory falls back to the process cwd instead of throwing', () => {
+  const abs = join(mkdtempSync(join(tmpdir(), 'engramory-cwd-')), INDEX)
+  const broken = { get: () => { throw new Error('unknown session') } }
+  for (const workingDirectory of [broken, sessionDirs()]) {
+    const { guard } = mount({}, { workingDirectory })
+    assert.match(guard(write(abs, big(300))), /300 lines/, 'no agent at all')
+    assert.match(guard({ name: 'write', agent: { session: {} }, arguments: { file_path: abs, content: big(300) } }),
+      /300 lines/, 'a session with no directory of its own')
+  }
+})
+
+test('without a session directory, a relative path still resolves against the process cwd', () => {
+  // dsh 0.1.x has no workingDirectory service; its tools resolve against the process.
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-cwd-'))
+  writeFileSync(join(dir, INDEX), `HEAD\n${big(210)}`, 'utf8')
+  const before = process.cwd()
+  process.chdir(dir)
+  try {
+    const { guard } = mount()
+    assert.match(guard({
+      name: 'edit', arguments: { file_path: INDEX, old_string: 'HEAD', new_string: big(30) },
+    }), /lines > 200/)
+    assert.equal(guard(write(INDEX, big(205))), undefined, 'and a shrinking rewrite passes')
+  } finally {
+    process.chdir(before)
+  }
+})
+
+test('a process cwd that is gone never makes the guard throw', () => {
+  // process.cwd() throws (ENOENT uv_cwd) once the directory is deleted. An absolute
+  // path does not need it, so it must still be measured; a relative one is let go.
+  const abs = join(mkdtempSync(join(tmpdir(), 'engramory-cwd-')), INDEX)
+  const { guard } = mount()
+  const real = process.cwd
+  process.cwd = () => { throw new Error('ENOENT: no such file or directory, uv_cwd') }
+  try {
+    assert.match(guard(write(abs, big(300))), /300 lines/)
+    assert.equal(guard(write(INDEX, big(300))), undefined)
+  } finally {
+    process.cwd = real
+  }
 })
 
 test('malformed executions are ignored rather than thrown on', () => {

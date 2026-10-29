@@ -24,7 +24,7 @@
  * Zero dependencies, no build step: plain ESM, node: builtins only.
  */
 import { readFileSync, realpathSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 export const name = 'engramory'
 
@@ -79,7 +79,33 @@ export function apply(ctx, config = {}) {
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
 
-  ctx.tools.guard((exec) => refuseOversizedIndex(exec, settings))
+  // dsh 0.2 resolves a relative file path against the calling SESSION's working
+  // directory, which its `working_directory` tool moves away from the process's own
+  // cwd. Measured against process.cwd(), a bare `MEMORY.md` after a cd is the wrong
+  // file or none: an edit of the real index passed unmeasured, and a shrinking rewrite
+  // of an over-cap index was judged against an empty file and refused. The service is
+  // optional (0.1.x has none) and may mount late, so — like `skills` below — it is
+  // picked up reactively and never makes the cap wait.
+  let workingDirectory
+  ctx.inject(['workingDirectory'], (inner) => {
+    inner.effect(() => {
+      const service = inner.workingDirectory
+      workingDirectory = service
+      return () => {
+        if (workingDirectory === service) workingDirectory = undefined
+      }
+    })
+  })
+  const sessionCwd = (exec) => {
+    try {
+      const dir = workingDirectory?.get(exec.agent.session)
+      return typeof dir === 'string' && isAbsolute(dir) ? dir : undefined
+    } catch {
+      return undefined // no agent, no session, or a service shape this port predates
+    }
+  }
+
+  ctx.tools.guard((exec) => refuseOversizedIndex(exec, settings, sessionCwd))
 
   // The skill registry is optional AND may activate after this plugin — fiber order
   // between unrelated providers is not guaranteed, so a one-shot probe here would
@@ -125,7 +151,7 @@ export function apply(ctx, config = {}) {
  * rejects the overwhelming majority of calls before anything is measured, and the
  * only I/O is a single read of the index on a gated write.
  */
-function refuseOversizedIndex(exec, settings) {
+function refuseOversizedIndex(exec, settings, sessionCwd) {
   const args = exec?.arguments
   if (!args || typeof args !== 'object') return undefined
 
@@ -152,19 +178,26 @@ function refuseOversizedIndex(exec, settings) {
       && (args.command === 'create' || args.command === 'str_replace'
         || args.command === 'insert'))
   if (!gated) return undefined
+  // Every read and identity check below uses the file the host will actually touch.
+  let target
+  try {
+    target = hostPath(sessionCwd(exec), filePath)
+  } catch {
+    return undefined // a relative path and no cwd left to resolve it (deleted under us)
+  }
   // If the guard is pinned to one file, this is where an unrelated same-named file in
   // another project drops out.
-  if (settings.indexKey !== undefined && pathKey(filePath) !== settings.indexKey) {
+  if (settings.indexKey !== undefined && pathKey(target) !== settings.indexKey) {
     return undefined
   }
 
   if (WHOLE_FILE_WRITES.has(tool)) {
     if (typeof args.content !== 'string') return undefined
-    return verdict(args.content, readIfPossible(filePath), filePath, settings)
+    return verdict(args.content, readIfPossible(target), filePath, settings)
   }
   if (tool === 'str_replace_editor' && args.command === 'create') {
     if (typeof args.file_text !== 'string') return undefined
-    return verdict(args.file_text, readIfPossible(filePath), filePath, settings)
+    return verdict(args.file_text, readIfPossible(target), filePath, settings)
   }
 
   const partial = PARTIAL_WRITES.has(tool)
@@ -172,7 +205,7 @@ function refuseOversizedIndex(exec, settings) {
       && (args.command === 'str_replace' || args.command === 'insert'))
   if (!partial) return undefined // read / view / list / unknown: never refused
 
-  const currentBuf = readIfPossible(filePath)
+  const currentBuf = readIfPossible(target)
   if (currentBuf === undefined) return undefined
   const current = currentBuf.toString('utf8')
   const simulated = simulateEdit(current, args)
@@ -261,19 +294,46 @@ function notMyIndexHint(settings) {
  * of them under a replace-all flag; an absent or ambiguous old-string means the
  * real tool errors and changes nothing, so the current text is the honest
  * prediction. Returns undefined when the shape isn't recognised.
+ *
+ * Matching happens on LF-normalised text and the result goes back in the file's own
+ * line endings, as dsh's local backend does it (`applyLiteralEdit` /
+ * `restoreLineEndings` in @deepseek-ai/dsh-fs-local). Matching the raw text let a CRLF
+ * index — common on Windows — read every LF `old_string` as "not found", predict no
+ * change, and pass an edit dsh then applied.
  */
 function simulateEdit(current, args) {
-  const oldStr = firstString(args.old_str, args.old_string)
-  if (oldStr === undefined || oldStr === '') return undefined
-  const newStr = firstString(args.new_str, args.new_string) ?? ''
-  if (args.replace_all === true || args.replaceAll === true) {
-    return current.split(oldStr).join(newStr)
-  }
-  const first = current.indexOf(oldStr)
+  const oldRaw = firstString(args.old_str, args.old_string)
+  if (oldRaw === undefined || oldRaw === '') return undefined
+  const oldStr = lf(oldRaw)
+  const newStr = lf(firstString(args.new_str, args.new_string) ?? '')
+  // dsh decodes with TextDecoder, which drops a leading BOM — from the text it
+  // matches, from the sample it detects line endings on, and from what it writes back.
+  const decoded = current.startsWith('﻿') ? current.slice(1) : current
+  const text = lf(decoded)
+  const first = text.indexOf(oldStr)
   if (first === -1) return current // the real tool errors: nothing changes
-  const second = current.indexOf(oldStr, first + oldStr.length)
-  if (second !== -1) return current // ambiguous: the real tool errors, nothing changes
-  return current.slice(0, first) + newStr + current.slice(first + oldStr.length)
+  let edited
+  if (args.replace_all === true || args.replaceAll === true) {
+    edited = text.split(oldStr).join(newStr)
+  } else {
+    const second = text.indexOf(oldStr, first + oldStr.length)
+    if (second !== -1) return current // ambiguous: the real tool errors, nothing changes
+    edited = text.slice(0, first) + newStr + text.slice(first + oldStr.length)
+  }
+  // Normalised once more before expanding, as dsh's restoreLineEndings does: a lone
+  // `\r` meeting an inserted `\n` at the seam is one CRLF, not `\r\r\n`.
+  return crlfDominates(decoded) ? lf(edited).split('\n').join('\r\n') : edited
+}
+
+function lf(text) {
+  return text.replaceAll('\r\n', '\n')
+}
+
+/** dsh's own call (`detectLineEndings`): CRLF wins on a majority in the first 4096 chars. */
+function crlfDominates(raw) {
+  const sample = raw.slice(0, 4096)
+  const crlf = sample.split('\r\n').length - 1
+  return crlf > sample.split('\n').length - 1 - crlf
 }
 
 function firstString(...values) {
@@ -317,6 +377,22 @@ function positive(value, fallback) {
   if (!Number.isFinite(value)) return fallback
   const floored = Math.floor(value)
   return floored > 0 ? floored : fallback
+}
+
+/**
+ * The path the host's own file tools would touch for `p`, mirroring dsh's local
+ * backend (`localDisplayPath` in @deepseek-ai/dsh-fs-local): resolve against `cwd`,
+ * except that on POSIX a spelling with a `..` segment is kept as written, so a `..`
+ * after a symlinked segment stays physical — collapsing it could measure a different
+ * file than the one the write lands on. Without a session directory (`cwd`
+ * undefined), the process's is used, and only when `p` needs one: process.cwd()
+ * throws once that directory is deleted, and an absolute path must not care.
+ */
+function hostPath(cwd, p) {
+  const resolved = () => (cwd === undefined ? resolve(p) : resolve(cwd, p))
+  if (process.platform === 'win32') return resolved()
+  const raw = isAbsolute(p) ? p : `${cwd ?? process.cwd()}${sep}${p}`
+  return /(?:^|[\\/])\.\.(?:[\\/]|$)/u.test(raw) ? raw : resolved()
 }
 
 /**

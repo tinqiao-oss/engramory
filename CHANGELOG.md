@@ -4,6 +4,49 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
 — expect rough edges off Claude Code (see SKILL.md §8 / §9).
 
+## 0.12.2 — 2026-10-29
+
+- **On dsh 0.2, an edit through a relative path could grow the index past the cap.**
+  dsh 0.2 gave every session its own working directory and a `working_directory`
+  tool to move it, and its `write`/`edit` resolve a relative `file_path` against that
+  directory. The guard kept resolving against the process's cwd, so after a cd an
+  edit of a bare `MEMORY.md` found no current file to measure and went through: on
+  dsh 0.2.1-rc.2 the published 0.2.5 let one grow the index to 253 lines, and dsh
+  reported success. The same mismatch had the opposite effect on compaction — a
+  shrinking rewrite of an over-cap index was measured against an empty file and
+  refused. The guard now reads each session's directory from dsh's `workingDirectory`
+  service and resolves paths the way dsh's local backend does. The service is picked
+  up reactively, like the skill registry: `inject` is still `['tools']`, so the cap
+  never waits for it, and every 0.1.x release — which has no such service — keeps
+  resolving against the process's cwd as before. Nothing errored on the way in;
+  the end-to-end run caught it only because `working_directory` was a tool nobody had
+  classified, and working out what it did turned up the rest.
+- **On a CRLF index, an LF `old_string` slipped every edit past the guard** — on
+  every dsh release, not just 0.2. dsh's edit matches on LF-normalised text (file,
+  `old_string` and `new_string` alike) and writes the result back in the file's own
+  line endings; the guard matched the raw text. On a CRLF `MEMORY.md` — the usual
+  shape on Windows — the `old_string` a model sends was "not found", the guard
+  predicted no change, and dsh applied the edit. The simulation now normalises and
+  restores line endings the same way, and drops a leading BOM as dsh's decoder does,
+  so an edit is sized in the bytes dsh actually writes back. Found by cross-review of
+  the fix above, then reproduced on the real host.
+- **The end-to-end check covers both.** `tests/dsh_e2e/run.py` now writes a CRLF
+  index and edits it with an LF `old_string` on every release, and on a release that
+  offers `working_directory` it cds into the store and edits a bare `MEMORY.md`; each
+  must come back refused with the disk unchanged. `working_directory` is classified
+  in `REVIEWED_TOOLS`. Before the fix, the published 0.2.5 failed both on dsh
+  0.2.1-rc.2 and the CRLF one on 0.1.7-rc.1 as well. 0.2.6 passed on eleven releases
+  (Windows), each declared in `dsh.compatibility.dshReleases`: 0.1.5-rc.3,
+  0.1.7-alpha.1, 0.1.7-alpha.2, 0.1.7-rc.1, 0.1.7-rc.2, 0.2.1-alpha.5, 0.2.1-rc.1,
+  0.2.1-rc.2 (npm `latest`), 0.2.1-rc.3, 0.2.1-rc.4 (`next`) and 0.2.2-alpha.2
+  (`alpha`).
+- **The compatibility display range now reaches into 0.2** (`>=0.1.0-rc.7
+  <0.3.0-0`). dsh never reads it — from 0.2, `dsh plugin add` refuses a plugin whose
+  `engines.dsh` or `@deepseek-ai/dsh*` peers the running release does not satisfy,
+  and the plugin declares neither, on purpose: a range there would turn "nobody has
+  run it on this release yet" into a hard refusal.
+- dsh-engramory **0.2.6**.
+
 ## 0.12.1 — 2026-09-24
 
 - **"Installs and activates on current dsh builds" had last been checked on rc.7.**

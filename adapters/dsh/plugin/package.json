@@ -1,6 +1,6 @@
 {
   "name": "dsh-engramory",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Curated file-based long-term memory for DeepSeek Harness — human-readable markdown notes, one plain-file store shared across hosts (git-ignored when it lives inside a project repo), and a deterministic index cap enforced by ctx.tools.guard()",
   "keywords": [
     "dsh-plugin",
@@ -19,12 +19,19 @@
       "patch": "./cordis.patch.yml"
     },
     "compatibility": {
-      "dsh": ">=0.1.0-rc.7 <0.2.0-0",
+      "dsh": ">=0.1.0-rc.7 <0.3.0-0",
       "dshReleases": {
         "0.1.5-rc.3": "compatible",
         "0.1.7-alpha.1": "compatible",
         "0.1.7-alpha.2": "compatible",
-        "0.1.7-rc.1": "compatible"
+        "0.1.7-rc.1": "compatible",
+        "0.1.7-rc.2": "compatible",
+        "0.2.1-alpha.5": "compatible",
+        "0.2.1-rc.1": "compatible",
+        "0.2.1-rc.2": "compatible",
+        "0.2.1-rc.3": "compatible",
+        "0.2.1-rc.4": "compatible",
+        "0.2.2-alpha.2": "compatible"
       }
     }
   },

@@ -15,6 +15,11 @@ host, one dsh release at a time:
        write a 260-line MEMORY.md   -> refused by the guard, and no file appears,
        write a 3-line MEMORY.md     -> goes through, byte for byte,
        edit it up to 253 lines      -> refused by the guard, file unchanged,
+       write a CRLF 3-line index    -> goes through, byte for byte,
+       edit it with an LF old_string -> refused by the guard, file unchanged,
+     and, on a release that offers `working_directory` (dsh 0.2+),
+       cd into the store            -> the session's directory moves,
+       edit a bare "MEMORY.md"      -> refused by the guard, file unchanged,
      reading both what dsh reported to the model and the disk after every step;
   5. checks the skill was advertised and that every tool dsh offers is in
      REVIEWED_TOOLS (an unreviewed one could write files straight past the cap);
@@ -77,6 +82,9 @@ REVIEWED_TOOLS = {
     # session state, not files
     "todo_write": "state", "create_goal": "state", "get_goal": "state",
     "update_goal": "state", "exit_plan_mode": "state",
+    # moves the session's directory, which is where write/edit resolve a relative path
+    # (dsh 0.2): the guard has to resolve against it too — the cd steps below check that
+    "working_directory": "state",
 }
 # A reviewed non-writer whose schema grows both of these has changed nature.
 PATH_ARGS = {"file_path", "path", "filePath", "filename", "file", "target_file", "target"}
@@ -88,6 +96,7 @@ NETWORK_TROUBLE = re.compile(
 
 BIG = "".join("- [note %d](note-%d.md) - hook %d\n" % (i, i, i) for i in range(260))
 SMALL = "# Memory index\n- [a](a.md) - first\n- [b](b.md) - line-3\n"
+SMALL_CRLF = SMALL.replace("\n", "\r\n")
 GROW_FROM = "- [b](b.md) - line-3\n"
 GROW_TO = GROW_FROM + "".join("- [n%d](n%d.md) - grown %d\n" % (i, i, i) for i in range(250))
 UNSEEN = object()
@@ -250,7 +259,8 @@ def check_release(version, plugin, work, node, npm):
 
     prefix, home, ws = (os.path.join(work, d) for d in ("prefix", "home", "ws"))
     index = os.path.join(ws, "mem", "MEMORY.md")
-    for d in (prefix, home, os.path.dirname(index)):
+    crlf_index = os.path.join(ws, "crlf", "MEMORY.md")
+    for d in (prefix, home, os.path.dirname(index), os.path.dirname(crlf_index)):
         os.makedirs(d, exist_ok=True)
 
     code, out, err = run([npm, "install", "--prefix", prefix, "@deepseek-ai/dsh@" + version,
@@ -298,16 +308,29 @@ def check_release(version, plugin, work, node, npm):
     check("profile carries the engramory row", code == 0 and "id: engramory" in out,
           tail(err) if code != 0 else "")
 
+    # A CRLF index (common on Windows): dsh's edit matches on LF-normalised text and
+    # writes the result back as CRLF, so an LF old_string does find its lines.
+    #
+    # dsh 0.2 resolves a relative file_path against the session's working directory,
+    # which `working_directory` moves away from the process's own cwd (ws). After the
+    # cd, a bare "MEMORY.md" is the index — and, from ws, a file that does not exist.
+    # Releases without the tool stop after the CRLF steps.
+    cd = lambda body: ({"tool": "working_directory", "args": {"cd": os.path.dirname(index)}}  # noqa: E731
+                       if "working_directory" in tool_roster(body) else {"text": "done"})
     plan = [
         {"tool": "write", "args": {"file_path": index, "content": BIG}},
         {"tool": "write", "args": {"file_path": index, "content": SMALL}},
         {"tool": "edit", "args": {"file_path": index, "old_string": GROW_FROM, "new_string": GROW_TO}},
+        {"tool": "write", "args": {"file_path": crlf_index, "content": SMALL_CRLF}},
+        {"tool": "edit", "args": {"file_path": crlf_index, "old_string": GROW_FROM, "new_string": GROW_TO}},
+        cd,
+        {"tool": "edit", "args": {"file_path": "MEMORY.md", "old_string": GROW_FROM, "new_string": GROW_TO}},
         {"text": "done"},
     ]
-    seen = {}  # agent-loop request i -> the index file's bytes when it arrived
+    seen = {}  # agent-loop request i -> (index bytes, CRLF index bytes) when it arrived
 
     def observe(i, body):
-        seen[i] = read_bytes(index)
+        seen[i] = (read_bytes(index), read_bytes(crlf_index))
 
     with FakeLLM(plan, observe=observe) as fake:
         code, out, err = run(dsh + ["--profile", PROFILE, TASK], cwd=ws,
@@ -317,7 +340,7 @@ def check_release(version, plugin, work, node, npm):
                      if any(p.endswith("/chat/completions") for p in fake.paths) else None)
     # A timeout stays a `fail`: a plugin that never lets dsh finish booting (issue #8)
     # looks exactly like this.
-    if not check("headless task ran", code == 0 and len(fake.main) >= 4,
+    if not check("headless task ran", code == 0 and len(fake.main) >= 6,
                  "exit %s, %d model turns: %s" % (code, len(fake.main), tail(err or out))):
         return checks, facts
 
@@ -347,23 +370,38 @@ def check_release(version, plugin, work, node, npm):
 
     pairs = tool_results(fake.main[-1])
     results = dict(pairs)
-    small = SMALL.encode("utf-8")
+    small, small_crlf = SMALL.encode("utf-8"), SMALL_CRLF.encode("utf-8")
     got = lambda key: results.get(key, "<no result>")  # noqa: E731
+    disk = lambda i, which: seen.get(i, (UNSEEN, UNSEEN))[which]  # noqa: E731
+    shown = lambda i, which: ("%r" % (disk(i, which),))[:80]  # noqa: E731
+    moved = "working_directory" in rosters[5]  # the turn the cd step was decided on
     check("one tool result per step, matched by id",
-          [i for i, _ in pairs] == ["step0", "step1", "step2"],
+          [i for i, _ in pairs] == ["step%d" % n for n in range(7 if moved else 5)],
           "ids in order: %s" % [str(i) for i, _ in pairs])
     check("260-line write refused by the guard", DENIAL in got("step0"), tail(got("step0"), 160))
-    check("refused write left no file behind", seen.get(1, UNSEEN) is None,
-          "file existed when the next request came" if seen.get(1, UNSEEN) is not UNSEEN
+    check("refused write left no file behind", disk(1, 0) is None,
+          "file existed when the next request came" if disk(1, 0) is not UNSEEN
           else "never observed")
     check("3-line write allowed", "step1" in results and DENIAL not in got("step1"),
           tail(got("step1"), 160))
-    check("3-line write landed byte for byte", seen.get(2, UNSEEN) == small,
-          ("%r" % (seen.get(2, UNSEEN),))[:80])
+    check("3-line write landed byte for byte", disk(2, 0) == small, shown(2, 0))
     check("edit past the cap refused by the guard", DENIAL in got("step2"), tail(got("step2"), 160))
-    check("refused edit left the file unchanged", seen.get(3, UNSEEN) == small,
-          ("%r" % (seen.get(3, UNSEEN),))[:80])
-    check("nothing else wrote the index afterwards", read_bytes(index) == small)
+    check("refused edit left the file unchanged", disk(3, 0) == small, shown(3, 0))
+    check("CRLF write allowed", "step3" in results and DENIAL not in got("step3"),
+          tail(got("step3"), 160))
+    check("CRLF write landed byte for byte", disk(4, 1) == small_crlf, shown(4, 1))
+    check("LF edit of a CRLF index refused by the guard", DENIAL in got("step4"),
+          tail(got("step4"), 160))
+    check("refused LF edit left the CRLF index unchanged", disk(5, 1) == small_crlf, shown(5, 1))
+    if moved:
+        mem = os.path.normcase(os.path.realpath(os.path.dirname(index)))
+        check("working_directory moved the session to the store",
+              os.path.normcase(os.path.realpath(got("step5").strip())) == mem, tail(got("step5"), 160))
+        check("relative edit after cd refused by the guard", DENIAL in got("step6"),
+              tail(got("step6"), 160))
+        check("refused relative edit left the file unchanged", disk(7, 0) == small, shown(7, 0))
+    check("nothing else wrote the index afterwards",
+          read_bytes(index) == small and read_bytes(crlf_index) == small_crlf)
 
     code, out, err = run(dsh + ["plugin", "--profile", PROFILE, "remove", "dsh-engramory"],
                          cwd=work, env=quiet, timeout=600)

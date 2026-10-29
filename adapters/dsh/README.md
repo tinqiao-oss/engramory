@@ -87,14 +87,17 @@ Paths above are for the user-global install. A `--project-root` install puts the
 >
 > Profile installs work — rc.6's `ERR_PNPM_FETCH_404` on `@deepseek-ai/dsh-type-meta`
 > was fixed upstream in rc.7 — though `dsh plugin` still shells out to a `pnpm` you
-> must have on PATH. Install **`dsh-engramory` 0.2.1 or later**: 0.2.0 installed but
+> must have on PATH. Install **`dsh-engramory` 0.2.6 or later**: 0.2.0 installed but
 > never activated (issue #8 — a stale-Cordis `inject` declaration left it pending
-> forever), which the very first field install caught. Verified end to end on a live
-> rc.7 web profile at the time (0.2.0 reproduces the boot failure byte for byte, 0.2.1
-> boots and serves), and re-checked on Windows on 2026-09-24 against dsh 0.1.5-rc.3,
-> 0.1.7-alpha.1, 0.1.7-alpha.2 and 0.1.7-rc.1 with [`tests/dsh_e2e/`](../../tests/dsh_e2e/):
-> install, skill listed, writes and edits past the cap refused through dsh's real tool
-> pipeline, a small write let through, clean removal. The releases a run passed on are
+> forever), which the very first field install caught; and up to 0.2.5 an edit could
+> slip past the cap on a CRLF index (every dsh release), or on dsh 0.2 through a
+> relative path after a `working_directory` cd. Verified end to end on a live rc.7 web
+> profile at the time (0.2.0 reproduces the boot failure byte for byte, 0.2.1 boots
+> and serves), and re-checked on Windows on 2026-10-29 against eleven dsh releases from
+> 0.1.5-rc.3 to 0.2.2-alpha.2 with [`tests/dsh_e2e/`](../../tests/dsh_e2e/): install,
+> skill listed, writes and edits past the cap refused through dsh's real tool pipeline
+> — including an LF edit of a CRLF index and, on 0.2, a relative edit after a cd — a
+> small write let through, clean removal. The releases a run passed on are
 > declared in the plugin's `package.json` (`dsh.compatibility.dshReleases`); anything
 > newer is unchecked until a run says otherwise. See [plugin/README.md](plugin/README.md).
 

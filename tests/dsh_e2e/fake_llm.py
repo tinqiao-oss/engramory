@@ -27,8 +27,10 @@ from urllib.parse import urlsplit
 class FakeLLM:
     """Serve `plan` on 127.0.0.1 until the `with` block exits.
 
-    Each step is `{"text": "..."}` or `{"tool": "<name>", "args": {...}}`; once the
-    plan runs out every reply is `{"text": "done"}`. Tool calls carry the id
+    Each step is `{"text": "..."}` or `{"tool": "<name>", "args": {...}}`, or a
+    function of the request body returning one — for a step that only makes sense on
+    a release offering some tool. Once the plan runs out every reply is
+    `{"text": "done"}`. Tool calls carry the id
     `step<N>` (N = the step's index), so results can be matched by id rather than by
     position. `main` collects the agent-loop request bodies in order, `paths` every
     POST path (which tells you the wire format), and `observe(i, body)` — if given —
@@ -68,7 +70,8 @@ class FakeLLM:
             i = len(self.main) - 1
             if self.observe is not None:
                 self.observe(i, body)
-        return i, (self.plan[i] if i < len(self.plan) else {"text": "done"})
+        step = self.plan[i] if i < len(self.plan) else {"text": "done"}
+        return i, (step(body) if callable(step) else step)
 
 
 def _handler(fake):

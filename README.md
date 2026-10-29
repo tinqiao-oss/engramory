@@ -29,7 +29,7 @@ itself stays git-ignored).
 > already exists, what you must not touch, and what to tell the user — the parts
 > agents reliably get wrong when improvising.
 
-> **Status: 0.12.1 — experimental.** The hard index cap (a `PreToolUse` hook) is
+> **Status: 0.12.2 — experimental.** The hard index cap (a `PreToolUse` hook) is
 > deterministic for the matched direct-edit tools (`Edit | Write | MultiEdit`) but
 > NOT a global write guard (shell tools — Bash, PowerShell, a background Monitor
 > command — plus MCP file tools, external editors, and sync clients bypass it);
@@ -326,9 +326,10 @@ file tools resolve relative paths against the session cwd); a project block stay
 relative so the repo can move. The index cap from those steps is rules + `engramory_check.py`,
 **not** a deterministic deny hook — though [`adapters/dsh/plugin/`](adapters/dsh/plugin/)
 (`dsh-engramory`) implements one against `ctx.tools.guard()`, whose refusal is monotonic.
-Install **0.2.1 or later**: dsh's preview-era "cannot install third-party plugins"
-bug is fixed upstream (rc.7), and 0.2.0 installs but never activates (issue #8 —
-older-Cordis `inject` syntax).
+Install **0.2.6 or later**: dsh's preview-era "cannot install third-party plugins"
+bug is fixed upstream (rc.7), 0.2.0 installs but never activates (issue #8 —
+older-Cordis `inject` syntax), and up to 0.2.5 an edit could slip past the cap on a
+CRLF index, or on dsh 0.2 through a relative path after a `working_directory` cd.
 
 Wiring *and* model behavior were dogfooded against `deepseek-v4-flash`: the block arrives
 as a `<system-reminder>`, a question answerable only from a stored note made the model open
@@ -347,9 +348,9 @@ wire the size cap at the strongest rung the host supports: PreToolUse hook →
 `tools/engramory_check.py` after each index write → model discipline, with
 `tools/engramory_doctor.py` as a periodic backstop. A deterministic cap needs a
 pre-write *deny* hook. Claude Code's is written, tested, and RUNNING here; dsh's shim
-(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.1+) installs and activates — last
-re-checked end to end on Windows on 2026-09-24 against four dsh releases (0.1.5-rc.3
-and three from the 0.1.7 line), each one declared in its `package.json` — while 0.2.0 never activated
+(`adapters/dsh/plugin/`, `dsh-engramory` 0.2.6+) installs and activates — last
+re-checked end to end on Windows on 2026-10-29 against eleven dsh releases from 0.1.5-rc.3 to 0.2.2-alpha.2, each one declared in its
+`package.json` — while 0.2.0 never activated
 (issue #8); some other hosts
 expose an equivalent seam too (Hermes; Cursor, though its is newer/flaky), so the cap is portable with
 a per-host I/O shim you write and verify yourself — while OpenClaw can only block via a
