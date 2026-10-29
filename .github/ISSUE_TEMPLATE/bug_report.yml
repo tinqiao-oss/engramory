@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in the hook, the tools, or the doctor isn't behaving as documented.
+description: Something in the hooks, the dsh plugin, the installer, or the tools isn't behaving as documented.
 labels: [bug]
 body:
   - type: markdown
@@ -19,9 +19,14 @@ body:
     attributes:
       label: Component
       options:
-        - hook (engramory_index_guard.py)
+        - hook — Claude Code (engramory_index_guard.py)
+        - hook — Codex (hooks/codex)
+        - dsh plugin (dsh-engramory)
+        - installer — engramory_init.py (incl. --uninstall)
         - tool — engramory_doctor.py
         - tool — engramory_check.py
+        - tool — engramory_sync.py / engramory_trace.py
+        - protocol text (SKILL.md / rules-snippet.md)
         - docs / templates
         - other
     validations:
@@ -30,8 +35,8 @@ body:
     id: host
     attributes:
       label: Host / agent
-      description: e.g. Claude Code, Cursor, Cline, Codex, Windsurf, or a plain script.
-      placeholder: Claude Code 2.x
+      description: e.g. Claude Code, Codex, dsh (DeepSeek Harness), Cursor, Kiro, or a plain script — with its version.
+      placeholder: dsh 0.2.1-rc.2
     validations:
       required: true
   - type: input
@@ -42,20 +47,21 @@ body:
     validations:
       required: true
   - type: input
-    id: python
+    id: runtime
     attributes:
-      label: Python version
-      description: Output of `python --version`.
-      placeholder: "3.12.3"
+      label: Runtime version
+      description: "`python --version` for the hooks and tools; `node --version` and the dsh-engramory version for the dsh plugin."
+      placeholder: "Python 3.12.3 / Node 24.11.1 + dsh-engramory 0.2.7"
     validations:
       required: true
   - type: textarea
     id: hook_payload
     attributes:
-      label: For a HOOK bug — the tool_input payload + index state
+      label: For a HOOK or dsh-plugin bug — the tool call + index state
       description: >
-        The `tool_input` JSON the hook received, plus the index it was gating
-        (line count / bytes of MEMORY.md). This is what makes a hook gating bug reproducible.
+        The `tool_input` JSON the hook received (for the dsh plugin: the tool name and its
+        arguments), plus the index it was gating (line count / bytes of MEMORY.md, and
+        whether it is a symlink or a special file). This is what makes a gating bug reproducible.
       render: json
     validations:
       required: false
