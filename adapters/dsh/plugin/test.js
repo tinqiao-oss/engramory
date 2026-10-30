@@ -1328,7 +1328,9 @@ test('companion mode: a store linked to a place that is not there yet cannot be 
   assert.match(reason, /closed to it/)
 })
 
-test('companion mode: a network $DSH_HOME is not walked for a stranger, only refused', () => {
+test('companion mode: a network $DSH_HOME is not walked for a stranger, only refused', (t) => {
+  // `\\host\share` names a network share only on Windows; elsewhere it is a relative path
+  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const started = Date.now()
   const reason = withDshHome('\\\\no-such-host.invalid\\share\\.dsh', () => guard({ name: 'read',
