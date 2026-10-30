@@ -96,6 +96,42 @@ def test_root_discovery_manifest_stays_in_step_with_the_plugin():
         os.path.join(PLUGIN, plugin["dsh"]["bundle"]["patch"]))
 
 
+def test_one_version_number_for_the_repo_and_the_plugin():
+    """From 1.0.0 the repo and the plugin are one release under one number.
+
+    Two numbers drifted apart before: the root manifest showed the plugin's version
+    while the README showed the repo's, and a plugin bump (0.2.4) never reached npm.
+    The plugin's package.json is the number npm gets; the root manifest, the newest
+    CHANGELOG heading and both READMEs' status lines must say the same, so a release
+    cannot bump one and forget the rest.
+    """
+    import json
+    import re
+
+    root_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+
+    def read(name):
+        with open(os.path.join(root_dir, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def first(pattern, text):
+        m = re.search(pattern, text, re.M)
+        return m.group(1) if m else None
+
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        version = json.load(fh)["version"]
+    # each captures the whole version token, so `1.0.0-rc.1` is not read as `1.0.0`;
+    # the CHANGELOG's is its first section heading, whatever its form, never a later one
+    found = {
+        "package.json (root)": json.loads(read("package.json"))["version"],
+        "CHANGELOG.md": first(r"^## (\S+)", read("CHANGELOG.md")),
+        "README.md": first(r"\*\*Status: (\S+?)\.\*\*", read("README.md")),
+        "README.zh-CN.md": first(r"\*\*状态[:：]\s*(\S+?)。\*\*", read("README.zh-CN.md")),
+    }
+    wrong = {k: v for k, v in found.items() if v != version}
+    assert not wrong, "not %s, the plugin's version: %s" % (version, wrong)
+
+
 def test_the_translated_readme_documents_the_same_config_fields():
     """A second README is a drift point; the config table is the part users act on.
 

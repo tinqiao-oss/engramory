@@ -703,9 +703,11 @@ For behaviour you want truly always-on (e.g. "always check memory at the start o
 a task"), put a one-line pointer in your host's always-loaded rules — Claude Code:
 `CLAUDE.md` or `~/.claude/CLAUDE.md`. A ready snippet is in `rules-snippet.md`.
 
-This is why Engramory is **0.x / experimental**: the hard cap is deterministic only
-for the matched direct-edit tools (not a global write guard), and the discipline is
-only as reliable as your host loading the rules plus the model following them.
+The version number does not lift these limits. From 1.0 the store format and the
+index caps change incompatibly only in a major version, but the hard cap is still
+deterministic only for the matched direct-edit tools (not a global write guard), and
+the discipline is still only as reliable as your host loading the rules plus the model
+following them.
 
 **Concurrency.** Engramory assumes a **single writer / serialized writes**. The hook
 reads the index, predicts, then decides — there is no locking, so two agents

@@ -1,6 +1,6 @@
 # Security Policy
 
-Engramory is an experimental (0.x) local developer tool: a discipline plus a
+Engramory is a local developer tool: a discipline plus a
 Claude Code index hook, optional Codex lifecycle hooks, a dsh guard plugin
 (`adapters/dsh/plugin/`, same size-nudge role as the Claude Code hook — a
 discipline rail, not a security control), and local helper
@@ -13,8 +13,8 @@ Please **do not** open a public issue for a security-sensitive report. Instead:
 - Open a private GitHub Security Advisory on this repository, **or**
 - Email **support@tinqiao.com** with details and a minimal repro.
 
-We aim to acknowledge within a few business days. As a 0.x project there is no
-formal SLA, but we take memory-content and hook-safety issues seriously.
+We aim to acknowledge within a few business days. There is no formal SLA, but we
+take memory-content and hook-safety issues seriously.
 
 ## Scope & threat model
 

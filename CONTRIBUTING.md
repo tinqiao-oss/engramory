@@ -1,6 +1,6 @@
 # Contributing to Engramory
 
-Thanks for your interest. Engramory is a small, experimental (0.x) project — a
+Thanks for your interest. Engramory is a small project — a
 *discipline* for agent memory, not a framework — so contributions are best kept
 focused and well-tested.
 
@@ -11,8 +11,11 @@ focused and well-tested.
   npm packages).
 - The repo-root `package.json` is a DISCOVERY manifest only (registry crawlers
   verify `dsh.bundle` at the root); it is `private: true` and never published.
-  When bumping the plugin, bump root and plugin together —
-  `tests/test_dsh_plugin.py` pins them in step.
+  One version number covers the repo and the plugin (README, *Versioning*): a
+  release bumps the plugin's `package.json`, this root one, the newest CHANGELOG
+  heading and both READMEs' status lines together — `tests/test_dsh_plugin.py` pins
+  them in step — and is tagged `vX.Y.Z` and published to npm as the same `X.Y.Z`,
+  even when only one side changed.
 - The load-bearing code is `hooks/engramory_index_guard.py` (the Claude Code
   PreToolUse cap), `hooks/codex/engramory_codex_hook.py` (Codex lifecycle
   assistance), `adapters/dsh/plugin/index.js` (the dsh cap guard), and the portable

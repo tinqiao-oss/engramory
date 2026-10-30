@@ -1,8 +1,38 @@
 # Changelog
 
 All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0–
-0.1.2 predate the 0.1.3 history consolidation). This is an experimental 0.x project
-— expect rough edges off Claude Code (see SKILL.md §8 / §9).
+0.1.2 predate the 0.1.3 history consolidation). From 1.0.0 the repo and the dsh plugin
+(`dsh-engramory` on npm) share one version number, and README's *Versioning* section
+says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
+Code and dsh, expect rough edges (see SKILL.md §8 / §9).
+
+## 1.0.0 — 2026-10-30
+
+- **One version number for the repo and the dsh plugin.** This release is Engramory
+  1.0.0 and `dsh-engramory` 1.0.0 — the plugin jumps from 0.3.0 to join the repo's
+  numbering — and every release from here is tagged `vX.Y.Z` and published to npm as
+  the same `X.Y.Z`, even when only one side changed; its section here says which. The
+  two numbers had drifted apart in practice: the root discovery manifest showed the
+  plugin's version while the README showed the repo's, and plugin 0.2.4, bumped with
+  0.10.1's protocol fix, never reached npm — users got that fix with 0.2.5, 24 days
+  later.
+- **What 1.0 promises** (README, *Versioning*). The store format, the scripts in
+  `tools/` and where `engramory_init.py` puts a store, the Claude Code and Codex hooks,
+  and the dsh plugin's index cap and its settings `indexName`, `maxLines`, `maxBytes`,
+  `indexPath`, `registerSkill`, `injectIndex`, `language` and `skill` change
+  incompatibly only in a major version. dsh's companion mode with the types `moment` /
+  `upcoming` / `self`, social mode with its file refusals and the bridge `speaker`
+  stamp, and the settings and memory pages are experimental and may change in a minor
+  version. A security fix
+  may change what an unsafe configuration does in any release, and says so here. The
+  limits are what they were (SKILL.md §8): the guards cover the matched file tools
+  only, and curation is model-followed.
+- **The number is checked.** `tests/test_dsh_plugin.py` fails when the plugin's
+  `package.json`, the root manifest, the newest heading here and either README's
+  status line disagree.
+- No change in behaviour: the plugin's code is 0.3.0's (same runtime digest), recorded
+  again end to end on the 12 dsh releases it declares.
+- dsh-engramory **1.0.0**.
 
 ## 0.13.0 — 2026-10-30
 
@@ -174,6 +204,7 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   another project's store, a
   stray argument standing in for a search root, subagents stranded after a restart, unbounded sync I/O on long paths, and the
   skill telling a companion conversation that a greeting gets no recall.
+- dsh-engramory **0.3.0**.
 
 ## 0.12.4 — 2026-10-29
 

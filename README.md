@@ -23,7 +23,9 @@ The files are human-readable and editable; the live store stays git-ignored.
 > **[AGENT-SETUP.md](AGENT-SETUP.md)** to assess the host, existing stores, safe
 > setup, and what you can honestly report as active.
 
-> **Status: 0.13.0 — experimental.** Claude Code's `PreToolUse` hook provides the
+> **Status: 1.0.0.** The store format, the tools and the index caps now change
+> incompatibly only in a major version ([versioning](#versioning)); what they cover
+> has not changed. Claude Code's `PreToolUse` hook provides the
 > hard index cap for matched direct-edit tools (`Edit | Write | MultiEdit`); the
 > `dsh-engramory` plugin is the second, for dsh's file tools. Shell tools (Bash, PowerShell, background Monitor commands), MCP file tools,
 > external editors, and sync clients bypass the guards. Model-followed curation
@@ -292,6 +294,33 @@ its contents off-machine.
 No hook scans memory content for secrets. This is best-effort discipline; see
 [SKILL.md](SKILL.md) §5/§8 and [SECURITY.md](SECURITY.md).
 
+## Versioning
+
+One number for everything: from 1.0.0 the repo's tag `vX.Y.Z` and the npm package
+`dsh-engramory@X.Y.Z` are one release, published together even when only one side
+changed (the [CHANGELOG](CHANGELOG.md) says which). Before 1.0 the plugin had its own
+numbers (0.1.0–0.3.0).
+
+From 1.0, these change incompatibly only in a major version:
+
+- **The store format:** the layout (`MEMORY.md`, one note per file, `archive/`), the
+  frontmatter keys, the four types and what each requires, and the index's headings
+  and pointer lines, in English and in Chinese.
+- **The tools:** the scripts in `tools/` (their commands and options, and where
+  `engramory_init.py` puts a store), and the Claude Code and Codex hooks.
+- **The dsh plugin:** its package name, the index cap's decisions (the table in its
+  README), and the settings
+  `indexName`, `maxLines`, `maxBytes`, `indexPath`, `registerSkill`, `injectIndex`,
+  `language` and `skill`.
+
+Experimental, and may change in a minor version: dsh's companion mode (`companion`)
+with the types `moment` / `upcoming` / `self`, social mode (`audience`) with the file
+refusals it adds and the bridge `speaker` stamp, and the plugin's settings and memory
+pages. The protocol's wording is
+revised in any release; a rule that would make a valid store invalid waits for a major
+version. A security fix may change what an unsafe configuration does in any release,
+and its CHANGELOG entry says so, as 0.13.0's `indexName` fallback did.
+
 ## Known limitations
 
 **Exactly two hosts have a deterministic pre-write deny written, tested, and
@@ -303,8 +332,10 @@ a seam — Hermes, Cursor, OpenClaw via `before_tool_call`, and Kiro CLI — are
 for the authoritative host picture; shell, MCP, and external-editor writes bypass
 every guard.
 
-- **Versioning / migration:** the semantic store has no `schema_version` or
-  defined upgrade path. Codex's versioned bookkeeping contains no memory.
+- **Versioning / migration:** the store carries no `schema_version`, and nothing
+  upgrades one automatically: a format change that would invalidate existing stores
+  waits for a major version ([Versioning](#versioning)), with the steps to migrate in
+  the CHANGELOG. Codex's versioned bookkeeping contains no memory.
 - **Provenance / trust:** no `source`, `confidence`, `last_verified`, expiry, or
   `superseded-by` fields. Recalled memory is advisory, unauthenticated, and
   attacker-influenceable ([SKILL.md](SKILL.md) §4).

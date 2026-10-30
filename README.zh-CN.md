@@ -15,7 +15,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent 吗?** 先读 **[AGENT-SETUP.md](AGENT-SETUP.md)**,判断宿主能力、已有记忆库、安全安装方式,以及哪些功能确实可以汇报为已启用。
 
-> **状态:0.13.0 —— 实验性。** Claude Code 的 `PreToolUse` hook 为匹配的直接编辑工具(`Edit|Write|MultiEdit`)提供硬性索引上限;`dsh-engramory` 插件是第二个,管 dsh 的文件工具。shell 工具(Bash、PowerShell、后台 Monitor 命令)、MCP 文件工具、外部编辑器和同步程序都能绕过防护。策展仍靠模型遵守规则,只能尽力而为;这还不是强制、可靠的跨 agent 记忆层。见[宿主覆盖范围](PORTING.md)和[协议局限](SKILL.md)。
+> **状态:1.0.0。** 记忆库格式、工具和索引上限从此只在主版本升级时才做不兼容的改动(见[版本规则](#版本规则));它们能管到的范围没有变。Claude Code 的 `PreToolUse` hook 为匹配的直接编辑工具(`Edit|Write|MultiEdit`)提供硬性索引上限;`dsh-engramory` 插件是第二个,管 dsh 的文件工具。shell 工具(Bash、PowerShell、后台 Monitor 命令)、MCP 文件工具、外部编辑器和同步程序都能绕过防护。策展仍靠模型遵守规则,只能尽力而为;这还不是强制、可靠的跨 agent 记忆层。见[宿主覆盖范围](PORTING.md)和[协议局限](SKILL.md)。
 
 ---
 
@@ -168,11 +168,23 @@ python tools/engramory_init.py codex --uninstall             # 执行
 
 没有 hook 扫描记忆中的秘密。这只能靠纪律尽力而为;见 [SKILL.md](SKILL.md) §5/§8 和 [SECURITY.md](SECURITY.md)。
 
+## 版本规则
+
+全部用一个版本号:从 1.0.0 起,仓库的 tag `vX.Y.Z` 和 npm 包 `dsh-engramory@X.Y.Z` 是同一次发布,哪怕只有一边有改动也一起发([CHANGELOG](CHANGELOG.md) 会写明改了哪边)。1.0 之前插件有自己的编号(0.1.0–0.3.0)。
+
+从 1.0 起,下面这些只在主版本升级时才做不兼容的改动:
+
+- **记忆库格式:**目录结构(`MEMORY.md`、一条笔记一个文件、`archive/`)、frontmatter 字段、四种类型及各自的必填项、索引的标题和指针行,中英文都算。
+- **工具:**`tools/` 下的脚本(命令和参数,以及 `engramory_init.py` 把记忆库放在哪里),还有 Claude Code 和 Codex 的 hook。
+- **dsh 插件:**包名、索引上限的判定(插件 README 里的判定表),以及 `indexName`、`maxLines`、`maxBytes`、`indexPath`、`registerSkill`、`injectIndex`、`language`、`skill` 这些配置。
+
+以下仍是实验性的,小版本里也可能改:dsh 的大肥鱼模式(`companion`)及 `moment` / `upcoming` / `self` 三种类型、社交模式(`audience`)及它附加的文件拒绝和桥接插件的 `speaker` 来源章,以及插件的设置页和记忆页。协议的措辞每次发布都可能修订;会让原本合格的记忆库变得不合格的规则,要等主版本。安全修复可能在任何一次发布里改变不安全配置的行为,CHANGELOG 会写明,0.13.0 里 `indexName` 的回落就是一例。
+
 ## 已知局限
 
 **恰好两个宿主有已编写、测试且在运行的确定性写前拒绝:**Claude Code([`hooks/engramory_index_guard.py`](hooks/engramory_index_guard.py))和 dsh([`dsh-engramory >= 0.2.7`](adapters/dsh/plugin/README.zh-CN.md))。其他宿主都靠规则 + `engramory_check.py` + doctor,尽力而为。即便已暴露接口——Hermes、Cursor、通过 `before_tool_call` 的 OpenClaw、Kiro CLI——也只是**原则上可移植,这里尚未编写或验证**。权威宿主说明见 [PORTING.md](PORTING.md);shell、MCP 和外部编辑器写入能绕过所有防护。
 
-- **版本 / 迁移:**语义记忆库没有 `schema_version` 或已定义的升级路径。Codex 带版本号的同步记录不含记忆。
+- **版本 / 迁移:**记忆库不带 `schema_version`,也没有任何东西会自动升级它:会让现有记忆库失效的格式改动要等主版本(见[版本规则](#版本规则)),迁移步骤写在 CHANGELOG 里。Codex 带版本号的同步记录不含记忆。
 - **来源 / 可信度:**没有 `source`、`confidence`、`last_verified`、过期或 `superseded-by` 字段。召回内容只供参考、未经鉴权,可能受攻击者影响([SKILL.md](SKILL.md) §4)。
 - **作用域 / 多项目:**可选 `scope: global | repo` 由 doctor 校验,但没有 `project_id`;扁平 slug 命名空间可能碰撞、串项目。包含协议版本、作用域、宿主配置的库级 manifest 仍是计划,尚未实现。
 - **并发:**采用[单写者、多读者](adapters/reader/README.md);Codex 的同步记录锁不保护语义笔记和索引写入。

@@ -260,6 +260,16 @@ Relative paths use the session's `workingDirectory` service when available,
 falling back to the process cwd. Edits match LF-normalised text and preserve the
 file's line endings when sizing the result, including CRLF bytes.
 
+## Versions
+
+This package carries Engramory's version: from 1.0.0, `dsh-engramory@X.Y.Z` is the
+same release as the repo's tag `vX.Y.Z` (before, it had its own numbers, 0.1.0–0.3.0).
+Companion mode, social mode (its file refusals and the `speaker` stamp included), and
+the settings and memory pages are experimental and may change in a minor version; the
+index cap's decisions (the table above) and the other settings change incompatibly only
+in a major one. Details in Engramory's
+[Versioning](https://github.com/tinqiao-oss/engramory#versioning).
+
 ## Known limits
 
 - **Unsimulable partial edits can cross the cap from below.** On a readable,
