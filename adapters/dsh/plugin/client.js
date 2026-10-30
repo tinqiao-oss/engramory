@@ -1,8 +1,7 @@
 /**
  * dsh-engramory, browser half: the settings page behind the Configure control on the
- * Plugins page. It edits the language and companion settings — which presets are a
- * companion (大肥鱼模式), which conversations are the user's own — through the routes
- * index.js registers, so nobody pastes session ids into YAML.
+ * Plugins page. It edits the language, companion mode (大肥鱼模式) and the index cap
+ * through the route index.js registers.
  *
  * Plain script, no build step, like index.js: React comes from the page's module table,
  * no Harness client package is loaded as a module (dsh's guidance — they change without
@@ -25,7 +24,7 @@ window.__ModuleLoader__.load({
     const DEFAULT_BYTES = 25600
 
     const zh = {
-      summary: '记忆用哪种语言写、大肥鱼模式，以及哪些会话是你自己的。',
+      summary: '记忆用哪种语言写、大肥鱼模式，以及索引上限。',
       loading: '正在读取设置…',
       loadFailed: '读不到设置。',
       retry: '重试',
@@ -36,24 +35,8 @@ window.__ModuleLoader__.load({
       languageEn: 'English',
       languageZh: '中文',
       companion: '大肥鱼模式',
-      companionHint: '勾选哪些人设是陪伴角色。用了这些人设的会话会多记三类：经历、约定、我自己；不是你自己的会话拿不到你的记忆。',
-      presetsNone: '还没有可选的人设。',
-      presetsUnavailable: '这个 dsh 列不出人设，可以手动填人设的 id。',
-      presetMissing: '未找到',
-      owners: '你自己的会话',
-      ownersHint: '打开「这是我」的会话拿得到你的全部记忆；别的大肥鱼会话拿不到。把群聊加进来，群里每个人都碰得到你的记忆。',
-      ownersNeedPreset: '先在上面勾选大肥鱼的人设，这里才会列出它们的会话。',
-      ownersEmpty: '还没有用这些人设的会话。',
-      sessionsUnavailable: '这个 dsh 列不出会话，只能手动填会话 ID。',
-      mine: '这是我',
-      byPrefix: '按前缀',
-      created: '创建于',
-      active: '最近活动',
-      otherIds: '名单里的其他会话 ID 和前缀',
-      addId: '会话 ID，或以 * 结尾的前缀',
-      addPreset: '人设 id',
-      add: '添加',
-      remove: '移除',
+      companionHint: '别人也能跟你的 AI 聊天时打开，比如接了 QQ、微信、抖音。打开后，只有你在 dsh 窗口里亲手发过消息、又没有别人说过话的对话，才用得上你的记忆；接入插件转进来的、外部程序和自动化任务开的对话都算别人的，一点记忆都拿不到。只有你自己用，就保持关闭。',
+      companionNote: '一段对话里只要出现过别人的消息，就一直算别人的。接入插件可以按 Engramory 的标准把你本人的消息标出来（比如你自己的 QQ 私聊），写法见插件说明。',
       cap: '索引上限',
       capHint: '记忆目录超过这个大小时，AI 的写入会被拒绝，要先压缩。默认 200 行 / 25600 字节。',
       capLines: '行',
@@ -70,7 +53,7 @@ window.__ModuleLoader__.load({
       failed: '保存失败：',
     }
     const en = {
-      summary: 'Which language the memory is written in, companion mode (大肥鱼模式), and which conversations are your own.',
+      summary: 'Which language the memory is written in, companion mode (大肥鱼模式), and the index cap.',
       loading: 'Reading the settings…',
       loadFailed: 'Could not read the settings.',
       retry: 'Retry',
@@ -81,24 +64,8 @@ window.__ModuleLoader__.load({
       languageEn: 'English',
       languageZh: '中文',
       companion: 'Companion mode (大肥鱼模式)',
-      companionHint: 'Tick the presets that are a companion character. Their conversations keep three more kinds of note — moments, plans, the character itself — and one that is not yours gets none of your memory.',
-      presetsNone: 'There are no presets to choose from yet.',
-      presetsUnavailable: 'This dsh cannot list its presets; type a preset id instead.',
-      presetMissing: 'not found',
-      owners: 'Your own conversations',
-      ownersHint: 'A conversation marked “This is me” gets all of your memory; any other companion conversation gets none. Listing a group chat lets everyone in it reach your memory.',
-      ownersNeedPreset: 'Tick a companion preset above to list its conversations here.',
-      ownersEmpty: 'No conversation runs these presets yet.',
-      sessionsUnavailable: 'This dsh cannot list its conversations; type a session id instead.',
-      mine: 'This is me',
-      byPrefix: 'by prefix',
-      created: 'created',
-      active: 'active',
-      otherIds: 'Other listed session ids and prefixes',
-      addId: 'A session id, or a prefix ending in *',
-      addPreset: 'Preset id',
-      add: 'Add',
-      remove: 'Remove',
+      companionHint: 'Turn it on when other people can talk to your AI too — through QQ, WeChat or Douyin, say. Then only a conversation you have written in, in dsh’s own window, and nobody else has, gets your memory; one a chat bridge, a program or an automation opened counts as someone else’s and gets none of it. If only you use this dsh, leave it off.',
+      companionNote: 'A conversation stays someone else’s once anyone else has written in it. A chat bridge can mark your own messages (your own QQ chat, say) by the Engramory standard the plugin README describes.',
       cap: 'Index cap',
       capHint: 'Past this size the AI’s writes to the memory index are refused until it compacts. The default is 200 lines / 25600 bytes.',
       capLines: 'lines',
@@ -119,6 +86,7 @@ window.__ModuleLoader__.load({
 .eng-page{display:flex;flex-direction:column;gap:18px;font-size:13px;line-height:1.55;color:var(--dsw-alias-label-primary);max-width:760px;}
 .eng-section{display:flex;flex-direction:column;gap:8px;}
 .eng-title{font-size:14px;font-weight:600;margin:0;}
+.eng-heading{display:flex;align-items:center;gap:10px;}
 .eng-hint{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary);}
 .eng-note{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary);}
 .eng-banner{padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);font-size:12px;}
@@ -127,27 +95,11 @@ window.__ModuleLoader__.load({
 .eng-segment{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);align-self:flex-start;}
 .eng-segment button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:6px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;}
 .eng-segment button[aria-pressed="true"]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12);}
-.eng-list{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden;}
-.eng-row{display:flex;align-items:center;gap:12px;padding:8px 12px;min-width:0;}
-.eng-row + .eng-row{border-top:1px solid var(--dsw-alias-border-l1);}
-.eng-row:hover{background:var(--dsw-alias-interactive-bg-hover);}
-.eng-row-main{display:flex;flex-direction:column;min-width:0;flex:1;}
-.eng-row-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.eng-row-sub{font-size:11px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.eng-row-side{display:flex;align-items:center;gap:8px;flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);}
-.eng-check{display:flex;align-items:center;gap:8px;cursor:pointer;}
-.eng-check input{margin:0;accent-color:var(--dsw-alias-brand-primary);}
 .eng-switch{position:relative;width:32px;height:18px;border-radius:999px;border:0;padding:0;cursor:pointer;background:var(--dsw-alias-border-l2);flex:none;}
 .eng-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary);}
 .eng-switch:disabled{opacity:.5;cursor:default;}
 .eng-switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-switch-thumb,#fff);transition:transform .15s ease;}
 .eng-switch[aria-checked="true"]::after{transform:translateX(14px);}
-.eng-chips{display:flex;flex-wrap:wrap;gap:6px;}
-.eng-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 8px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);font-size:12px;max-width:100%;}
-.eng-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.eng-chip button{border:0;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;border-radius:999px;width:18px;height:18px;padding:0;font:inherit;line-height:18px;}
-.eng-chip button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}
-.eng-add{display:flex;gap:6px;}
 .eng-input{border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:inherit;padding:5px 9px;font:inherit;font-size:12px;outline:none;min-width:0;}
 .eng-input:focus{border-color:var(--dsw-alias-brand-primary);}
 .eng-input[aria-invalid="true"]{border-color:var(--dsw-alias-state-error-primary);}
@@ -160,14 +112,12 @@ window.__ModuleLoader__.load({
 .eng-btn-primary{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));border-color:transparent;color:var(--dsw-alias-label-primary-foreground,#fff);}
 .eng-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));opacity:.9;}
 .eng-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-.eng-mono{font-family:var(--dsw-font-mono,ui-monospace,monospace);}
 `
 
     /** The settings the page edits, in the order the host computes its revision from. */
     const settingsOf = (data) => ({
       language: data.language === 'zh' ? 'zh' : 'en',
-      companionPresets: [...data.companionPresets],
-      ownerSessions: [...data.ownerSessions],
+      companion: data.companion === true,
       maxLines: data.maxLines,
       maxBytes: data.maxBytes,
     })
@@ -178,10 +128,6 @@ window.__ModuleLoader__.load({
         ? value
         : undefined
     }
-    const isPrefix = (entry) => entry.endsWith('*')
-    const matchesPrefix = (entry, id) => isPrefix(entry) && id.startsWith(entry.slice(0, -1))
-    const without = (list, value) => list.filter((v) => v !== value)
-    const withValue = (list, value) => (list.includes(value) ? list : [...list, value])
 
     /** fetch with a deadline: a request the host never answers must not hold the page busy. */
     async function request(init = {}) {
@@ -212,30 +158,6 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function Chips({ items, t, onRemove, disabled }) {
-      if (items.length === 0) return null
-      return h('div', { className: 'eng-chips' }, items.map((item) => h('span', { className: 'eng-chip', key: item },
-        h('span', { className: 'eng-mono', title: item }, item),
-        h('button', { type: 'button', 'aria-label': `${t('remove')} ${item}`, title: t('remove'), disabled,
-          onClick: () => onRemove(item) }, '×'))))
-    }
-
-    function AddField({ placeholder, t, disabled, onAdd }) {
-      const [text, setText] = useState('')
-      const submit = () => {
-        const value = text.trim()
-        if (!value) return
-        onAdd(value)
-        setText('')
-      }
-      return h('div', { className: 'eng-add' },
-        h('input', { className: 'eng-input eng-mono', value: text, placeholder, disabled, style: { flex: 1 },
-          onChange: (e) => setText(e.target.value),
-          onKeyDown: (e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing) submit() } }),
-        h('button', { type: 'button', className: 'eng-btn', disabled: disabled || !text.trim(), onClick: submit },
-          t('add')))
-    }
-
     function LanguageSection({ draft, t, disabled, update }) {
       const option = (value, label) => h('button', {
         type: 'button', 'aria-pressed': draft.language === value, disabled,
@@ -248,82 +170,14 @@ window.__ModuleLoader__.load({
         h('p', { className: 'eng-hint' }, t('languageHint')))
     }
 
-    function PresetSection({ data, draft, t, disabled, update }) {
-      const chosen = draft.companionPresets
-      const toggle = (id, on) => update({ companionPresets: on ? withValue(chosen, id) : without(chosen, id) })
-      let body
-      if (data.presets === null) {
-        body = [
-          h('p', { className: 'eng-note', key: 'n' }, t('presetsUnavailable')),
-          h(Chips, { key: 'c', items: chosen, t, disabled, onRemove: (id) => toggle(id, false) }),
-          h(AddField, { key: 'a', placeholder: t('addPreset'), t, disabled, onAdd: (id) => toggle(id, true) }),
-        ]
-      } else {
-        const known = new Set(data.presets.map((p) => p.id))
-        const rows = [
-          ...data.presets.map((p) => ({ id: p.id, name: p.name, missing: false })),
-          ...chosen.filter((id) => !known.has(id)).map((id) => ({ id, missing: true })),
-        ]
-        body = rows.length === 0
-          ? h('p', { className: 'eng-note' }, t('presetsNone'))
-          : h('div', { className: 'eng-list' }, rows.map((p) => h('label', { className: 'eng-row eng-check', key: p.id },
-            h('input', { type: 'checkbox', checked: chosen.includes(p.id), disabled,
-              onChange: (e) => toggle(p.id, e.target.checked) }),
-            h('span', { className: 'eng-row-main' },
-              h('span', { className: 'eng-row-title' }, p.name || p.id),
-              p.missing ? h('span', { className: 'eng-row-sub' }, t('presetMissing'))
-                : p.name ? h('span', { className: 'eng-row-sub eng-mono' }, p.id) : null))))
-      }
+    function CompanionSection({ draft, t, disabled, update }) {
       return h('section', { className: 'eng-section' },
-        h('h3', { className: 'eng-title' }, t('companion')),
+        h('div', { className: 'eng-heading' },
+          h('h3', { className: 'eng-title' }, t('companion')),
+          h(Switch, { checked: draft.companion, disabled, label: t('companion'),
+            onChange: (on) => update({ companion: on }) })),
         h('p', { className: 'eng-hint' }, t('companionHint')),
-        body)
-    }
-
-    function OwnerSection({ data, draft, t, disabled, update, titles }) {
-      const owners = draft.ownerSessions
-      const setOwners = (next) => update({ ownerSessions: next })
-      const chosen = new Set(draft.companionPresets)
-      const presetName = new Map((data.presets ?? []).map((p) => [p.id, p.name || p.id]))
-      const sessions = (data.sessions ?? []).filter((s) => chosen.has(s.preset))
-        .map((s) => ({ ...s, ...titles.get(s.id) }))
-        .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
-      const listed = new Set(sessions.map((s) => s.id))
-      const others = owners.filter((o) => isPrefix(o) || !listed.has(o))
-      let list
-      if (data.sessions === null) {
-        list = h('p', { className: 'eng-note' }, t('sessionsUnavailable'))
-      } else if (chosen.size === 0) {
-        list = h('p', { className: 'eng-note' }, t('ownersNeedPreset'))
-      } else if (sessions.length === 0) {
-        list = h('p', { className: 'eng-note' }, t('ownersEmpty'))
-      } else {
-        list = h('div', { className: 'eng-list' }, sessions.map((s) => {
-          const prefix = owners.find((o) => matchesPrefix(o, s.id))
-          const exact = owners.includes(s.id)
-          const when = new Date(s.updatedAt ?? s.createdAt)
-          const sub = [presetName.get(s.preset) ?? s.preset,
-            Number.isFinite(when.getTime()) && when.getTime() > 0
-              ? `${t(s.updatedAt === undefined ? 'created' : 'active')} ${when.toLocaleString()}` : '',
-            s.id].filter(Boolean).join(' · ')
-          return h('div', { className: 'eng-row', key: s.id },
-            h('span', { className: 'eng-row-main' },
-              h('span', { className: 'eng-row-title', title: s.title || s.id }, s.title || s.id),
-              h('span', { className: 'eng-row-sub', title: sub }, sub)),
-            h('span', { className: 'eng-row-side' },
-              prefix !== undefined && !exact ? `${t('byPrefix')} ${prefix}` : t('mine'),
-              h(Switch, { checked: exact || prefix !== undefined, label: `${t('mine')}: ${s.title || s.id}`,
-                disabled: disabled || (prefix !== undefined && !exact),
-                onChange: (on) => setOwners(on ? withValue(owners, s.id) : without(owners, s.id)) })))
-        }))
-      }
-      return h('section', { className: 'eng-section' },
-        h('h3', { className: 'eng-title' }, t('owners')),
-        h('p', { className: 'eng-hint' }, t('ownersHint')),
-        list,
-        others.length > 0 ? h('p', { className: 'eng-note' }, t('otherIds')) : null,
-        h(Chips, { items: others, t, disabled, onRemove: (o) => setOwners(without(owners, o)) }),
-        h(AddField, { placeholder: t('addId'), t, disabled, onAdd: (o) => setOwners(withValue(owners, o)) }))
+        h('p', { className: 'eng-note' }, t('companionNote')))
     }
 
     function CapSection({ caps, t, disabled, setCaps }) {
@@ -339,7 +193,7 @@ window.__ModuleLoader__.load({
         h('p', { className: 'eng-hint' }, t('capHint')))
     }
 
-    function SettingsForm({ t, titles }) {
+    function SettingsForm({ t }) {
       const [state, setState] = useState({ phase: 'loading' })
       const [draft, setDraft] = useState(undefined)
       const [caps, setCaps] = useState({ maxLines: String(DEFAULT_LINES), maxBytes: String(DEFAULT_BYTES) })
@@ -444,9 +298,7 @@ window.__ModuleLoader__.load({
         editable ? null : h('div', { className: 'eng-banner' },
           t(data.readOnly === 'expression' ? 'expression' : 'unavailable')),
         h(LanguageSection, { draft, t, disabled, update }),
-        h(PresetSection, { data, draft, t, disabled, update }),
-        h(OwnerSection, { data, draft, t, disabled, update,
-          titles: typeof titles === 'function' ? titles() : new Map() }),
+        h(CompanionSection, { draft, t, disabled, update }),
         h(CapSection, { caps, t, disabled, setCaps }),
         banner ? h('div', { className: 'eng-banner', 'data-tone': banner.tone, role: 'status' }, banner.text) : null,
         editable ? h('div', { className: 'eng-actions' },
@@ -459,23 +311,6 @@ window.__ModuleLoader__.load({
     function SettingsPage(props) {
       if (props.view === 'summary') return props.t('summary')
       return h(SettingsForm, props)
-    }
-
-    /** Session titles and last activity from the page's own session list, when it has one. */
-    function sessionTitles(ctx) {
-      return () => {
-        const titles = new Map()
-        try {
-          const byId = ctx.get('sessions')?.list?.getSnapshot?.()?.byId ?? {}
-          for (const [id, row] of Object.entries(byId)) {
-            titles.set(id, {
-              ...(typeof (row?.title ?? row?.displayTitle) === 'string' ? { title: row.title ?? row.displayTitle } : {}),
-              ...(Number.isFinite(row?.updatedAt) ? { updatedAt: row.updatedAt } : {}),
-            })
-          }
-        } catch { /* no session list on this page: ids are shown instead */ }
-        return titles
-      }
     }
 
     return {
@@ -494,7 +329,6 @@ window.__ModuleLoader__.load({
           name: 'plugins.row.config',
           key: ROW,
           locale: NS,
-          inject: () => ({ titles: sessionTitles(ctx) }),
         }, SettingsPage))
       },
     }

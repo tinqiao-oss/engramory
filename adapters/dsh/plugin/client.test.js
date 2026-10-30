@@ -4,7 +4,7 @@
  * A component that throws blanks its slot entry in dsh with nothing but a console line,
  * so the settings page is rendered here against a small stand-in for React (state,
  * refs, callbacks and effects, enough for this page) and driven the way a user would:
- * load, tick, switch, save. The registration it makes is checked against what the
+ * load, switch, save. The registration it makes is checked against what the
  * Plugins page looks for. What it looks like is checked in a real dsh, not here.
  */
 import assert from 'node:assert/strict'
@@ -106,7 +106,7 @@ const findAll = (node, pred, out = []) => {
   return out
 }
 const button = (tree, label) => findAll(tree, (n) => n.type === 'button' && textOf(n) === label)[0]
-const switchFor = (tree, title) => findAll(tree, (n) => n.props.role === 'switch' && n.props['aria-label'].endsWith(title))[0]
+const switchFor = (tree, label) => findAll(tree, (n) => n.props.role === 'switch' && n.props['aria-label'] === label)[0]
 
 /** Load client.js as dsh would, and return what its factory registers. */
 async function loadClient() {
@@ -122,7 +122,7 @@ async function loadClient() {
 }
 
 /** Apply the client with the page services, capturing the slot registration. */
-async function applied({ sessions } = {}) {
+async function applied() {
   const { registered, mod, react } = await loadClient()
   const dictionaries = {}
   const slots = []
@@ -133,7 +133,7 @@ async function applied({ sessions } = {}) {
   }
   const ctx = {
     effect: (fn) => fn(),
-    get: (name) => (name === 'sessions' ? sessions : undefined),
+    get: () => undefined,
     locale: { register: (ns, dicts) => { dictionaries[ns] = dicts; return () => {} } },
     slots: {
       inject: (owner, fn) => { assert.equal(owner, 'plugins.row.config'); fn() },
@@ -145,14 +145,7 @@ async function applied({ sessions } = {}) {
 }
 
 const settingsData = (patch = {}) => ({
-  language: 'en', companionPresets: ['whale'], ownerSessions: ['wx-*', 'gone-1'],
-  maxLines: 200, maxBytes: 25600, editable: true,
-  presets: [{ id: 'default' }, { id: 'whale', name: '大肥鱼' }],
-  sessions: [
-    { id: 'own-1', preset: 'whale', createdAt: 2 },
-    { id: 'wx-9', preset: 'whale', createdAt: 1 },
-    { id: 'code-1', preset: 'default', createdAt: 3 },
-  ],
+  language: 'en', companion: false, maxLines: 200, maxBytes: 25600, editable: true,
   ...patch,
   revision: 'r1',
 })
@@ -195,47 +188,39 @@ test('client: the summary view is one line, and the page reads the settings rout
   assert.equal(component({ view: 'summary', t: (k) => `<${k}>` }), '<summary>')
   const sent = fakeFetch({ GET: settingsData() })
   const { react, slots: again } = await applied()
-  const page = react.mount(react.React.createElement(again[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+  const page = react.mount(react.React.createElement(again[0].component, { view: 'page', t: (k) => k }))
   assert.match(textOf(page.tree), /loading/)
   await page.settle()
   assert.equal(sent[0].url, 'api/engramory/settings')
 })
 
-test('client: lists the companion conversations, marks prefix matches, and saves what the user switched', async () => {
-  const sessions = { list: { getSnapshot: () => ({ byId: { 'own-1': { title: '我和大肥鱼', updatedAt: 50 } } }) } }
-  const { slots, react } = await applied({ sessions })
+test('client: switches companion mode on and saves exactly the settings the host edits', async () => {
+  const { slots, react } = await applied()
   const sent = fakeFetch({
     GET: (log) => (log.some((s) => s.method === 'POST')
-      ? settingsData({ ownerSessions: ['wx-*', 'gone-1', 'own-1'], language: 'zh' })
+      ? settingsData({ companion: true, language: 'zh' })
       : settingsData()),
     POST: { ok: true },
   })
   const realTimeout = globalThis.setTimeout
   globalThis.setTimeout = (fn) => realTimeout(fn, 0)
   try {
-    const titles = () => new Map([['own-1', { title: '我和大肥鱼', updatedAt: 50 }]])
-    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles }))
+    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     await page.settle()
-    const text = textOf(page.tree)
-    assert.match(text, /我和大肥鱼/) // the session's own title, not its id
-    assert.doesNotMatch(text, /code-1/) // not a companion preset
-    assert.match(text, /gone-1/) // a listed id with no conversation stays visible and removable
-    const prefixed = switchFor(page.tree, 'wx-9')
-    assert.equal(prefixed.props['aria-checked'], true)
-    assert.equal(prefixed.props.disabled, true) // owned by the prefix, not by this switch
+    assert.match(textOf(page.tree), /companionHint[\s\S]*companionNote/)
+    const companion = switchFor(page.tree, 'companion')
+    assert.equal(companion.props['aria-checked'], false)
     assert.equal(button(page.tree, 'save').props.disabled, true) // nothing changed yet
-    switchFor(page.tree, '我和大肥鱼').props.onClick()
+    companion.props.onClick()
     await page.settle()
+    assert.equal(switchFor(page.tree, 'companion').props['aria-checked'], true)
     button(page.tree, 'languageZh').props.onClick()
     await page.settle()
     button(page.tree, 'save').props.onClick()
     // the page polls until the reloaded plugin answers with the saved settings
     for (let i = 0; i < 20 && !/\bsaved\b/.test(textOf(page.tree)); i++) await page.settle()
     const post = sent.find((s) => s.method === 'POST')
-    assert.deepEqual(post.body, {
-      revision: 'r1', language: 'zh', companionPresets: ['whale'],
-      ownerSessions: ['wx-*', 'gone-1', 'own-1'], maxLines: 200, maxBytes: 25600,
-    })
+    assert.deepEqual(post.body, { revision: 'r1', language: 'zh', companion: true, maxLines: 200, maxBytes: 25600 })
     assert.match(textOf(page.tree), /saved/)
   } finally {
     globalThis.setTimeout = realTimeout
@@ -245,7 +230,7 @@ test('client: lists the companion conversations, marks prefix matches, and saves
 test('client: a stale save reloads the settings and says so; a read-only dsh offers no save', async () => {
   const { slots, react } = await applied()
   fakeFetch({ GET: settingsData(), POST: { status: 409, body: { ok: false, error: 'stale' } } })
-  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
   button(page.tree, 'languageZh').props.onClick()
   await page.settle()
@@ -256,7 +241,7 @@ test('client: a stale save reloads the settings and says so; a read-only dsh off
   const second = await applied()
   fakeFetch({ GET: settingsData({ editable: false }) })
   const readOnly = second.react.mount(second.react.React.createElement(second.slots[0].component,
-    { view: 'page', t: (k) => k, titles: () => new Map() }))
+    { view: 'page', t: (k) => k }))
   await readOnly.settle()
   assert.match(textOf(readOnly.tree), /unavailable/)
   assert.equal(button(readOnly.tree, 'save'), undefined)
@@ -269,7 +254,7 @@ test('client: a save whose settings never read back says so, and the form is usa
   const realTimeout = globalThis.setTimeout
   globalThis.setTimeout = (fn) => realTimeout(fn, 0)
   try {
-    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     await page.settle()
     button(page.tree, 'languageZh').props.onClick()
     await page.settle()
@@ -291,7 +276,7 @@ test('client: a save that fails on the network leaves the form usable', async ()
     if (init.method === 'POST') throw new Error('socket hang up')
     return { ok: true, status: 200, json: async () => settingsData() }
   }
-  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
   button(page.tree, 'languageZh').props.onClick()
   await page.settle()
@@ -313,7 +298,7 @@ test('client: a response whose body stalls is cut off by the deadline, not waite
   const realTimeout = globalThis.setTimeout
   globalThis.setTimeout = (fn) => realTimeout(fn, 0)
   try {
-    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     for (let i = 0; i < 20 && !/loadFailed/.test(textOf(page.tree)); i++) {
       await new Promise((resolve) => realTimeout(resolve, 2))
       await page.settle()
@@ -327,7 +312,7 @@ test('client: a response whose body stalls is cut off by the deadline, not waite
 test('client: a read-only page names why', async () => {
   const { slots, react } = await applied()
   fakeFetch({ GET: settingsData({ editable: false, readOnly: 'expression' }) })
-  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
   assert.match(textOf(page.tree), /expression/)
   assert.equal(button(page.tree, 'save'), undefined)
@@ -336,7 +321,7 @@ test('client: a read-only page names why', async () => {
 test('client: an index cap that is not a positive whole number blocks the save', async () => {
   const { slots, react } = await applied()
   fakeFetch({ GET: settingsData() })
-  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k, titles: () => new Map() }))
+  const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
   const lines = findAll(page.tree, (n) => n.type === 'input' && n.props.inputMode === 'numeric')[0]
   lines.props.onChange({ target: { value: '12.5' } })

@@ -102,11 +102,10 @@ export function apply(ctx, config = {}) {
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
     text: TEXT[languageOf(config.language)],
-    // Companion mode (大肥鱼模式) is on once a persona preset is named (SKILL.md §2.2).
-    companionPresets: stringList(config.companionPresets),
-    ownerSessions: stringList(config.ownerSessions),
+    // Companion mode (大肥鱼模式, SKILL.md §2.2): for a profile where others can talk to
+    // the agent too, so only the user's own conversations get the memory.
+    companion: config.companion === true,
   }
-  settings.companion = settings.companionPresets.length > 0
   settings.readLimit = Math.min(MAX_READ_LIMIT, Math.max(MIN_READ_LIMIT, 4 * settings.maxBytes))
 
   // dsh 0.2 resolves a relative file path against the calling SESSION's working
@@ -135,26 +134,42 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // Companion mode reads two more optional services, both possibly late: which preset
-  // a session runs NOW — dsh keeps it as the `agentPreset` session projection, since a
-  // blank session may still switch from the one in its header — and the live agents,
-  // where a subagent's parent is found when this process has not seen it yet (dsh only
-  // continues a subagent while its parent is live).
+  // Companion mode reads two more optional services, both possibly late: dsh's session
+  // projections, where the SPEAKERS unit registered here folds who has written in each
+  // session, and the live agents, where a subagent's parent is found (dsh only continues
+  // a subagent while its parent is live).
   const live = {}
   if (settings.companion) {
-    for (const name of ['sessionProjections', 'agents']) {
-      ctx.inject([name], (inner) => {
-        inner.effect(() => {
-          const service = inner[name]
-          live[name] = service
-          return () => {
-            if (live[name] === service) live[name] = undefined
-          }
-        })
+    ctx.inject(['agents'], (inner) => {
+      inner.effect(() => {
+        const service = inner.agents
+        live.agents = service
+        return () => {
+          if (live.agents === service) live.agents = undefined
+        }
       })
-    }
+    })
+    // Read only where this plugin's own registration took: dsh keeps an earlier registrant
+    // of the key when it refuses ours, and that unit's state is not this one's. A registry
+    // that refuses it leaves every session a stranger's (companionRoles).
+    ctx.inject(['sessionProjections'], (inner) => {
+      inner.effect(() => {
+        const registry = inner.sessionProjections
+        let dispose
+        try {
+          dispose = registry.register(SPEAKERS)
+        } catch {
+          return () => {}
+        }
+        live.speakers = registry
+        return () => {
+          if (live.speakers === registry) live.speakers = undefined
+          if (typeof dispose === 'function') dispose()
+        }
+      })
+    })
   }
-  const roleOf = settings.companion ? companionRoles(settings, live) : () => 'normal'
+  const roleOf = settings.companion ? companionRoles(live) : () => 'normal'
 
   // A guard that throws breaks the host's tool call; only an UNEXPECTED exception can
   // get here (an edit whose simulated result exceeds V8's string limit, say), and like
@@ -202,44 +217,32 @@ export function apply(ctx, config = {}) {
   // late, like the services above; a host whose prompt registry has no runtime context
   // keeps the cap and the skill and simply goes without.
   //
-  // In companion mode the same context carries who is on the other end: the user's own
-  // companion conversation gets the index and the companion rules; any other companion
-  // conversation gets no store at all, only a note saying so. Those two still go in
-  // with `injectIndex: false`, which only turns the index off.
+  // In companion mode a context of its own carries who is on the other end: the user's
+  // own conversation gets the index and the companion rules; any other conversation gets
+  // no store at all, only a note saying so. Those two still go in with
+  // `injectIndex: false`, which only turns the index off.
   //
-  // A companion conversation's context is a second, REQUIRED one: a persona preset may
-  // turn optional runtime context off (dsh-persona's `includeRuntimeContext: false`, as
-  // the shipped `minimal` preset does), which would leave the owner without the memory
-  // and a stranger without the note that the store is closed — seen on a real dsh. The
-  // user named those presets as companions, so the memory belongs there; every other
-  // conversation keeps the index optional, as its preset expects.
+  // That context is REQUIRED: a persona preset may turn optional runtime context off
+  // (dsh-persona's `includeRuntimeContext: false`, as the shipped `minimal` preset does),
+  // which would leave the owner without the memory and a stranger without the note that
+  // the store is closed — seen on a real dsh.
   const injectIndex = config.injectIndex !== false
   if (injectIndex || settings.companion) {
     const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
-    const contexts = [{
-      name: 'engramory:memory-index',
-      text: settings.companion
-        ? (context) => (roleOf(context?.agent) === 'normal' ? index(context) : '')
-        : index,
-    }]
-    if (settings.companion) {
-      contexts.push({
-        name: 'engramory:companion',
-        required: true,
-        text: (context) => {
-          const role = roleOf(context?.agent)
-          if (role === 'stranger') return settings.text.strangerNotice
-          if (role !== 'owner') return ''
-          let shown = ''
-          try {
-            shown = index(context)
-          } catch {
-            // an index that cannot be read must not take the companion rules with it
-          }
-          return shown ? `${shown}\n\n${settings.text.companion}` : settings.text.companion
-        },
-      })
-    }
+    const contexts = settings.companion ? [{
+      name: 'engramory:companion',
+      required: true,
+      text: (context) => {
+        if (roleOf(context?.agent) !== 'owner') return settings.text.strangerNotice
+        let shown = ''
+        try {
+          shown = index(context)
+        } catch {
+          // an index that cannot be read must not take the companion rules with it
+        }
+        return shown ? `${shown}\n\n${settings.text.companion}` : settings.text.companion
+      },
+    }] : [{ name: 'engramory:memory-index', text: index }]
     ctx.inject(['systemPrompt'], (inner) => {
       const prompt = inner.systemPrompt
       if (typeof prompt?.context !== 'function') return
@@ -264,9 +267,8 @@ export function apply(ctx, config = {}) {
   }
 
   // The settings page (client.js, the Configure control on the Plugins page) reads and
-  // saves the language and companion settings through these routes, so the user picks
-  // their own conversations from a list instead of pasting session ids into YAML. The
-  // web server is optional (a headless dsh has none) and may mount late.
+  // saves the language, companion mode and the cap through these routes. The web server
+  // is optional (a headless dsh has none) and may mount late.
   // The page is keyed to the bundle's own row, so only that row serves it: a second row
   // of this package would otherwise claim the same path (dsh refuses a second claim) or,
   // claiming it first, have the page save ITS config. A row whose id cannot be told
@@ -296,32 +298,28 @@ export function apply(ctx, config = {}) {
 const SETTINGS_ROUTE = '/api/engramory/settings'
 /** The bundle patch's row id, which the Plugins page keys the page by (client.js). */
 const SETTINGS_ROW = 'engramory'
-/** Bounds on what a save may carry, and on how many conversations the page lists. */
-const MAX_LISTED = 500
-const MAX_ID_LENGTH = 200
 // apply() takes any positive cap, so a save must not refuse one a profile already has.
 const MAX_CAP_LINES = Number.MAX_SAFE_INTEGER
 const MAX_CAP_BYTES = Number.MAX_SAFE_INTEGER
-const MAX_SESSIONS = 2000
 
 /**
- * GET answers what the settings page shows: the five settings it edits, as this plugin
- * reads them, the presets and conversations to choose from, and whether a save can land.
- * POST saves them through dsh's profile editor (`configEditor`), which validates the whole
- * config, writes the profile's patch and reloads this plugin with it — or leaves the file
- * as it was. A save carries the revision the page loaded, so an edit made elsewhere in
- * between (by hand, in another window) is not overwritten.
+ * GET answers what the settings page shows: the four settings it edits, as this plugin
+ * reads them, and whether a save can land. POST saves them through dsh's profile editor
+ * (`configEditor`), which validates the whole config, writes the profile's patch and
+ * reloads this plugin with it — or leaves the file as it was. A save carries the revision
+ * the page loaded, so an edit made elsewhere in between (by hand, in another window) is
+ * not overwritten.
  *
  * Only the owner's signed-in browser reaches these: dsh answers 403 to any other caller of
  * an exact route, so an agent, a stranger's conversation included, cannot call them to
- * list itself among the owner's conversations.
+ * turn companion mode off.
  */
 function settingsRoutes(ctx, config, fiber) {
   const json = (status, body) => new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   })
-  const read = async () => {
+  const read = () => {
     const entry = ownEntry(ctx.get('configEditor'), fiber)
     const raw = entry?.options?.config ?? config
     const shown = editableSettings(raw)
@@ -331,8 +329,6 @@ function settingsRoutes(ctx, config, fiber) {
       // A setting written as a `!!js` expression is not what the page would show.
       editable: entry !== undefined && plainSettings(raw),
       ...(entry === undefined ? { readOnly: 'editor' } : plainSettings(raw) ? {} : { readOnly: 'expression' }),
-      presets: await listPresets(ctx),
-      sessions: await listSessions(ctx),
     })
   }
   const save = async (request) => {
@@ -389,17 +385,12 @@ function ownEntry(editor, fiber) {
   }
 }
 
-/**
- * The settings the page edits, read the way apply() reads them — and with duplicate ids
- * dropped, as a save drops them, so the settings a save leaves behind read back equal.
- */
+/** The settings the page edits, read the way apply() reads them. */
 function editableSettings(raw) {
   const config = raw !== null && typeof raw === 'object' ? raw : {}
-  const unique = (list) => [...new Set(list)]
   return {
     language: languageOf(config.language),
-    companionPresets: unique(stringList(config.companionPresets)),
-    ownerSessions: unique(stringList(config.ownerSessions)),
+    companion: config.companion === true,
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
@@ -408,16 +399,15 @@ function editableSettings(raw) {
 const revisionOf = (shown) => JSON.stringify(shown)
 
 /**
- * Whether the settings the page edits are plain values in `raw`: absent, or the strings,
- * string lists and numbers apply() reads. A `!!js` expression arrives as an object and is
+ * Whether the settings the page edits are plain values in `raw`: absent, or the string,
+ * boolean and numbers apply() reads. A `!!js` expression arrives as an object and is
  * evaluated by dsh, so the page can neither show it nor treat it as a default.
  */
 function plainSettings(raw) {
   const config = raw !== null && typeof raw === 'object' ? raw : {}
   const plain = {
     language: (v) => typeof v === 'string',
-    companionPresets: (v) => typeof v === 'string' || (Array.isArray(v) && v.every((s) => typeof s === 'string')),
-    ownerSessions: (v) => typeof v === 'string' || (Array.isArray(v) && v.every((s) => typeof s === 'string')),
+    companion: (v) => typeof v === 'boolean',
     maxLines: (v) => typeof v === 'number',
     maxBytes: (v) => typeof v === 'number',
   }
@@ -429,29 +419,16 @@ function parseSettings(body) {
   if (body === null || typeof body !== 'object') return 'body'
   if (typeof body.revision !== 'string') return 'revision'
   if (body.language !== 'en' && body.language !== 'zh') return 'language'
-  const next = { language: body.language }
-  for (const key of ['companionPresets', 'ownerSessions']) {
-    const list = body[key]
-    if (!Array.isArray(list) || list.length > MAX_LISTED) return key
-    const clean = []
-    for (const item of list) {
-      const value = typeof item === 'string' ? item.trim() : ''
-      if (!value || value.length > MAX_ID_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) return key
-      if (!clean.includes(value)) clean.push(value)
-    }
-    next[key] = clean
-  }
+  if (typeof body.companion !== 'boolean') return 'companion'
   for (const [key, max] of [['maxLines', MAX_CAP_LINES], ['maxBytes', MAX_CAP_BYTES]]) {
     if (!Number.isInteger(body[key]) || body[key] < 1 || body[key] > max) return key
   }
-  next.maxLines = body.maxLines
-  next.maxBytes = body.maxBytes
-  return next
+  return { language: body.language, companion: body.companion, maxLines: body.maxLines, maxBytes: body.maxBytes }
 }
 
 /**
  * The row's next config. dsh's profile patch replaces a row's config whole, so the
- * fields the page does not edit are carried over as they are; the five it edits are
+ * fields the page does not edit are carried over as they are; the four it edits are
  * written only where they differ from the plugin's own defaults, so a later default is
  * not masked by a pinned copy. Saved back to the defaults, with nothing else changed,
  * the row gets its inherited config back — the editor then drops the override.
@@ -463,11 +440,10 @@ function withSettings(current, next, inherited) {
     else out[key] = value
   }
   set('language', next.language, next.language === 'en')
-  set('companionPresets', next.companionPresets, next.companionPresets.length === 0)
-  set('ownerSessions', next.ownerSessions, next.ownerSessions.length === 0)
+  set('companion', true, !next.companion)
   set('maxLines', next.maxLines, next.maxLines === DEFAULT_MAX_LINES)
   set('maxBytes', next.maxBytes, next.maxBytes === DEFAULT_MAX_BYTES)
-  const managed = ['language', 'companionPresets', 'ownerSessions', 'maxLines', 'maxBytes']
+  const managed = ['language', 'companion', 'maxLines', 'maxBytes']
   const others = (config) => Object.fromEntries(Object.entries(config ?? {})
     .filter(([key]) => !managed.includes(key)))
   const base = inherited !== null && typeof inherited === 'object' ? inherited : {}
@@ -479,134 +455,223 @@ function withSettings(current, next, inherited) {
   return out
 }
 
-/** The agent presets to choose companions from, or null where dsh has no registry. */
-async function listPresets(ctx) {
-  try {
-    const presets = await ctx.get('agentPresets')?.list?.()
-    if (!Array.isArray(presets)) return null
-    return presets.filter((p) => typeof p?.id === 'string' && p.id)
-      .map((p) => (typeof p.name === 'string' && p.name ? { id: p.id, name: p.name } : { id: p.id }))
-  } catch {
-    return null
+/**
+ * The producers of dsh's own messages that carry nothing an outsider wrote: context, tool
+ * results, skills, compaction, agent-to-agent traffic. From dsh 0.2.1-rc.5's message
+ * source map and its catalog of first-party producers (`dsh-session-format-v3-to-v4`),
+ * so a restored older log reads the same. Two carry text without an author, and only the
+ * owner can send either on that dsh (it grants a caller other than the owner nothing):
+ * an answer to the agent's question (`user-question-reply`) and a scheduled prompt
+ * (`schedule`). `webhook`, input from outside, is left out. A kind not named here — a
+ * later dsh's, or any plugin's — is someone else's unless its source says otherwise.
+ */
+const INERT_PRODUCERS = new Set([
+  'runtime-context', 'system-prompt', 'time-context', 'tmux-context', 'working-directory',
+  'model-selection', 'plan-mode', 'ptc-mode', 'tool-registry', 'repeat-tool-reminder',
+  'skill-catalog', 'skill-invocation', 'agent-instructions', 'compact-checkpoint',
+  'compact-basic', 'cordis-host-runner', 'tool-cordis', 'tool-jobs', 'tool-goal', 'goal',
+  'user-approval', 'user-question-reply', 'schedule', 'session-reference',
+  'subagent-settled', 'subagent-report', 'agent-message', 'team-message', 'coordinator',
+  'dsh-session-title-llm', 'hooks-codex', 'hooks-claude-code', 'model', 'tool',
+])
+
+/**
+ * Who wrote one user message, by the source dsh stamps on it (a message queued in
+ * `agent/inbox/spliced` or committed in `user/message`):
+ *   'owner'    the signed-in owner, typing in dsh's own window (desktop or web): dsh's
+ *              browser client sends every prompt with a request id and the browser's time
+ *              zone, and dsh records any caller other than the owner as `principal`. Or a
+ *              plugin declared the message the owner's: `speaker: { role: 'owner' }` on its
+ *              source — the standard a chat bridge follows for the owner's own chat (README);
+ *   'other'    anyone else: dsh's `user` kind without both marks (a program calling dsh
+ *              web's API, `dsh headless`, an editor or terminal client, a bridge writing that
+ *              kind), any kind dsh's own producers do not use (`plugin:<name>`, as chat
+ *              bridges write, or any other), `speaker: { role: 'guest' }`, and a source that
+ *              cannot be read;
+ *   undefined  nobody: dsh's own producers (INERT_PRODUCERS) and a plugin's own message
+ *              declared `speaker: { role: 'none' }` — a report or a reminder no outsider
+ *              wrote. These decide nothing. (SPEAKERS also lets through two bare `user`
+ *              messages dsh writes itself.)
+ */
+function speakerOf(source) {
+  if (source === null || typeof source !== 'object') return 'other'
+  const speaker = source.speaker !== null && typeof source.speaker === 'object' ? source.speaker.role : undefined
+  if (speaker === 'owner') return 'owner'
+  if (speaker === 'guest') return 'other'
+  if (speaker === 'none') return undefined
+  const kind = source.kind
+  if (kind === 'user') {
+    return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
+      source.principal === undefined ? 'owner' : 'other'
   }
+  return typeof kind === 'string' && INERT_PRODUCERS.has(kind) ? undefined : 'other'
+}
+
+/** A source that is dsh's `user` kind and nothing else: no request id, caller, zone or speaker. */
+const isBareUser = (source) => source !== null && typeof source === 'object' &&
+  source.kind === 'user' && Object.keys(source).length === 1
+
+/**
+ * The SPEAKERS projection's state: has the owner written in the session, has anyone else.
+ * In a subagent's log (`child`), where its own events start (`from`, the history its parent
+ * forked to it coming first) and whether its task has arrived (`tasked`); the slash commands
+ * running now (`commands`) and how many events ago the latest began (`since`); the ids of
+ * messages let through as dsh's own until they are committed (`byDsh`).
+ */
+const NOBODY = Object.freeze({ owner: false, other: false })
+const SPEAKERS_KEY = 'engramory:speakers'
+/** Past this many events a command's window closes, `command/done` or not (a lost append). */
+const COMMAND_WINDOW = 32
+const MAX_BY_DSH = 256
+const SPEAKER_KEYS = new Set(['owner', 'other', 'child', 'from', 'tasked', 'commands', 'since', 'byDsh'])
+const ids = (list, max) => Array.isArray(list) && list.length > 0 && list.length <= max &&
+  list.every((id) => typeof id === 'string' && id !== '')
+const isSpeakers = (value) => value !== null && typeof value === 'object' &&
+  Object.keys(value).every((key) => SPEAKER_KEYS.has(key)) &&
+  typeof value.owner === 'boolean' && typeof value.other === 'boolean' &&
+  (value.child === undefined ? value.from === undefined && value.tasked === undefined
+    : value.child === true && Number.isSafeInteger(value.from) && value.from >= 0 &&
+      (value.tasked === undefined || value.tasked === true)) &&
+  (value.commands === undefined ? value.since === undefined
+    : ids(value.commands, COMMAND_WINDOW) && Number.isSafeInteger(value.since) &&
+      value.since >= 0 && value.since < COMMAND_WINDOW) &&
+  (value.byDsh === undefined || ids(value.byDsh, MAX_BY_DSH))
+
+/** `state` without `keys`. */
+const omit = (state, ...keys) => Object.fromEntries(Object.entries(state).filter(([k]) => !keys.includes(k)))
+
+/** The command window after one event: a command begins or ends, or it ages by one event. */
+function commandsAfter(state, event) {
+  const id = event?.data?.commandId
+  if (event?.type === 'command/run' && typeof id === 'string' && id !== '') {
+    const running = (state.commands ?? []).filter((c) => c !== id)
+    return { ...state, commands: [...running, id].slice(-COMMAND_WINDOW), since: 0 }
+  }
+  if (state.commands === undefined) return state
+  const running = event?.type === 'command/done' ? state.commands.filter((c) => c !== id) : state.commands
+  const since = state.since + 1
+  return running.length === 0 || since >= COMMAND_WINDOW
+    ? omit(state, 'commands', 'since')
+    : { ...state, commands: running, since }
 }
 
 /**
- * The conversations to mark as the user's own: every session that runs a preset, newest
- * first, with the preset it runs now (a live session may have switched from its header's).
- * Subagents are left out — they take their parent's role. Null where dsh cannot list them.
+ * A host-only dsh session projection folding who has written in each session, so a role
+ * is one read per step instead of a walk over the log. dsh drives it over every committed
+ * event, a fork's inherited ones and a restored log's included, and checkpoints it.
+ *
+ * A message counts from the moment it is queued (`agent/inbox/spliced`), not only once it
+ * is committed (`user/message`): dsh computes a step's runtime context before it commits
+ * the messages that step delivers, so a fold over commits alone judged every turn without
+ * its own message — the first message of the user's conversation got a stranger's note,
+ * and an outsider's first message in it got the memory (seen on dsh 0.2.1-rc.5). Bridges
+ * reach the queue too (`agent.followup`, `agent.steer`). A queued message later withdrawn
+ * still counts: an outsider who was about to be heard is not forgotten.
+ *
+ * Two bare `user` messages are dsh's own and decide nothing. One a slash command adds while
+ * it runs, between its `command/run` and `command/done` (`/plan <text>`, `/goal`'s
+ * attachments; on a real dsh three events after `command/run`): dsh records no one as
+ * having run a command, and a bridge that forwards one runs it in its own conversation,
+ * which its other messages already make someone else's. The window closes at the
+ * command's `command/done`, or COMMAND_WINDOW events on. The other is the first one in a
+ * subagent's own events, the task its parent agent hands it (later ones from the parent
+ * are `agent-message`); the history a fork-backed subagent inherits is its parent's, and
+ * the parent's own role stands for it. Any other bare `user` message is someone else's.
  */
-async function listSessions(ctx) {
-  try {
-    const records = await ctx.get('sessionQuery')?.listSessions?.()
-    if (!Array.isArray(records)) return null
-    const live = ctx.get('sessions')
-    const projections = ctx.get('sessionProjections')
-    const out = []
-    for (const record of records) {
-      const header = record?.header
-      if (typeof header?.id !== 'string' || header.origin === 'subagent') continue
-      const started = typeof header.agentPreset === 'string' ? header.agentPreset : undefined
-      let preset = started
-      try {
-        // A live session's own answer stands, "no preset" included: it may have switched.
-        const session = record.live ? live?.get?.(header.id) : undefined
-        if (session !== undefined) preset = presetOf(session, projections)
-      } catch {
-        preset = started
+const SPEAKERS = {
+  key: SPEAKERS_KEY,
+  // Bumped whenever the state's fields or the fold change, so dsh refolds a session from its
+  // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes).
+  stateVersion: 2,
+  // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
+  stateSchema: {
+    parse(value) {
+      if (!isSpeakers(value)) throw new TypeError(`${SPEAKERS_KEY}: not a state of this unit`)
+      return structuredClone(value)
+    },
+  },
+  init: (header, inheritedEventCount) => (header?.origin === 'subagent'
+    ? { ...NOBODY, child: true, from: Number.isSafeInteger(inheritedEventCount) && inheritedEventCount > 0 ? inheritedEventCount : 0 }
+    : NOBODY),
+  apply(state, event) {
+    if (state.child === true && typeof event?.seq === 'number' && event.seq < state.from) return state
+    let next = commandsAfter(state, event)
+    const messages = event?.type === 'user/message' ? [event.data]
+      : event?.type === 'agent/inbox/spliced' ? event.data?.inserted
+        : undefined
+    if (!Array.isArray(messages)) return next
+    const committed = event.type === 'user/message'
+    for (const message of messages) {
+      if (message?.role !== 'user') continue
+      const id = typeof message.id === 'string' && message.id !== '' ? message.id : undefined
+      if (id !== undefined && next.byDsh?.includes(id)) {
+        if (committed) {
+          const rest = next.byDsh.filter((b) => b !== id)
+          next = rest.length > 0 ? { ...next, byDsh: rest } : omit(next, 'byDsh')
+        }
+        continue
       }
-      if (preset === undefined) continue
-      out.push({ id: header.id, preset, createdAt: Number(header.createdAt) || 0 })
+      const byCommand = next.commands !== undefined
+      if (id !== undefined && isBareUser(message.source) &&
+          (byCommand || (next.child === true && next.tasked !== true))) {
+        next = {
+          ...next,
+          ...(byCommand ? {} : { tasked: true }),
+          ...(committed ? {} : { byDsh: [...(next.byDsh ?? []), id].slice(-MAX_BY_DSH) }),
+        }
+        continue
+      }
+      const speaker = speakerOf(message.source)
+      if (speaker === 'owner' && !next.owner) next = { ...next, owner: true }
+      if (speaker === 'other' && !next.other) next = { ...next, other: true }
     }
-    return out.sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_SESSIONS)
-  } catch {
-    return null
-  }
-}
-
-/** A config list of non-empty strings (one string alone is a list of one); others dropped. */
-function stringList(value) {
-  const list = typeof value === 'string' ? [value] : Array.isArray(value) ? value : []
-  return list.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim())
+    return next
+  },
 }
 
 /**
  * Who a session is talking to, in companion mode (大肥鱼模式):
- *   'normal'   not a companion conversation — nothing changes for it;
- *   'owner'    the user's own companion conversation: its id is in `ownerSessions`
- *              (exactly, or by a prefix written `prefix*`);
- *   'stranger' any other companion conversation, such as one a chat bridge opened for
- *              somebody else in the same profile.
+ *   'owner'    the user's own conversation: the user has written in it (speakerOf) and
+ *              nobody else ever has;
+ *   'stranger' any other: one a chat bridge, a script or a schedule opened, and one an
+ *              outsider has written in even once — what the memory put into it earlier
+ *              stays in its history, out of this plugin's reach.
  *
- * A session is a companion conversation when the preset it runs NOW is one of
- * `companionPresets`. A subagent (`origin: 'subagent'`) acts for the conversation
- * that spawned it and takes its role, whatever preset it runs itself: the parent's
- * role as last seen, else the live parent agent's, looked up in dsh's agent registry
- * (a restart, then the user continuing a subagent before its parent has taken a step).
- * A fork also names a `parentSession` but is a conversation of its own: it is judged
- * by its own id and preset. Fails closed: a call with no session, or a subagent whose
- * parent can be neither remembered nor found — unless the user listed the subagent's
- * own id — counts as a stranger's.
+ * A subagent (`origin: 'subagent'`) acts for the conversation that spawned it: it is the
+ * user's own while its live parent, read afresh on every call, is — and nobody else has
+ * written to it directly. A fork also names a `parentSession` but is a conversation of its
+ * own, judged by its own log, the history it inherited included. Fails closed: a call with
+ * no session, no registration of the SPEAKERS unit, a state that is not one, a fold that
+ * throws, or a subagent whose parent is unnamed or not live counts as a stranger's.
  */
-function companionRoles(settings, live) {
-  const seen = new Map() // session id -> role, for subagents to inherit
-  const owned = (id) => settings.ownerSessions.some((o) =>
-    o.endsWith('*') ? id.startsWith(o.slice(0, -1)) : id === o)
+function companionRoles(live) {
   const classify = (agent, depth) => {
-    let session
-    let id
     try {
-      session = agent?.session
-      id = session?.id
+      const session = agent?.session
+      if (typeof session?.id !== 'string' || session.id === '' || live.speakers === undefined) {
+        return 'stranger'
+      }
+      const heard = live.speakers.stateOf(session, SPEAKERS_KEY)
+      if (!isSpeakers(heard) || heard.other) return 'stranger'
+      const header = session.header
+      if ((header?.origin === 'subagent') !== (heard.child === true)) return 'stranger'
+      if (header?.origin === 'subagent') {
+        const parentId = header.parentSession
+        const parent = typeof parentId === 'string' && parentId !== '' && depth < MAX_LINEAGE
+          ? live.agents?.get?.(parentId)
+          : undefined
+        return parent === undefined ? 'stranger' : classify(parent, depth + 1)
+      }
+      return heard.owner ? 'owner' : 'stranger'
     } catch {
       return 'stranger'
     }
-    if (typeof id !== 'string' || id === '') return 'stranger'
-    let role
-    try {
-      const header = session.header
-      if (header?.origin === 'subagent' && typeof header.parentSession === 'string') {
-        role = seen.get(header.parentSession)
-        if (role === undefined && depth < MAX_LINEAGE) {
-          const parent = live.agents?.get?.(header.parentSession)
-          if (parent !== undefined) role = classify(parent, depth + 1)
-        }
-        // A parent neither remembered nor live: only the user's own listing vouches.
-        role ??= owned(id) ? 'owner' : 'stranger'
-      } else {
-        role = !settings.companionPresets.includes(presetOf(session, live.sessionProjections))
-          ? 'normal'
-          : owned(id) ? 'owner' : 'stranger'
-      }
-    } catch {
-      role = 'stranger'
-    }
-    seen.delete(id) // re-insert: the map stays in last-seen order, oldest dropped first
-    seen.set(id, role)
-    if (seen.size > 4096) seen.delete(seen.keys().next().value)
-    return role
   }
   return (agent) => classify(agent, 0)
 }
 
 /** How many subagent generations a role is looked up through before failing closed. */
 const MAX_LINEAGE = 8
-
-/**
- * The preset a session runs now: the `agentPreset` projection where dsh has one (a
- * blank session may switch from the preset it was created with), else the header's.
- * A query that fails is not a missing service: it throws, and the caller counts the
- * session a stranger's rather than trust a header that may be out of date.
- */
-function presetOf(session, projections) {
-  if (typeof projections?.stateOf === 'function') {
-    const current = projections.stateOf(session, 'agentPreset')
-    if (typeof current === 'string') return current
-    if (current === null) return undefined // registered, and no preset
-  }
-  const start = session.header?.agentPreset
-  return typeof start === 'string' ? start : undefined
-}
 
 /** Arguments that name a file or a directory, as dsh's tools and common others spell them. */
 const PATH_ARGS = ['file_path', 'path', 'filePath', 'filename', 'file', 'target_file', 'target']
@@ -1414,9 +1479,11 @@ const TEXT = {
       ' In a companion conversation: anything worth remembering about the user, or ' +
       'about the life you share — a moment, something coming up, a change in yourself.',
     companion:
-      'Companion mode (大肥鱼模式): this conversation runs a companion persona for the ' +
-      'user — it is not a coding task. Any message from the user, a greeting included, ' +
-      'may call for recall: a date coming up, something to ask about, an agreement. ' +
+      'Companion mode (大肥鱼模式) is on, and this conversation is the user\'s own: they ' +
+      'have written in it in dsh\'s own window, and nobody else has. When you play a ' +
+      'character for the user here — a companion persona, not a coding task — any message ' +
+      'from the user, a greeting included, may call for recall: a date coming up, something ' +
+      'to ask about, an agreement. ' +
       'Bring it up in character; do not name files, the index, tools or a memory system ' +
       'unless asked. Save what is worth keeping as the Engramory skill describes: who ' +
       'the user is as `user`, how to address them and what never to say as `feedback`, ' +
@@ -1430,12 +1497,14 @@ const TEXT = {
       'note only when the user asks you to forget it; never write ID numbers, card ' +
       'numbers or passwords.',
     strangerNotice:
-      'Engramory: this companion conversation is not one of the user\'s own (its session ' +
-      'is not in `ownerSessions`), so no memory is loaded here and the memory store is ' +
-      'closed to file tools. Do not recall or save anything about the user in it.',
+      'Engramory: this conversation is not the user\'s own — someone else has written in ' +
+      'it, or the user never has in dsh\'s own window — so no memory is loaded here and the ' +
+      'memory store is closed to file tools. Do not recall or save anything about the user ' +
+      'in it.',
     strangerRefusal:
-      'This companion conversation is not one of the user\'s own (its session is not in ' +
-      'the Engramory `ownerSessions` list), so the memory store is closed to it.',
+      'This conversation is not the user\'s own (Engramory companion mode: someone else has ' +
+      'written in it, or the user never has in dsh\'s own window), so the memory store is ' +
+      'closed to it.',
     head: (label, path) =>
       `${label} (\`${path}\`), loaded for you by dsh-engramory: the index of your ` +
       'long-term memory, one line per note, linking a note file in that directory. Use ' +
@@ -1471,8 +1540,9 @@ const TEXT = {
       '在陪伴对话里：关于用户、关于你们共同生活的任何值得记住的事——一个时刻、将要发生' +
       '的事、你自己的变化。',
     companion:
-      '大肥鱼模式：这个会话为用户运行陪伴人设——它不是编程任务。用户的每句话，包括打招呼，' +
-      '都可能该想起点什么：临近的日子、该问起的事、约定。用你的角色口吻自然带出；除非用户' +
+      '大肥鱼模式已打开，这个会话是用户本人的：用户在 dsh 窗口里亲手发过消息，也没有别人在' +
+      '里面说过话。你在这里为用户扮演角色时——陪伴人设，不是编程任务——用户的每句话，包括' +
+      '打招呼，都可能该想起点什么：临近的日子、该问起的事、约定。用你的角色口吻自然带出；除非用户' +
       '问起，不念文件名，不提索引、工具或记忆系统。值得记的照 Engramory skill 的格式写：' +
       '用户是谁记成 `user`，怎么称呼、哪些话别说记成 `feedback`；你们共同的人生分三类记：' +
       '一起经历的、带日期的事记成 `moment`（索引标题 `## 经历`）；用户生活里将要发生的事记成 ' +
@@ -1482,11 +1552,12 @@ const TEXT = {
       '口吻如实说——没记上绝不说记住了。`moment` 和 `self` 笔记只有用户说忘掉才删；' +
       '证件号、银行卡号、密码一律不记。',
     strangerNotice:
-      'Engramory：这个陪伴会话不是用户自己的（会话不在 `ownerSessions` 名单里），所以这里' +
-      '不加载记忆，文件工具也碰不到记忆库。不要在这里回忆或保存关于用户的任何事。',
+      'Engramory：这个会话不是用户本人的——有别人在里面说过话，或者用户从没在 dsh 窗口里' +
+      '亲手发过消息——所以这里不加载记忆，文件工具也碰不到记忆库。不要在这里回忆或保存关于' +
+      '用户的任何事。',
     strangerRefusal:
-      '这个陪伴会话不是用户自己的（会话不在 Engramory 的 `ownerSessions` 名单里），记忆库' +
-      '对它关闭。',
+      '这个会话不是用户本人的（Engramory 大肥鱼模式：有别人在里面说过话，或者用户从没在 dsh ' +
+      '窗口里亲手发过消息），记忆库对它关闭。',
     head: (label, path) =>
       `${label}（\`${path}\`），由 dsh-engramory 为你加载：这是你长期记忆的索引，一行` +
       '一条笔记，链接到该目录下的笔记文件。直接用它，不必读文件，只打开看起来相关的笔记。' +
@@ -1532,8 +1603,8 @@ function skillEn(companion = false) {
     'THIS FROM LENGTH: a one-word reply that picks an option or carries on work',
     'underway inherits that task. Still unclear? Treat it as a task.',
     ...(companion ? [
-      'Companion mode is the exception: in a companion conversation — the runtime',
-      'context says when you are in one — any message from the user, a greeting',
+      'Companion mode is the exception: in a companion conversation — one where you',
+      'play a character for the user — any message from the user, a greeting',
       'included, may call for recall.',
     ] : []),
     '',
@@ -1662,7 +1733,7 @@ function skillZh(companion = false) {
     '让工作变成非任务：贴来让你审的 diff 仍是任务。**绝不按长短判断**：一个字的回复如果',
     '是在选方案或接着做手上的事，就继承那个任务。还拿不准？当成任务。',
     ...(companion ? [
-      '大肥鱼模式是例外：在陪伴对话里（运行时上下文会告诉你是不是），用户的每句话，包括',
+      '大肥鱼模式是例外：在陪伴对话里（你为用户扮演角色的对话），用户的每句话，包括',
       '打招呼，都可能该想起点什么。',
     ] : []),
     '',

@@ -81,12 +81,35 @@ dsh plugin --profile <name> remove dsh-engramory
 
 ## Companion mode (大肥鱼模式)
 
-For a persona the user chats with — the community's 大肥鱼, or any other character run
-from a dsh agent preset, often wired to WeChat, Douyin or Bilibili through a bridge
-plugin. Turn it on by naming the preset(s) in `companionPresets`; a session running one
-of them is a companion conversation. Coding sessions in the same profile keep their index,
-guard and recall rules; the skill they share only gains a companion section.
+For a dsh that other people can talk to as well — a character such as the community's
+大肥鱼, wired to QQ, WeChat, Douyin or Bilibili through a bridge plugin. Turn it on with
+`companion: true`, or the switch on the settings page (below). If you are the only one
+who talks to this dsh, leave it off: nothing in this section is needed.
 
+- **Only your own conversations get the memory.** A conversation is yours when you have
+  written in it in dsh's own window — the desktop app or `dsh web` — and nobody else has.
+  dsh stamps every user message with where it came from, and its browser client sends
+  each prompt with a request id and the browser's time zone: that is how a message you
+  typed there is told apart. Everything else is someone else's:
+  - a message a bridge plugin submits, under a kind of its own (`plugin:<name>`, as
+    dsh-onebot writes, or any other kind dsh's own producers do not use) or dsh's plain
+    `user` kind, unless the bridge marks it as yours (the standard below);
+  - a program calling dsh web's API, `dsh headless`, an editor or terminal client;
+  - a conversation an automation or a plugin opened, until you write in it;
+  - a caller dsh itself names as someone other than the owner.
+
+  Once anyone else has written in a conversation it stays theirs, even after you write
+  in it too: what the memory put into it earlier stays in its history. Messages dsh
+  adds itself (runtime context, skills, compaction, agent-to-agent messages) decide
+  nothing.
+- **Someone else's conversation gets no memory:** no index, a note saying so, and file
+  tools that may name files only. A directory is refused (so grep, glob and directory
+  views are — any tree may hold a store), and so is any path into a store, however it is
+  spelled or linked, including a store that does not exist yet, so none can be planted
+  for you. A subagent is yours while its live parent is — read afresh on every call —
+  and nobody else has written to it directly; a forked conversation is judged by its own
+  history, the part it inherited included. A call with no session, a
+  dsh without session projections, or a network path counts as someone else's.
 - **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
   `moment` — something the character and the user shared, with its date; kept, and
   folded into a monthly archive when the index fills. `upcoming` — something coming up
@@ -96,43 +119,55 @@ guard and recall rules; the skill they share only gains a companion section.
   A `moment` or `self` note is deleted only when the user asks to forget. In a Chinese
   store their headings are `## 经历`, `## 约定` and `## 我自己`. The other four types
   keep their meaning.
-- **Recall in character.** A companion conversation is told that any message, a greeting
-  included, may call for recall, and to speak of what it remembered — or failed to save
-  — in character, without naming files or tools.
-- **Only the user's own conversations get the memory.** A bridge usually opens one
-  session per contact or group in the same profile, so a stranger's conversation runs
-  the same preset. Mark your own conversations on the settings page (below), or copy
-  their ids (the session menu's *Copy Session ID*) into `ownerSessions`; a companion
-  conversation not listed there
-  gets no index, a note saying so, and its file tools may name files only: a
-  directory is refused (so grep, glob and directory views are — any tree may hold a
-  store), and so is any path into a store, however it is spelled or linked, including
-  a store that does not exist yet, so none can be planted for you. A subagent takes the
-  role of the conversation that spawned it, looked up among dsh's live agents when this
-  process has not seen it (a subagent you listed yourself counts as yours even when
-  its parent cannot be found); a forked conversation is judged on its own id. A call
-  with no session, or a network path, counts as a stranger's. Listing a group chat lets everyone in it reach the
-  memory.
-- **The persona preset decides what it can do with memory.** What a companion
-  conversation is given — the memory and its rules, or a stranger's note — is a
-  *required* runtime context, so it arrives even under a preset that turns optional
-  context off (dsh-persona's `includeRuntimeContext: false`, as dsh's `minimal` preset
-  does). Saving is another matter: the preset needs dsh's file tools and the skill tool
-  for the character to write notes the way the skill describes. A preset with only a
-  shell can read the memory it is given, and its writes go past the guard.
+- **Recall in character.** Your conversations are told that, when the agent plays a
+  character for you, any message, a greeting included, may call for recall, and to speak
+  of what it remembered — or failed to save — in character, without naming files or
+  tools.
+- **The persona preset decides what it can do with memory.** What a conversation is
+  given in companion mode — the memory and its rules, or the note — is a *required*
+  runtime context, so it arrives even under a preset that turns optional context off
+  (dsh-persona's `includeRuntimeContext: false`, as dsh's `minimal` preset does). Saving
+  is another matter: the preset needs dsh's file tools and the skill tool for the
+  character to write notes the way the skill describes. A preset with only a shell can
+  read the memory it is given, and its writes go past the guard.
 
-This keeps the user's memory out of a stranger's context by the routes dsh's own file
-tools take. It is **not** a security boundary: a shell tool reads any file, and a
-different profile on the same account can still read the store's files. Keeping
-strangers away from the store needs filesystem permissions or a sandbox.
+This keeps the user's memory out of others' context by the routes dsh's own file tools
+take. It is **not** a security boundary: a shell tool reads any file, and a different
+profile on the same account can still read the store's files. Keeping others away from
+the store needs filesystem permissions or a sandbox.
+
+### For bridge authors: marking who wrote a message
+
+With companion mode on, every message a bridge submits counts as someone else's. For the
+owner's own chat to get the memory — their private QQ chat with the character, say —
+put a `speaker` on the message's source:
+
+```js
+agent.followup(createUserMessage({
+  content: [{ type: 'text', text }],
+  source: { kind: 'plugin:your-bridge', speaker: { role: 'owner' } },
+}))
+```
+
+| `speaker.role` | Meaning |
+|---|---|
+| `owner` | The dsh owner wrote it: a message from the account the user set as theirs in your bridge. |
+| `guest` | Someone else wrote it — the same as no `speaker` at all. |
+| `none` | Nobody wrote it: your plugin's own report, reminder or notice. It does not turn the owner's conversation into someone else's. |
+
+Mark a message `owner` only when it comes from the owner's own account. A group's
+conversation stays someone else's once anyone else in it speaks. dsh keeps unknown
+source fields in the session log, so the role survives a restart.
+
+A program that talks to dsh only through dsh web's API cannot set a source, and its
+messages count as someone else's — unless it sends `clientTimeZone` with a prompt: dsh
+then records exactly what its own page sends, and the message counts as the owner's. A
+program forwarding other people's messages must leave `clientTimeZone` out.
 
 ## Settings page
 
 On dsh's **Plugins** page, open *Engramory memory* and then its row: the page sets the
-memory language, which presets are companions, which of their conversations are yours —
-a switch per conversation, titled as dsh titles it, so there are no ids to paste — and
-the index cap. A listed id or `prefix*` without a conversation stays visible and
-removable, and one can be added by hand.
+memory language, companion mode — one switch — and the index cap.
 
 Saving goes through dsh's own profile editor: it validates the whole config, writes it
 to your profile's `cordis.patch.yml`, and reloads the plugin with it — or leaves the
@@ -142,8 +177,8 @@ their override instead of pinning it. Other fields (`indexName`, `indexPath`, �
 in the file.
 
 Only your signed-in browser reaches the page's route: dsh answers 401 to a request
-without its login cookie and 403 to a cross-site one, so an agent cannot call it to put
-itself on the list. A dsh without the profile editor shows the page read-only.
+without its login cookie and 403 to a cross-site one, so an agent cannot call it to turn
+companion mode off. A dsh without the profile editor shows the page read-only.
 
 ## Configuration
 
@@ -156,8 +191,7 @@ itself on the list. A dsh without the profile editor shows the page read-only.
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
 | `injectIndex` | `true` | Put the memory index into dsh's runtime context on every step (see above). Set `false` to recall by reading the file instead. |
 | `language` | `en` | `zh` writes the store in Chinese (SKILL.md §1.1): Chinese note names, `## 用户` / `## 反馈` / `## 项目` / `## 参考` headings, `**为什么：**` / `**怎么用：**` labels, and the skill and the injected index in Chinese. Frontmatter keys and `type:` values stay English, so every host still reads the store. The cap's refusals stay English. `zh` and its regional forms (`zh-CN`, `zh-TW`, …) select Chinese; any other value falls back to `en`. |
-| `companionPresets` | none | Agent preset ids whose sessions are companion conversations (companion mode, above). One id may be written as a plain string. Empty: companion mode is off. |
-| `ownerSessions` | none | Session ids of the user's own companion conversations; `prefix*` matches by prefix. A companion conversation not listed gets no memory. `*` alone opens every companion conversation to it. |
+| `companion` | `false` | `true` turns companion mode on (above): only your own conversations get the memory. Only the boolean `true` counts. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 
 ## What the guard actually does
@@ -205,14 +239,29 @@ file's line endings when sizing the result, including CRLF bytes.
   from `$DSH_HOME`, resolved the way dsh resolves it. What is injected is framed as notes,
   not instructions, that may be stale; a host without runtime context
   (no `ctx.systemPrompt.context`) goes without it.
+- **Companion mode knows your typing by what dsh's browser client sends.** A program that
+  sends the same request id and time zone as dsh's own page is taken for you, and a
+  browser whose time zone cannot be read leaves your messages unmarked. dsh's terminal,
+  editor (ACP) and SDK clients do not mark them either: with companion mode on, only
+  dsh's own window counts.
+- **Some of dsh's messages carry no author.** An answer to the agent's question, a
+  scheduled prompt and a message a slash command adds (`/plan <text>`, `/goal`'s
+  attachments) count as nobody's, and a queued message edited through dsh's API keeps the
+  author it had. On dsh 0.2.1 only the owner can answer, schedule or edit — in dsh's
+  window, or through a program with the owner's login, which can read the store's files
+  through dsh's own file API anyway — and a chat bridge that forwards a command runs it in
+  its own conversation, which its other messages already make someone else's.
+- **A kind of message a later dsh adds counts as someone else's** until this plugin knows
+  it: a conversation of yours may lose the memory, never the other way round.
 - dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and reactive
   `ctx.inject()` children for the skill registry, the session working directory, the
-  prompt registry, and — in companion mode — the session projections that hold each
-  session's current preset; a compatible-release declaration needs recorded host
+  prompt registry, and — in companion mode — dsh's session projections, where it folds
+  who has written in each session; a compatible-release declaration needs recorded host
   evidence, not just unit tests. The recorded end-to-end runs cover the cap, the skill
   and the injected index; companion mode and the settings page were checked by hand on
-  a real dsh (0.2.1-rc.5) — an owner's, a stranger's and a coding conversation, and a
-  save through the page — but are not part of that record yet.
+  a real dsh (0.2.1-rc.5) — messages typed in dsh's window, sent by `dsh headless` and by
+  a program through dsh web's API, and a save through the page — but are not part of that
+  record yet.
 
 ## License
 

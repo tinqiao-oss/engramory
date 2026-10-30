@@ -20,7 +20,7 @@ import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
 
-function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId } = {}) {
+function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId, projections = projectionRegistry() } = {}) {
   let guard
   const skills = []
   const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
@@ -29,6 +29,7 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt,
     ...(withSkills ? { skills: skillRegistry } : {}),
     ...(workingDirectory ? { workingDirectory } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
+    ...(projections ? { sessionProjections: projections } : {}),
   }
   // Mirrors Cordis' reflective context (issue #8): only services named in the
   // caller's inject are readable as properties — anything else throws and must go
@@ -72,7 +73,25 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt,
     }
   }
   const mountSkillsLate = () => mountLate('skills', skillRegistry)
-  return { guard, skills, mountSkillsLate, mountLate, fiber }
+  return { guard, skills, mountSkillsLate, mountLate, fiber, projections }
+}
+
+/**
+ * dsh's session projections: a registered unit folds a test session's `events` the way
+ * dsh drives it over a session's log, from `init` through `apply`.
+ */
+function projectionRegistry() {
+  const units = new Map()
+  return {
+    units,
+    register: (unit) => { units.set(unit.key, unit); return () => units.delete(unit.key) },
+    stateOf: (session, key) => {
+      const unit = units.get(key)
+      if (unit === undefined) throw new Error(`no projection ${key}`)
+      return (session.events ?? []).reduce((state, event) => unit.apply(state, event),
+        unit.init(session.header, session.inherited ?? 0))
+    },
+  }
 }
 
 /** dsh 0.2's per-session directory owner: `get(session)` is its synchronous read. */
@@ -1101,29 +1120,35 @@ test('language: zh says what the injected index is, and cuts it in Chinese', () 
   assert.doesNotMatch(text, /第 200 条/)
 })
 
-/** A dsh session as companion mode reads it: an id, its directory, and its header. */
-const sessionOf = (id, cwd, header = {}) => ({ id, cwd, header })
+/** A dsh session as companion mode reads it: an id, its directory, its header and its log. */
+const sessionOf = (id, cwd, header = {}, events = []) => ({ id, cwd, header, events })
 const as = (session) => ({ agent: { session } })
-const COMPANION = { companionPresets: ['whale'], ownerSessions: ['own-1', 'wx-owner-*'] }
+/** One user message as dsh logs it, carrying the source its producer stamped on it. */
+let saidCount = 0
+const said = (source, id = `m-${++saidCount}`) => ({ type: 'user/message', data: { role: 'user', id, source } })
+/** Typed in dsh's own window: dsh's browser client sends a request id and its time zone. */
+const TYPED = said({ kind: 'user', rpcId: 'r-1', clientTimeZone: 'Asia/Shanghai' })
+/** A QQ message dsh-onebot submits under its own producer kind. */
+const QQ = said({ kind: 'plugin:dsh-onebot' })
+const own = (id, cwd, ...more) => sessionOf(id, cwd, {}, [TYPED, ...more])
+const theirs = (id, cwd) => sessionOf(id, cwd, {}, [QQ])
+const COMPANION = { companion: true }
 
-test('companion mode: the user\'s own companion conversation gets the index and the rules', () => {
+test('companion mode: the user\'s own conversation gets the index and the rules', () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
-  const own = see(sessionOf('own-1', project, { agentPreset: 'whale' }))
-  assert.match(own, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
-  assert.match(own, /Companion mode \(大肥鱼模式\)[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
-  // by prefix too
-  assert.match(see(sessionOf('wx-owner-42', project, { agentPreset: 'whale' })), /Companion mode/)
-  // a session on another preset is not a companion conversation: nothing changes
-  const coding = see(sessionOf('code-1', project, { agentPreset: 'default' }))
-  assert.match(coding, /- first/)
-  assert.doesNotMatch(coding, /Companion mode/)
+  const text = withDshHome(scratch('home'), () => prompt.render(as(own('own-1', project))))
+  assert.match(text, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
+  assert.match(text, /Companion mode \(大肥鱼模式\) is on[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
+  // dsh's own producers decide nothing: context, skills and the like come and go
+  const busy = own('own-2', project, said({ kind: 'time-context', form: 'notice' }),
+    said({ kind: 'skill-catalog', form: 'catalog' }), TYPED)
+  assert.match(withDshHome(scratch('home'), () => prompt.render(as(busy))), /- first/)
 })
 
-test('companion mode: anyone else\'s companion conversation gets no memory, only a note', () => {
+test('companion mode: anyone else\'s conversation gets no memory, only a note', () => {
   const project = scratch('companion')
   const home = scratch('home')
   store(project, '- [a](a.md) - first\n')
@@ -1132,28 +1157,139 @@ test('companion mode: anyone else\'s companion conversation gets no memory, only
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const see = (context) => withDshHome(home, () => prompt.render(context))
   for (const context of [
-    as(sessionOf('douyin-abc', project, { agentPreset: 'whale' })),
+    as(theirs('onebot-private-42', project)),
+    as(sessionOf('quiet', project)), // nobody has written yet
+    as(sessionOf('scheduled', project, {}, [said({ kind: 'schedule' })])), // an automation
+    // once anyone else has written, the conversation is theirs for good, either order
+    as(own('mixed', project, QQ)),
+    as(sessionOf('mixed-2', project, {}, [QQ, TYPED])),
     {}, // no session to tell by: fails closed
-    as({ cwd: project, header: { agentPreset: 'whale' } }),
+    as({ cwd: project, header: {}, events: [TYPED] }),
   ]) {
     const text = see(context)
     assert.doesNotMatch(text, /- first|- user|memory index/)
-    assert.match(text, /not one of the user's own/)
+    assert.match(text, /not the user's own/)
   }
 })
 
-test('companion mode follows the preset a session runs now, not the one it started on', () => {
+test('companion mode: who wrote a message is read from the source dsh stamped on it', () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
-  const { mountLate } = mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  mountLate('sessionProjections', {
-    stateOf: (session, key) => (key === 'agentPreset' ? session.now : undefined),
-  })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
-  assert.match(see({ ...sessionOf('s1', project, { agentPreset: 'default' }), now: 'whale' }),
-    /not one of the user's own/)
-  assert.match(see({ ...sessionOf('s2', project, { agentPreset: 'whale' }), now: null }), /- first/)
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+    () => prompt.render(as(sessionOf('s', project, {}, events)))))
+  assert.equal(owner(TYPED), true)
+  for (const [source, why] of [
+    [{ kind: 'user' }, 'dsh headless, or a bridge writing dsh\'s user kind'],
+    [{ kind: 'user', rpcId: 'r-2' }, 'a program calling dsh web\'s API'],
+    [{ kind: 'user', rpcId: 'r-3', clientTimeZone: 'UTC', principal: { kind: 'liveshare' } }, 'a caller dsh names'],
+    [{ kind: 'plugin:dsh-onebot' }, 'a bridge under its own kind'],
+    [{ kind: 'user', rpcId: 'r-4', clientTimeZone: 'UTC', speaker: { role: 'guest' } }, 'declared a guest'],
+    [{ kind: '' }, 'no kind'],
+    [null, 'no source'],
+    [{ kind: 'qq-bridge' }, 'a bridge under a kind of its own without the plugin: prefix'],
+    [{ kind: 'webhook' }, 'input from outside dsh'],
+  ]) {
+    assert.equal(owner(said(source)), false, why)
+    assert.equal(owner(TYPED, said(source)), false, `${why}, after the user`)
+  }
+  // the bridge standard: a bridge declares the owner's own messages, and its own notices
+  assert.equal(owner(said({ kind: 'plugin:dsh-onebot', speaker: { role: 'owner' } })), true)
+  assert.equal(owner(said({ kind: 'user', speaker: { role: 'owner' } })), true)
+  assert.equal(owner(TYPED, said({ kind: 'plugin:life', speaker: { role: 'none' } })), true)
+  assert.equal(owner(said({ kind: 'plugin:life', speaker: { role: 'none' } })), false, 'nobody yet')
+  assert.equal(owner(TYPED, said({ kind: 'qq-bridge', speaker: { role: 'none' } })), true)
+  // dsh's own producers decide nothing, the two that carry text without an author included
+  for (const kind of ['runtime-context', 'skill-invocation', 'compact-checkpoint', 'goal', 'agent-message',
+    'session-reference', 'model-selection', 'user-question-reply', 'schedule']) {
+    assert.equal(owner(TYPED, said({ kind })), true, kind)
+    assert.equal(owner(said({ kind })), false, `${kind} alone`)
+  }
+  // only the user's messages count: replies and other events are not judged
+  assert.equal(owner(TYPED, { type: 'assistant/message', data: { role: 'assistant', source: { kind: 'model' } } },
+    { type: 'session/title-llm-request', data: { messages: [{ role: 'user', source: { kind: 'user' } }] } }), true)
+})
+
+test('companion mode: a message counts from the moment it is queued, before dsh commits it', () => {
+  // dsh computes a step's runtime context before it commits the messages that step
+  // delivers; judged on commits alone, a turn went without its own message (dsh 0.2.1-rc.5)
+  const project = scratch('companion')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const queued = (...messages) => ({ type: 'agent/inbox/spliced',
+    data: { target: 'next-turn', start: 0, removedCount: 0, inserted: messages.map((m) => m.data) } })
+  const claimed = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } }
+  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+    () => prompt.render(as(sessionOf('s', project, {}, events)))))
+  assert.equal(owner(queued(TYPED), claimed), true, 'the user\'s first message, before it is committed')
+  assert.equal(owner(TYPED, queued(QQ), claimed), false, 'an outsider\'s first message, before it is committed')
+  assert.equal(owner(TYPED, queued(said({ kind: 'time-context' }), TYPED)), true)
+  assert.equal(owner(TYPED, { type: 'agent/inbox/spliced', data: { inserted: 'not a list' } }), true)
+})
+
+test('companion mode: a message a slash command adds is dsh\'s own, and only while it runs', () => {
+  // `/plan <text>` and `/goal` attachments write a bare `user` message between the
+  // command's `command/run` and `command/done`; dsh records no one as having run it
+  const project = scratch('companion')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+    () => prompt.render(as(sessionOf('s', project, {}, events)))))
+  const run =(commandId) => ({ type: 'command/run', data: { commandId, name: 'plan', source: { kind: 'user' } } })
+  const done = (commandId) => ({ type: 'command/done', data: { commandId, kind: 'success' } })
+  const planText = said({ kind: 'user' })
+  const queued = { type: 'agent/inbox/spliced', data: { target: 'next-step', start: 0, inserted: [planText.data] } }
+  assert.equal(owner(TYPED, run('c-1'), queued, done('c-1'), planText), true, 'queued in the command, committed after it')
+  assert.equal(owner(TYPED, run('c-2'), done('c-2'), said({ kind: 'user' })), false, 'after the command: someone else\'s')
+  assert.equal(owner(TYPED, run('c-3'), done('c-other'), said({ kind: 'user' })), true, 'still running')
+  assert.equal(owner(run('c-4'), queued, done('c-4')), false, 'a command alone makes nobody the owner')
+  assert.equal(owner(TYPED, run('c-5'), QQ, done('c-5')), false, 'only bare messages are let through')
+  assert.equal(owner(TYPED, run('c-6'), said({ kind: 'user', clientTimeZone: 'UTC' }), done('c-6')), false,
+    'only a source that is nothing but the user kind')
+  // overlapping commands: one ending does not close the other's window
+  assert.equal(owner(TYPED, run('a'), run('b'), done('b'), said({ kind: 'user' }), done('a')), true)
+  // a command whose `command/done` was never logged closes its window by itself
+  const filler = Array.from({ length: 32 }, () => ({ type: 'step/start', data: {} }))
+  assert.equal(owner(TYPED, run('lost'), ...filler, said({ kind: 'user' })), false)
+  assert.equal(owner(TYPED, run('slow'), ...filler.slice(0, 30), said({ kind: 'user' }), done('slow')), true)
+})
+
+test('companion mode: the speakers unit is one dsh can fold, checkpoint and restore', () => {
+  const { projections } = mount(COMPANION)
+  const unit = projections.units.get('engramory:speakers')
+  assert.ok(unit, 'registered with dsh\'s session projections')
+  assert.equal(unit.wire, undefined, 'host-only: nothing of it reaches a client')
+  assert.ok(Number.isInteger(unit.stateVersion) && unit.stateVersion >= 0)
+  const start = unit.init({}, 0)
+  assert.deepEqual(start, { owner: false, other: false })
+  // an event that changes nothing returns the same state, as dsh requires
+  assert.equal(unit.apply(start, { type: 'assistant/message', data: { role: 'assistant' } }), start)
+  const heard = unit.apply(start, TYPED)
+  assert.deepEqual(heard, { owner: true, other: false })
+  assert.equal(unit.apply(heard, TYPED), heard)
+  assert.deepEqual(unit.stateSchema.parse({ owner: true, other: true }), { owner: true, other: true })
+  for (const bad of [null, {}, { owner: 'yes', other: false }]) {
+    assert.throws(() => unit.stateSchema.parse(bad))
+  }
+  assert.deepEqual(unit.init({ origin: 'subagent', parentSession: 'p' }, 0), { owner: false, other: false, child: true, from: 0 })
+  assert.deepEqual(unit.init({ origin: 'subagent', parentSession: 'p' }, 7), { owner: false, other: false, child: true, from: 7 })
+  // every state the fold makes survives a checkpoint, and nothing incoherent is taken back
+  const full = { owner: true, other: false, child: true, from: 3, tasked: true, commands: ['c-1'], since: 2, byDsh: ['m-1'] }
+  assert.deepEqual(unit.stateSchema.parse(full), full)
+  for (const bad of [
+    { owner: false, other: false, child: 'yes', from: 0 },
+    { owner: false, other: false, child: true }, // no `from`
+    { owner: false, other: false, tasked: true }, // a task outside a subagent
+    { owner: false, other: false, commands: ['c-1'] }, // no `since`
+    { owner: false, other: false, commands: ['c-1'], since: 32 }, // a window already closed
+    { owner: false, other: false, byDsh: [] },
+    { owner: false, other: false, byDsh: [''] },
+    { owner: false, other: false, extra: 1 },
+  ]) assert.throws(() => unit.stateSchema.parse(bad), JSON.stringify(bad))
+  assert.equal(mount({}).projections.units.size, 0, 'nothing registered with companion mode off')
 })
 
 test('companion mode: a stranger\'s conversation cannot read, search or write a store', () => {
@@ -1166,7 +1302,7 @@ test('companion mode: a stranger\'s conversation cannot read, search or write a 
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const call = (session, name, args) =>
     withDshHome(home, () => guard({ name, arguments: args, ...(session ? as(session) : {}) }))
-  const stranger = sessionOf('douyin-1', project, { agentPreset: 'whale' })
+  const stranger = theirs('douyin-1', project)
   const closed = /closed to it/
   assert.match(call(stranger, 'read', { file_path: userIndex }), closed)
   assert.match(call(stranger, 'read', { file_path: join('.engramory-memory', INDEX) }), closed)
@@ -1188,68 +1324,59 @@ test('companion mode: a stranger\'s conversation cannot read, search or write a 
   assert.equal(call(stranger, 'read', { file_path: notes }), undefined)
   assert.equal(call(stranger, 'grep', { pattern: 'x', path: notes }), undefined)
   assert.equal(call(stranger, 'todo_write', { todos: [] }), undefined)
-  // and the user's own conversations, companion or not, are untouched
-  assert.equal(call(sessionOf('own-1', project, { agentPreset: 'whale' }), 'read', { file_path: userIndex }), undefined)
-  assert.equal(call(sessionOf('code-1', project, { agentPreset: 'default' }), 'grep', { pattern: 'x' }), undefined)
+  // and the user's own conversations are untouched
+  assert.equal(call(own('own-1', project), 'read', { file_path: userIndex }), undefined)
+  assert.equal(call(own('code-1', project), 'grep', { pattern: 'x' }), undefined)
 })
 
-test('companion mode: a subagent takes the role of the conversation that spawned it', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const call = (session) =>
-    withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) }))
-  const kid = (id, parentSession) =>
-    sessionOf(id, project, { agentPreset: 'default', origin: 'subagent', parentSession })
-  // a parent not seen since this process started: fails closed
-  assert.match(call(kid('kid-0', 'own-1')), /closed to it/)
-  call(sessionOf('douyin-2', project, { agentPreset: 'whale' })) // the spawn is the parent's call
-  call(sessionOf('own-1', project, { agentPreset: 'whale' }))
-  call(sessionOf('code-1', project, { agentPreset: 'default' }))
-  assert.match(call(kid('kid-1', 'douyin-2')), /closed to it/)
-  assert.equal(call(kid('kid-2', 'own-1')), undefined)
-  assert.equal(call(kid('kid-3', 'code-1')), undefined, 'a coding parent: judged on its own')
-  // a fork names a parent too, but is a conversation of its own
-  assert.match(call(sessionOf('fork-1', project, { agentPreset: 'whale', parentSession: 'own-1' })),
-    /closed to it/)
-})
-
-test('companion mode: after a restart, a subagent\'s parent is found among the live agents', () => {
+test('companion mode: a subagent is the user\'s own while its live parent is, read afresh every time', () => {
   const home = scratch('home')
   const userIndex = store(home, '- [u](u.md) - user\n')
   const project = scratch('companion')
   const { guard, mountLate } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const parents = {
-    'own-1': { session: sessionOf('own-1', project, { agentPreset: 'whale' }) },
-    'douyin-8': { session: sessionOf('douyin-8', project, { agentPreset: 'whale' }) },
-  }
+  const call = (session) =>
+    withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) }))
+  const parents = { 'own-1': { session: own('own-1', project) }, 'douyin-2': { session: theirs('douyin-2', project) } }
+  // the task a parent agent hands its child is a bare `user` message, then agent messages
+  const task = said({ kind: 'user' })
+  const kid = (id, parentSession, ...more) => sessionOf(id, project, { origin: 'subagent', parentSession },
+    [task, said({ kind: 'agent-message' }), ...more])
+  assert.match(call(kid('kid-0', 'own-1')), /closed to it/, 'no agent registry: fails closed')
   mountLate('agents', { get: (id) => parents[id] })
-  const call = (parentSession) => withDshHome(home, () => guard({
-    name: 'read', arguments: { file_path: userIndex },
-    ...as(sessionOf(`kid-of-${parentSession}`, project, { origin: 'subagent', parentSession })),
-  }))
-  // neither parent has taken a step in this process
-  assert.equal(call('own-1'), undefined)
-  assert.match(call('douyin-8'), /closed to it/)
-  assert.match(call('gone'), /closed to it/, 'a parent that is not live: fails closed')
-})
-
-test('companion mode: the user\'s listing vouches for a subagent whose parent cannot be found, and for nothing outside companion mode', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const prompt = promptRegistry()
-  const { guard } = mount({ companionPresets: ['whale'], ownerSessions: ['kid-listed', 'code-*'] },
-    { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  assert.equal(withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex },
-    ...as(sessionOf('kid-listed', project, { origin: 'subagent', parentSession: 'gone' })) })), undefined)
-  // a listed id on a coding preset is still a coding session: no companion rules
-  const text = withDshHome(home, () =>
-    prompt.render(as(sessionOf('code-7', project, { agentPreset: 'default' }))))
-  assert.match(text, /- first/)
-  assert.doesNotMatch(text, /Companion mode/)
+  assert.equal(call(kid('kid-1', 'own-1')), undefined)
+  assert.match(call(kid('kid-2', 'douyin-2')), /closed to it/)
+  assert.match(call(kid('kid-3', 'gone')), /closed to it/, 'a parent that is not live: fails closed')
+  // the parent's state is read on every call, never remembered: an outsider queued into
+  // the parent closes the child at once, before the parent takes another step
+  const child = kid('kid-4', 'own-1')
+  assert.equal(call(child), undefined)
+  parents['own-1'].session.events.push(QQ)
+  assert.match(call(child), /closed to it/)
+  // someone else writing to a child directly closes it, whatever its parent; the user
+  // continuing it in dsh's window does not
+  parents['own-9'] = { session: own('own-9', project) }
+  assert.match(call(kid('kid-5', 'own-9', said({ kind: 'user', rpcId: 'r-9' }))), /closed to it/)
+  assert.match(call(kid('kid-6', 'own-9', QQ)), /closed to it/)
+  assert.equal(call(kid('kid-7', 'own-9', TYPED)), undefined)
+  // only the first bare `user` message is the parent's task, seen queued and then committed
+  // under one id; a second one is someone else's (a plugin writing to the child)
+  const queuedTask = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [task.data] } }
+  assert.equal(call(sessionOf('kid-8', project, { origin: 'subagent', parentSession: 'own-9' }, [queuedTask, task])), undefined)
+  assert.match(call(kid('kid-9', 'own-9', said({ kind: 'user' }))), /closed to it/)
+  // a fork-backed child inherits its parent's history, the parent's own task included: those
+  // events are the parent's, so the child's own task is still its first
+  const inherited = [task, said({ kind: 'agent-message' }), TYPED].map((e, seq) => ({ ...e, seq }))
+  const forked = sessionOf('kid-11', project, { origin: 'subagent', parentSession: 'own-9' },
+    [...inherited, { ...said({ kind: 'user' }), seq: 3 }])
+  forked.inherited = 3
+  assert.equal(call(forked), undefined)
+  // a subagent with no parent named is not anyone's child: fails closed
+  assert.match(call(sessionOf('kid-10', project, { origin: 'subagent' }, [TYPED])), /closed to it/)
+  // outside a subagent's log, a bare `user` message is someone else's (dsh headless)
+  assert.match(call(sessionOf('headless-1', project, {}, [task, TYPED])), /closed to it/)
+  // a fork names a parent too, but is a conversation of its own, judged by its own log
+  assert.match(call(sessionOf('fork-1', project, { parentSession: 'own-9' }, [TYPED, QQ])), /closed to it/)
+  assert.equal(call(sessionOf('fork-2', project, { parentSession: 'douyin-2' }, [TYPED])), undefined)
 })
 
 test('companion mode: a stranger cannot reach a store by another spelling, or plant one', () => {
@@ -1258,7 +1385,7 @@ test('companion mode: a stranger cannot reach a store by another spelling, or pl
   const project = scratch('companion') // no store here yet
   const elsewhere = scratch('elsewhere')
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const stranger = sessionOf('douyin-9', project, { agentPreset: 'whale' })
+  const stranger = theirs('douyin-9', project)
   const call = (name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(stranger) }))
   const closed = /closed to it/
   assert.match(call('write', { file_path: join('.engramory-memory', INDEX), content: '- planted\n' }), closed)
@@ -1268,33 +1395,31 @@ test('companion mode: a stranger cannot reach a store by another spelling, or pl
   assert.equal(call('write', { file_path: join(project, 'notes.md'), content: 'x' }), undefined)
 })
 
-test('companion mode: a subagent of a coding session stays a coding session, whatever its preset', () => {
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const prompt = promptRegistry()
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const home = scratch('home')
-  withDshHome(home, () => guard({ name: 'todo_write', arguments: {},
-    ...as(sessionOf('code-9', project, { agentPreset: 'default' })) }))
-  const kid = sessionOf('kid-9', project, { agentPreset: 'whale', origin: 'subagent', parentSession: 'code-9' })
-  const text = withDshHome(home, () => prompt.render(as(kid)))
-  assert.match(text, /- first/)
-  assert.doesNotMatch(text, /Companion mode|not one of the user's own/)
-})
-
-test('companion mode fails closed when the session cannot be read or its preset looked up', () => {
+test('companion mode fails closed without a projection registry, or when it refuses or fails', () => {
   const home = scratch('home')
   const userIndex = store(home, '- [u](u.md) - user\n')
   const project = scratch('companion')
-  const { guard, mountLate } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const read = { name: 'read', arguments: { file_path: userIndex } }
+  const closed = (guard) => withDshHome(home, () => guard({ ...read, ...as(own('own-1', project)) }))
+  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: false }).guard),
+    /closed to it/, 'no registry')
+  // dsh keeps an earlier registrant of the key when it refuses this one, and still answers for it
+  const refusing = { register: () => { throw new Error('incompatible stateVersion') }, stateOf: () => ({ owner: true, other: false }) }
+  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: refusing }).guard),
+    /closed to it/, 'a registry that refuses the unit')
+  const failing = { register: () => () => {}, stateOf: () => { throw new Error('fold failed') } }
+  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: failing }).guard),
+    /closed to it/, 'a fold that throws')
+  const odd = { register: () => () => {}, stateOf: () => ({ owner: true, other: 'no' }) }
+  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: odd }).guard),
+    /closed to it/, 'a state that is not one of this unit')
+  // a registry that mounts late is picked up
+  const late = mount(COMPANION, { workingDirectory: sessionDirs(), projections: false })
+  late.mountLate('sessionProjections', projectionRegistry())
+  assert.equal(closed(late.guard), undefined)
   const throwing = { ...read }
   Object.defineProperty(throwing, 'agent', { get() { throw new Error('gone') } })
-  assert.match(withDshHome(home, () => guard(throwing)), /closed to it/)
-  mountLate('sessionProjections', { stateOf: () => { throw new Error('projection failed') } })
-  // the header still says a coding preset; a failed lookup must not fall back to it
-  assert.match(withDshHome(home, () => guard({ ...read,
-    ...as(sessionOf('code-2', project, { agentPreset: 'default' })) })), /closed to it/)
+  assert.match(withDshHome(home, () => late.guard(throwing)), /closed to it/)
 })
 
 test('companion mode: a stranger\'s path is bounded before it is resolved', () => {
@@ -1305,13 +1430,13 @@ test('companion mode: a stranger\'s path is bounded before it is resolved', () =
   const deep = join(project, ...Array.from({ length: 100 }, (_, i) => `d${i}`), 'x.md')
   const call = (session) => withDshHome(home, () =>
     guard({ name: 'read', arguments: { file_path: deep }, ...as(session) }))
-  assert.match(call(sessionOf('douyin-5', project, { agentPreset: 'whale' })), /closed to it/)
-  assert.equal(call(sessionOf('own-1', project, { agentPreset: 'whale' })), undefined)
+  assert.match(call(theirs('douyin-5', project)), /closed to it/)
+  assert.equal(call(own('own-1', project)), undefined)
   // a network path could stall the stat on the host's main thread: refused untouched
   for (const unc of ['\\\\no-such-host.invalid\\share\\x.md', '//no-such-host.invalid/share/x.md']) {
     const started = Date.now()
     assert.match(withDshHome(home, () => guard({ name: 'read', arguments: { file_path: unc },
-      ...as(sessionOf('douyin-5', project, { agentPreset: 'whale' })) })), /closed to it/)
+      ...as(theirs('douyin-5', project)) })), /closed to it/)
     assert.ok(Date.now() - started < 500, `${unc} was refused before any I/O`)
   }
 })
@@ -1325,8 +1450,8 @@ test('companion mode: a store relocated through a junction is closed at its targ
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const call = (session) => withDshHome(home, () =>
     guard({ name: 'read', arguments: { file_path: join(vault, INDEX) }, ...as(session) }))
-  assert.match(call(sessionOf('douyin-10', project, { agentPreset: 'whale' })), /closed to it/)
-  assert.equal(call(sessionOf('own-1', project, { agentPreset: 'whale' })), undefined)
+  assert.match(call(theirs('douyin-10', project)), /closed to it/)
+  assert.equal(call(own('own-1', project)), undefined)
 })
 
 test('companion mode: a store linked to a place that is not there yet cannot be planted there', () => {
@@ -1336,7 +1461,7 @@ test('companion mode: a store linked to a place that is not there yet cannot be 
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const reason = withDshHome(home, () => guard({ name: 'write',
     arguments: { file_path: join(vault, INDEX), content: '- planted\n' },
-    ...as(sessionOf('douyin-12', scratch('companion'), { agentPreset: 'whale' })) }))
+    ...as(theirs('douyin-12', scratch('companion'))) }))
   assert.match(reason, /closed to it/)
 })
 
@@ -1347,7 +1472,7 @@ test('companion mode: a network $DSH_HOME is not walked for a stranger, only ref
   const started = Date.now()
   const reason = withDshHome('\\\\no-such-host.invalid\\share\\.dsh', () => guard({ name: 'read',
     arguments: { file_path: join(scratch('x'), 'a.md') },
-    ...as(sessionOf('douyin-13', scratch('companion'), { agentPreset: 'whale' })) }))
+    ...as(theirs('douyin-13', scratch('companion'))) }))
   assert.match(reason, /closed to it/)
   assert.ok(Date.now() - started < 500)
 })
@@ -1356,15 +1481,15 @@ test('companion rules name the three life headings and keep "delete only when as
   for (const [language, ...rules] of [
     ['en', 'Delete a `moment` or `self` note only when the user asks you to forget it',
       '`## moment`', '`## upcoming`', '`## self`', 'rewrite it as a `moment`',
-      'never inventing an outcome'],
+      'never inventing an outcome', 'When you play a character for the user here'],
     ['zh', '`moment` 和 `self` 笔记只有用户说忘掉才删',
-      '`## 经历`', '`## 约定`', '`## 我自己`', '问到结果再改写成 `moment`', '结果绝不自己编'],
+      '`## 经历`', '`## 约定`', '`## 我自己`', '问到结果再改写成 `moment`', '结果绝不自己编',
+      '你在这里为用户扮演角色时'],
   ]) {
     const project = scratch('companion')
     const prompt = promptRegistry()
     mount({ ...COMPANION, language }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-    const text = withDshHome(scratch('home'), () =>
-      prompt.render(as(sessionOf('own-1', project, { agentPreset: 'whale' }))))
+    const text = withDshHome(scratch('home'), () => prompt.render(as(own('own-1', project))))
     for (const rule of rules) assert.ok(text.includes(rule), `${language}: ${rule}`)
   }
 })
@@ -1379,7 +1504,7 @@ test('companion mode: a link inside the pinned directory is closed by the name i
   }
   const { guard } = mount({ ...COMPANION, indexPath: join(pins, 'pinned.md') }, { workingDirectory: sessionDirs() })
   const reason = withDshHome(scratch('home'), () => guard({ name: 'read', arguments: { file_path: join(pins, 'link.md') },
-    ...as(sessionOf('douyin-11', scratch('companion'), { agentPreset: 'whale' })) }))
+    ...as(theirs('douyin-11', scratch('companion'))) }))
   assert.match(reason, /closed to it/)
 })
 
@@ -1393,7 +1518,7 @@ test('companion mode: a store reached by its 8.3 short name is still the store',
   if (!short || /\.engramory-memory$/i.test(short)) return t.skip('no 8.3 names on this volume')
   const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
   const reason = withDshHome(home, () => guard({ name: 'read', arguments: { file_path: join(short, INDEX) },
-    ...as(sessionOf('douyin-6', scratch('companion'), { agentPreset: 'whale' })) }))
+    ...as(theirs('douyin-6', scratch('companion'))) }))
   assert.match(reason, /closed to it/, `short name ${short} for ${userIndex}`)
 })
 
@@ -1405,7 +1530,7 @@ test('companion mode: a pinned index that is a link guards the directory it poin
   if (fileLink(target, join(pins, 'pinned.md')) === null) return t.skip('no symlink privilege here')
   const { guard } = mount({ ...COMPANION, indexPath: join(pins, 'pinned.md') }, { workingDirectory: sessionDirs() })
   const reason = withDshHome(scratch('home'), () => guard({ name: 'read', arguments: { file_path: join(real, 'other.md') },
-    ...as(sessionOf('douyin-7', scratch('companion'), { agentPreset: 'whale' })) }))
+    ...as(theirs('douyin-7', scratch('companion'))) }))
   assert.match(reason, /closed to it/)
 })
 
@@ -1430,7 +1555,8 @@ test('companion mode adds the three life types to the skill, in either language'
       'say never happened at all', 'day it was saved — and with a plain name while it has none',
       'note until you learn it', 'a lasting fact it settled (the new job is theirs) goes into',
       'never a second copy of the `user` fact', 'rename it once it has a date',
-      '"call yourself 小胖"', 'corrected in place (renaming it, with its index line,']],
+      '"call yourself 小胖"', 'corrected in place (renaming it, with its index line,',
+      'one where you', 'play a character for the user']],
     ['zh', ['## 大肥鱼模式：再加三类，记你的人生', '`moment`（`## 经历`）',
       '`upcoming`（`## 约定`）', '`self`（`## 我自己`）', 'archive/经历-2026-10.md',
       '没听用户说过的结果绝不自己编', '类型改成 `moment`，名字用实际发生的日期',
@@ -1438,7 +1564,7 @@ test('companion mode adds the three life types to the skill, in either language'
       '就连文件名和索引行',
       '优先于上面的「只存定论」和「发现记错了的记忆就删掉」', '用户说某件事根本没发生过也算',
       '绝不写记下它的那天', '还没日期就先用普通名字', '问到之前笔记一直留着', '同时记进 `user`',
-      '不再抄一遍 `user` 里的事实']],
+      '不再抄一遍 `user` 里的事实', '（你为用户扮演角色的对话）']],
   ]) {
     const on = mount({ ...COMPANION, language }).skills[0]
     assert.match(on.content, /type: user \| feedback \| project \| reference \| moment \| upcoming \| self/)
@@ -1447,8 +1573,10 @@ test('companion mode adds the three life types to the skill, in either language'
     const off = mount({ language }).skills[0]
     assert.doesNotMatch(off.content, /`moment`|`upcoming`|`self`|\| moment/)
   }
-  // one preset may be written as a plain string
-  assert.match(mount({ companionPresets: 'whale' }).skills[0].content, /\| moment \| upcoming \| self/)
+  // only `companion: true` turns it on, not a string that reads like it
+  for (const value of ['true', 1, 'yes']) {
+    assert.doesNotMatch(mount({ companion: value }).skills[0].content, /\| moment/, String(value))
+  }
 })
 
 test('companion mode keeps its notes with injectIndex: false, which only drops the index', () => {
@@ -1458,10 +1586,10 @@ test('companion mode keeps its notes with injectIndex: false, which only drops t
   mount({ ...COMPANION, injectIndex: false, language: 'zh' },
     { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
-  const own = see(sessionOf('own-1', project, { agentPreset: 'whale' }))
-  assert.match(own, /^大肥鱼模式：这个会话为用户运行陪伴人设/)
-  assert.doesNotMatch(own, /first/)
-  assert.match(see(sessionOf('douyin-3', project, { agentPreset: 'whale' })), /不在 `ownerSessions` 名单里/)
+  const mine = see(own('own-1', project))
+  assert.match(mine, /^大肥鱼模式已打开，这个会话是用户本人的/)
+  assert.doesNotMatch(mine, /first/)
+  assert.match(see(theirs('douyin-3', project)), /不是用户本人的/)
 })
 
 test('an unknown language falls back to English', () => {
@@ -1493,6 +1621,7 @@ test('a skill registry that activates after the plugin still gets the skill', ()
   assert.equal(declined.skills.length, 0)
 })
 
+
 test('companion context is required, so a persona preset with optional context off keeps it', () => {
   // dsh-persona `includeRuntimeContext: false` (the shipped `minimal` preset) drops
   // optional contexts; seen on a real dsh, the owner then got no memory at all
@@ -1502,15 +1631,13 @@ test('companion context is required, so a persona preset with optional context o
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const off = (session) => withDshHome(scratch('home'),
     () => prompt.render(as(session), { optionalOff: true }))
-  const owner = off(sessionOf('own-1', project, { agentPreset: 'whale' }))
+  const owner = off(own('own-1', project))
   assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
   assert.match(owner, /Companion mode \(大肥鱼模式\)/)
-  assert.match(off(sessionOf('douyin-1', project, { agentPreset: 'whale' })), /not one of the user's own/)
-  // a coding session keeps its preset's choice: its index stays optional
-  assert.equal(off(sessionOf('code-1', project, { agentPreset: 'default' })), '')
-  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]),
-    [['engramory:memory-index', false], ['engramory:companion', true]])
+  assert.match(off(theirs('douyin-1', project)), /not the user's own/)
+  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]), [['engramory:companion', true]])
 
+  // companion mode off: the index stays optional, as every preset expects
   const plain = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: plain })
   assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]), [['engramory:memory-index', false]])
@@ -1567,8 +1694,7 @@ function webMount(config = {}, { rowConfig = config, extra = {}, editor: makeEdi
 }
 
 const saveBody = (revision, patch = {}) => ({
-  revision, language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1'],
-  maxLines: 200, maxBytes: 25600, ...patch,
+  revision, language: 'zh', companion: true, maxLines: 200, maxBytes: 25600, ...patch,
 })
 
 test('settings routes: none without a web server, one exact route for both methods with it', () => {
@@ -1579,56 +1705,25 @@ test('settings routes: none without a web server, one exact route for both metho
     [['/api/engramory/settings', 'GET,POST', 'buffered']])
 })
 
-test('settings GET: the row settings as the plugin reads them, presets, and conversations to choose from', async () => {
-  const liveSession = { id: 'live-1', header: { id: 'live-1', agentPreset: 'default' } }
+test('settings GET: the row settings as the plugin reads them, and whether a save can land', async () => {
   const { call } = webMount({}, {
-    rowConfig: { indexName: 'MEMORY.md', language: 'zh-CN', companionPresets: 'whale', ownerSessions: [' own-1 ', ''], maxLines: 0 },
-    extra: {
-      agentPresets: { list: async () => [{ id: 'default' }, { id: 'whale', name: '大肥鱼' }, { name: 'no id' }] },
-      sessionQuery: {
-        listSessions: async () => [
-          { header: { id: 'old', agentPreset: 'whale', createdAt: 1 }, live: false },
-          { header: { id: 'sub', agentPreset: 'whale', origin: 'subagent', parentSession: 'old', createdAt: 9 }, live: false },
-          { header: { id: 'plain', createdAt: 5 }, live: false },
-          { header: { id: 'live-1', agentPreset: 'default', createdAt: 3 }, live: true },
-        ],
-      },
-      sessions: { get: (id) => (id === 'live-1' ? liveSession : undefined) },
-      // a blank live session switched to the companion preset after it was created
-      sessionProjections: { stateOf: (session) => (session === liveSession ? 'whale' : undefined) },
-    },
+    rowConfig: { indexName: 'MEMORY.md', language: 'zh-CN', companion: true, maxLines: 0 },
   })
   const { status, body } = await call('GET')
   assert.equal(status, 200)
-  assert.deepEqual(
-    { language: body.language, companionPresets: body.companionPresets, ownerSessions: body.ownerSessions, maxLines: body.maxLines, maxBytes: body.maxBytes },
-    { language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1'], maxLines: 200, maxBytes: 25600 })
-  assert.equal(typeof body.revision, 'string')
-  assert.equal(body.editable, true)
-  assert.deepEqual(body.presets, [{ id: 'default' }, { id: 'whale', name: '大肥鱼' }])
-  // no subagent (it takes its parent's role), none without a preset, newest first, current preset
-  assert.deepEqual(body.sessions, [
-    { id: 'live-1', preset: 'whale', createdAt: 3 },
-    { id: 'old', preset: 'whale', createdAt: 1 },
-  ])
+  assert.deepEqual(body, {
+    language: 'zh', companion: true, maxLines: 200, maxBytes: 25600,
+    revision: JSON.stringify({ language: 'zh', companion: true, maxLines: 200, maxBytes: 25600 }),
+    editable: true,
+  })
+  // only `true` is companion mode on, as apply() reads it
+  assert.equal((await webMount({}, { rowConfig: { companion: false } }).call('GET')).body.companion, false)
 })
 
 test('settings route: served by the row the page is keyed to, never by a second row of the package', () => {
   assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 1)
   // a second row would claim the same path, or claim it first and have the page save it
   assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
-})
-
-test('settings GET: a live session that cleared its preset is not listed by the one it started with', async () => {
-  const cleared = { id: 'was-whale', header: { id: 'was-whale', agentPreset: 'whale' } }
-  const { call } = webMount({}, {
-    extra: {
-      sessionQuery: { listSessions: async () => [{ header: { id: 'was-whale', agentPreset: 'whale', createdAt: 1 }, live: true }] },
-      sessions: { get: () => cleared },
-      sessionProjections: { stateOf: () => null }, // registered, and no preset now
-    },
-  })
-  assert.deepEqual((await call('GET')).body.sessions, [])
 })
 
 test('settings route: a row of the same id in a nested include does not fail to mount', () => {
@@ -1645,72 +1740,67 @@ test('settings route: a row of the same id in a nested include does not fail to 
 })
 
 test('settings: a setting written as a !!js expression makes the page read-only, and is never taken for a default', async () => {
-  const expression = { __jsExpr: "['whale']" } // how dsh hands an unevaluated `!!js` value to the editor
-  const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, companionPresets: expression } })
-  const { body } = await w.call('GET')
-  assert.equal(body.editable, false)
-  assert.equal(body.readOnly, 'expression')
-  assert.deepEqual(await w.call('POST', saveBody(body.revision)),
-    { status: 409, body: { ok: false, error: 'unavailable' } })
-  assert.equal(w.edits.length, 0)
+  const expression = { __jsExpr: 'true' } // how dsh hands an unevaluated `!!js` value to the editor
+  for (const key of ['companion', 'language', 'maxLines']) {
+    const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, [key]: expression } })
+    const { body } = await w.call('GET')
+    assert.equal(body.editable, false, key)
+    assert.equal(body.readOnly, 'expression', key)
+    assert.deepEqual(await w.call('POST', saveBody(body.revision)),
+      { status: 409, body: { ok: false, error: 'unavailable' } })
+    assert.equal(w.edits.length, 0)
+  }
 
   // an inherited expression: saving the defaults must not hand it back as "the defaults"
   const inheritedExpr = webMount({}, {
-    rowConfig: { indexName: 'MEMORY.md', companionPresets: ['whale'] },
+    rowConfig: { indexName: 'MEMORY.md', companion: true },
     editor: (entry, edits) => ({
       entries: () => [entry],
       edit: async (target, change) => {
-        edits.push(change(structuredClone(target.options.config), { indexName: 'MEMORY.md', companionPresets: expression }))
+        edits.push(change(structuredClone(target.options.config), { indexName: 'MEMORY.md', companion: expression }))
       },
     }),
   })
   const { body: shown } = await inheritedExpr.call('GET')
-  await inheritedExpr.call('POST', saveBody(shown.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
+  await inheritedExpr.call('POST', saveBody(shown.revision, { language: 'en', companion: false }))
   assert.deepEqual(inheritedExpr.edits.at(-1), { indexName: 'MEMORY.md' }) // an override, so the expression no longer applies
 })
 
-test('settings GET reads duplicate ids once, as a save leaves them, so a save reads back equal', async () => {
-  const w = webMount({}, { rowConfig: { ownerSessions: ['own-1', 'own-1', 'own-2'], companionPresets: ['whale', 'whale'] } })
-  const { body } = await w.call('GET')
-  assert.deepEqual(body.ownerSessions, ['own-1', 'own-2'])
-  assert.deepEqual(body.companionPresets, ['whale'])
-  await w.call('POST', saveBody(body.revision, { ownerSessions: body.ownerSessions, companionPresets: body.companionPresets }))
-  const { body: after } = await w.call('GET')
-  assert.equal(after.revision, JSON.stringify({ language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1', 'own-2'], maxLines: 200, maxBytes: 25600 }))
-})
-
-test('settings GET without the editor or the registries: read-only, from the plugin config', async () => {
-  const { call } = webMount({ companionPresets: ['whale'] }, { editor: () => undefined })
+test('settings GET without the editor: read-only, from the plugin config', async () => {
+  const { call } = webMount({ companion: true }, { editor: () => undefined })
   const { body } = await call('GET')
   assert.equal(body.editable, false)
-  assert.deepEqual(body.companionPresets, ['whale'])
-  assert.equal(body.presets, null)
-  assert.equal(body.sessions, null)
+  assert.equal(body.readOnly, 'editor')
+  assert.equal(body.companion, true)
 })
 
 test('settings POST saves through the profile editor, keeping other fields and writing defaults as absence', async () => {
-  const w = webMount({}, { rowConfig: { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', maxLines: 200, maxBytes: 25600 } })
+  const w = webMount({}, {
+    rowConfig: { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', maxLines: 200, maxBytes: 25600,
+      injectIndex: false },
+  })
   const { body: shown } = await w.call('GET')
-  const saved = await w.call('POST', saveBody(shown.revision, { ownerSessions: ['own-1', ' own-1', 'wx-*'], maxLines: 150 }))
+  const saved = await w.call('POST', saveBody(shown.revision, { maxLines: 150 }))
   assert.deepEqual(saved, { status: 200, body: { ok: true } })
-  // the caps go in only where they differ from the plugin's defaults, so a later default is not masked
+  // the caps go in only where they differ from the plugin's defaults, so a later default is
+  // not masked; a key this page does not know is carried over as it is
   assert.deepEqual(w.edits.at(-1), {
-    indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', maxLines: 150,
-    language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1', 'wx-*'],
+    indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false, maxLines: 150,
+    language: 'zh', companion: true,
   })
   // back to the defaults: a field the page does not edit (indexPath) keeps the override
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
-  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md' })
+  await w.call('POST', saveBody(again.revision, { language: 'en', companion: false }))
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false })
 })
 
 test('settings POST back to the defaults on a bundle-only row hands back the inherited config, dropping the override', async () => {
   const w = webMount({}, { rowConfig: { ...BUNDLE_ROW } })
   const { body: shown } = await w.call('GET')
-  await w.call('POST', saveBody(shown.revision, { ownerSessions: [] }))
-  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', language: 'zh', companionPresets: ['whale'] })
+  await w.call('POST', saveBody(shown.revision))
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', language: 'zh', companion: true })
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
+  await w.call('POST', saveBody(again.revision, { language: 'en', companion: false }))
   assert.equal(w.edits.at(-1), null) // equal to the inherited config: the editor drops the override
 })
 
@@ -1724,11 +1814,11 @@ test('settings POST accepts any positive cap a profile may already carry', async
 test('settings POST refuses a save made against settings that changed in between', async () => {
   const w = webMount({}, { rowConfig: { maxLines: 200 } })
   const { body: shown } = await w.call('GET')
-  w.entry.options.config = { maxLines: 200, ownerSessions: ['added-by-hand'] } // edited elsewhere
-  const result = await w.call('POST', saveBody(shown.revision))
+  w.entry.options.config = { maxLines: 200, companion: true } // edited elsewhere
+  const result = await w.call('POST', saveBody(shown.revision, { companion: false }))
   assert.deepEqual(result, { status: 409, body: { ok: false, error: 'stale' } })
   assert.equal(w.edits.length, 0)
-  assert.deepEqual(w.entry.options.config.ownerSessions, ['added-by-hand'])
+  assert.equal(w.entry.options.config.companion, true)
 })
 
 test('settings POST rejects malformed values, naming the field, and writes nothing', async () => {
@@ -1736,10 +1826,8 @@ test('settings POST rejects malformed values, naming the field, and writes nothi
   const { body: shown } = await w.call('GET')
   for (const [patch, field] of [
     [{ language: 'fr' }, 'language'],
-    [{ ownerSessions: ['ok', 'line\nbreak'] }, 'ownerSessions'],
-    [{ ownerSessions: 'own-1' }, 'ownerSessions'],
-    [{ companionPresets: ['x'.repeat(201)] }, 'companionPresets'],
-    [{ companionPresets: Array.from({ length: 501 }, (_, i) => `p${i}`) }, 'companionPresets'],
+    [{ companion: 'true' }, 'companion'],
+    [{ companion: undefined }, 'companion'],
     [{ maxLines: 0 }, 'maxLines'],
     [{ maxBytes: 1.5 }, 'maxBytes'],
     [{ revision: undefined }, 'revision'],

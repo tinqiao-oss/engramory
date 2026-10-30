@@ -32,59 +32,79 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   to forget. None needs Why/How. Tie-breaks with the four: a lasting fact about the
   user (a birthday) stays `user`, and what the user asks of the character stays
   `feedback`. §4, §5, §6 and the report contract name the exceptions.
-- **dsh companion mode (大肥鱼模式).** `companionPresets` names the persona preset(s);
-  a session running one — the preset it runs now, read from dsh's `agentPreset`
-  projection — is a companion conversation, and coding sessions in the same profile are
-  untouched. The user's own companion conversations (`ownerSessions`, ids from the
-  session menu's *Copy Session ID*, `prefix*` allowed) get the index plus companion
-  rules: recall on any message, a greeting included; speak of memory in character;
-  never claim a save that did not happen; never write ID numbers, card numbers or
-  passwords. Any other companion conversation — chat bridges open one per contact or
-  group in the same profile — gets no index, a note saying so, and file tools that may
-  name files only: a directory is refused (grep, glob and directory views walk trees
-  that may hold a store), and so is any path into a store, by path segment as written
-  and as the OS resolves it — links, case, Unicode form, 8.3 short names, a store not
-  created yet — and at the real location of a store relocated through a link or
-  junction (the global one, those from the session's directory up, the pinned one).
-  A subagent takes its parent's role, the parent looked up among dsh's
-  live agents when this process has not seen it; a fork is judged on its own id. It
-  fails closed — no session, a parent neither seen nor live (unless the subagent's own
-  id is listed), a failed preset lookup, a path over 64 segments, a network path — and
-  it is best-effort, not access control: a shell tool reads any file (SECURITY.md).
-  With companion mode on, the skill every session shares gains its companion section;
-  coding sessions keep their index, their guard and their recall rules.
+- **dsh companion mode (大肥鱼模式)**, for a dsh other people can talk to as well — a
+  character wired to QQ, WeChat or Douyin through a bridge plugin. `companion: true` turns
+  it on, and then only the user's own conversations get the memory: one the user has
+  written in, in dsh's own window, and nobody else has. dsh stamps every user message
+  with its source, and its browser client sends each prompt with a request id and the
+  browser's time zone; a host-only session projection (`engramory:speakers`) folds who has
+  written in each session. Everything else is someone else's — any kind dsh's own
+  producers do not use (a bridge's `plugin:<name>`, or any other) or dsh's plain `user`
+  kind, a program calling dsh web's API,
+  `dsh headless`, an automation's conversation before the user writes in it, a caller dsh
+  names as not the owner — and once anyone else has written, the conversation stays
+  theirs; dsh's own producers decide nothing. A bridge marks the owner's own messages
+  with `speaker: { role: 'owner' }` on their source, and its own notices with
+  `role: 'none'` (the plugin README's standard for bridge authors). The user's own
+  conversations get the index plus companion rules: when the agent plays a character,
+  recall on any message, a greeting included; speak of memory in character; never claim
+  a save that did not happen; never write ID numbers, card numbers or passwords. Anyone
+  else's gets no index, a note saying so, and file tools that may name files only: a
+  directory is refused (grep, glob and directory views walk trees that may hold a
+  store), and so is any path into a store, by path segment as written and as the OS
+  resolves it — links, case, Unicode form, 8.3 short names, a store not created yet —
+  and at the real location of a store relocated through a link or junction (the global
+  one, those from the session's directory up, the pinned one). A subagent is the user's
+  own while its live parent is, read afresh on every call, and nobody else has written to
+  it directly; a fork is judged by its own history, the inherited part included. It fails
+  closed — no session, a projection registration refused, a parent not live, a path over
+  64 segments, a network path — and it is best-effort, not access control: a shell tool
+  reads any file, and a program can imitate dsh's page (SECURITY.md). Answers to the
+  agent's questions, scheduled prompts and the message a slash command adds carry no
+  author and count as nobody's. With
+  companion mode on, the skill gains its companion section. A run on a real dsh
+  (0.2.1-rc.5) found, before release, that dsh computes a step's runtime context before
+  it commits the messages that step delivers: judged on commits, the user's first message
+  got the note and an outsider's first message in the user's conversation got the memory.
+  A message now counts from the moment it is queued (`agent/inbox/spliced`); checked
+  again on that dsh with messages typed in its window, sent through its API with and
+  without a time zone, and after a restart. Cross-review (GPT and DeepSeek) then found
+  kinds no dsh producer uses taken for nobody's, a subagent's remembered parent role
+  outliving an outsider's message to the parent, an outsider writing to a subagent
+  directly, a refused projection registration read anyway, then a plugin's bare message to
+  a subagent taken for its task, a subagent with no parent named, and the owner's own
+  `/plan <text>` closing their conversation, then overlapping commands, a command whose
+  end was never logged, a fork-backed subagent's inherited task, and checkpoints taken
+  back without a coherence check. The mode was first built on
+  persona presets and a list of the user's session ids; that was dropped before release,
+  since a popular persona plugin applies its persona without a preset, and a list of ids
+  cannot follow a bridge that opens a new session for every message.
 - **A settings page on dsh** (the plugin's first browser half, `client.js`). On the
-  Plugins page, Engramory's row opens a page that sets the memory language, the
-  companion presets, which of their conversations are the user's own — one switch per
-  conversation, so no session id is pasted into YAML — and the index cap. It saves
-  through dsh's own profile editor (validated, written to the profile's
-  `cordis.patch.yml`, plugin reloaded, or the file left as it was), refuses a save made
-  against settings changed elsewhere, and writes defaults as absence. Its route is
-  reached only by the owner's signed-in browser: dsh answers 401 without the login
-  cookie and 403 to a cross-site request, so an agent cannot list itself as an owner.
-  Plain script, no build, React from the page, host theme tokens, Chinese and English.
-  The package now also exports display metadata (`locale/*.json`) and an icon. Two
-  rounds of cross-review (GPT and DeepSeek) and runs on a real dsh found, before
+  Plugins page, Engramory's row opens a page that sets the memory language, companion
+  mode and the index cap. It saves through dsh's own profile editor (validated, written
+  to the profile's `cordis.patch.yml`, plugin reloaded, or the file left as it was),
+  refuses a save made against settings changed elsewhere, and writes defaults as
+  absence. Its route is reached only by the owner's signed-in browser: dsh answers 401
+  without the login cookie and 403 to a cross-site request, so an agent cannot turn
+  companion mode off. Plain script, no build, React from the page, host theme tokens,
+  Chinese and English. The package now also exports display metadata (`locale/*.json`)
+  and an icon. Cross-review (GPT and DeepSeek) and runs on a real dsh found, before
   release: a second row of the package claiming the route (or having the page save its
-  config), duplicate ids that never read back equal after a save, fetches without a
-  deadline (body included), a cleared preset listed by the one a session started with,
-  default caps pinned into the profile, a `!!js` value taken for a default, and the
-  row id read from the tree-scoped `entry.id` (`include:engramory`) instead of
-  `options.id`.
-- **A companion conversation's context is required.** On a real dsh, a persona preset
-  that turns optional runtime context off (dsh-persona `includeRuntimeContext: false`,
-  as the shipped `minimal` preset does) left the owner with no memory at all. The
-  owner's memory and rules, and a stranger's note, are now a second runtime context
-  marked `required`; every other conversation's index stays optional. Checked by hand
-  on dsh 0.2.1-rc.5 with an owner's, a stranger's and a coding conversation.
+  config), fetches without a deadline (body included), default caps pinned into the
+  profile, a `!!js` value taken for a default, and the row id read from the tree-scoped
+  `entry.id` (`include:engramory`) instead of `options.id`.
+- **Companion mode's context is required.** On a real dsh, a persona preset that turns
+  optional runtime context off (dsh-persona `includeRuntimeContext: false`, as the
+  shipped `minimal` preset does) left the owner with no memory at all. In companion mode
+  the owner's memory and rules, and anyone else's note, are a runtime context marked
+  `required`; with it off, the index stays optional.
 - **Defaults are unchanged.** With companion mode off and English, the skill, the
   injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
   compared). Four rounds of cross-review (GPT and DeepSeek) found, before release, a
   stranger planting a store that did not exist yet, forks inheriting the owner's role,
   case / 8.3 / junction / dangling-link aliases past the filter, a tree search over
   another project's store, a
-  stray argument standing in for a search root, a failed preset lookup trusting the
-  header, subagents stranded after a restart, unbounded sync I/O on long paths, and the
+  stray argument standing in for a search root, subagents stranded after a restart, unbounded sync I/O on long paths, and the
   skill telling a companion conversation that a greeting gets no recall.
 
 ## 0.12.4 — 2026-10-29
