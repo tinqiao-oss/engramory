@@ -86,9 +86,9 @@ export function apply(ctx, config = {}) {
   // (renaming `indexName` would just unguard the real index). The Claude Code hook
   // has had ENGRAMORY_INDEX_PATH for exactly this; this is its counterpart.
   //
-  // The key and the basename are computed ONCE here: guards run on every tool call
-  // and must stay cheap, so the per-call path stays a string compare and the single
-  // realpath() only happens when the basename already matched.
+  // Its identity is found on every gated write (pinnedKey), as the target's is: a key
+  // found once at start went stale when a folder on its path became a link or a drive
+  // was mapped later, and a relative pin names a file in each session's directory.
   const indexPath = typeof config.indexPath === 'string' && config.indexPath.trim()
     ? config.indexPath.trim()
     : undefined
@@ -98,10 +98,6 @@ export function apply(ctx, config = {}) {
   const settings = {
     indexName: indexNameOf(config.indexName),
     indexPath,
-    // A relative pin names a file in each session's directory, as recall and dsh's own
-    // file tools resolve it: its key is found per call (pinnedKey), not once against
-    // the process's directory, where it named a file nobody was writing.
-    indexKey: indexPath === undefined || !qualified(indexPath) ? undefined : pathKey(indexPath),
     // When pinned, the name to match is the pinned file's own basename.
     matchName: (indexPath === undefined
       ? indexNameOf(config.indexName)
@@ -773,7 +769,7 @@ async function projectStoreOf(start, indexName) {
   }
   let realRoot
   try {
-    realRoot = await recallRealpath(root)
+    realRoot = await realOfAsync(root)
   } catch {
     return undefined
   }
@@ -793,12 +789,12 @@ async function existsAsync(path) {
   }
 }
 
-/** projectIndex(), asynchronously, against a root already resolved by recallRealpath. */
+/** projectIndex(), asynchronously, against a root already resolved by realOfAsync(). */
 async function projectIndexAsync(path, realRoot) {
   try {
     const link = await fsp.lstat(path)
     if (link.isSymbolicLink() || !link.isFile()) return false
-    return contains(realRoot, await recallRealpath(path))
+    return contains(realRoot, await realOfAsync(path))
   } catch {
     return false
   }
@@ -809,13 +805,6 @@ function contains(root, p) {
   const rel = relative(folded(root), folded(p))
   return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
-
-/**
- * The realpath pathKey() resolves with, asynchronously: Node's JS one on Windows, which
- * keeps an 8.3 short name as written, the OS's elsewhere — so a store is inside its project
- * here exactly when projectIndex() says so for recall.
- */
-const recallRealpath = process.platform === 'win32' ? promisify(realpath) : fsp.realpath
 
 /** A real path as compared here: case folded on Windows only, as pathKey(). */
 const folded = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)
@@ -1328,9 +1317,10 @@ const under = (path, root) =>
   path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
 
 /**
- * pathKey() resolved by the OS on every platform, then folded. Windows' native
- * realpath expands 8.3 short names (`ENGRAM~1` for `.engramory-memory`) that the JS
- * one keeps, which the cap can live with and the stranger filter cannot.
+ * pathKey() for the stranger filter: resolved by the OS (so an 8.3 short name such as
+ * `ENGRAM~1` for `.engramory-memory` is expanded), then folded in case and Unicode form on
+ * every platform. Where pathKey() falls back to Node's walk, this throws on any error but
+ * "nothing there": the filter fails closed.
  */
 function osKey(p) {
   let head = process.platform !== 'win32' && isAbsolute(p) ? p : resolve(p)
@@ -1535,11 +1525,43 @@ function projectIndex(path, root) {
   return inside(path, root)
 }
 
-/** Does `path`, symlinks resolved, stay under `root`? */
+/**
+ * Does the existing `path`, links resolved, stay under the existing `root`? Both must
+ * resolve: one that cannot is not known to be inside (pathKey() would fall back to the
+ * spelling, and a link out of the project would read as in it).
+ */
 function inside(path, root) {
-  const rel = relative(pathKey(root), pathKey(path))
-  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+  try {
+    return contains(realOf(root), realOf(path))
+  } catch {
+    return false
+  }
 }
+
+/**
+ * The real path of an existing `p` as the OS gives it — 8.3 short names expanded. Where the
+ * OS will not give one on Windows (a volume its API does not serve, a system folder it will
+ * not open), Node's own walk, as before; "nothing there" is not retried.
+ */
+function realOf(p) {
+  try {
+    return realpathSync.native(p)
+  } catch (error) {
+    if (process.platform !== 'win32' || absent(error)) throw error
+    return realpathSync(p)
+  }
+}
+
+/** realOf(), asynchronously, for the memory page. */
+async function realOfAsync(p) {
+  try {
+    return await fsp.realpath(p)
+  } catch (error) {
+    if (process.platform !== 'win32' || absent(error)) throw error
+    return await jsRealpath(p)
+  }
+}
+const jsRealpath = promisify(realpath)
 
 function exists(path) {
   try {
@@ -1609,8 +1631,8 @@ function withinCap(text, settings, used = 0) {
  * The cap itself. Returning a string denies the call; `undefined` lets it through.
  *
  * Guards are synchronous by contract, so this stays cheap: every tool that cannot
- * write leaves on string compares; a write pays a path resolution, and a write to the
- * index one bounded read of it.
+ * write leaves on string compares; a write pays a path resolution (two with an index
+ * pinned), and a write to the index one bounded read of it.
  */
 function refuseOversizedIndex(exec, settings, sessionCwd) {
   const args = exec?.arguments
@@ -1710,14 +1732,14 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
 }
 
 /**
- * The pinned index's identity for this call, or undefined when nothing is pinned: an
- * absolute pin's, computed once; a relative pin's, resolved against the calling
- * session's directory as recall resolves it (hostPath) — the process's only when the
- * session has none, as dsh 0.1.x's tools do.
+ * The pinned index's identity for this call, or undefined when nothing is pinned: found
+ * now, from the file system as it is now, as the target's is; a relative pin resolved
+ * against the calling session's directory as recall resolves it (hostPath) — the
+ * process's only when the session has none, as dsh 0.1.x's tools do.
  */
 function pinnedKey(exec, settings, sessionCwd) {
   if (settings.indexPath === undefined) return undefined
-  return settings.indexKey ?? pathKey(hostPath(sessionCwd(exec), settings.indexPath))
+  return pathKey(hostPath(sessionCwd(exec), settings.indexPath))
 }
 
 /**
@@ -1991,21 +2013,22 @@ function hostPath(cwd, p) {
  * would make an unrelated `memory.md` collide with the pinned index. (Known limit:
  * `toLowerCase` is not NTFS's exact case-folding table, same as the Python guard.)
  *
- * On POSIX an absolute spelling is kept as written and walked by the OS
- * (`realpathSync.native` is realpath(3)): Node's JS realpathSync resolve()s first, which
- * collapses a `..` after a symlinked segment lexically — to the parent of the LINK,
+ * The OS resolves it (`realpathSync.native`). On POSIX an absolute spelling is kept as
+ * written and walked by the OS (realpath(3)): Node's JS realpathSync resolve()s first,
+ * which collapses a `..` after a symlinked segment lexically — to the parent of the LINK,
  * where dsh, walking it physically, reaches the parent of its TARGET. `link/../idx.md`
  * then named another file than the one written (#20). Windows resolves `..` lexically
- * anyway, as dsh does there, so it keeps the JS form.
+ * anyway, as dsh does there, so the path is resolve()d first; the OS then expands an 8.3
+ * short name (`PROGRA~1`, `MEMORY~1.MD`), which Node's JS realpath keeps — the same file
+ * written through its short name was not the guarded index.
  */
 function pathKey(p) {
   const posix = process.platform !== 'win32'
-  const real = posix ? realpathSync.native : realpathSync
   let head = posix && isAbsolute(p) ? p : resolve(p)
   const tail = []
   for (;;) {
     try {
-      head = real(head)
+      head = realOf(head)
       break
     } catch {
       const parent = dirname(head)

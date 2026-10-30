@@ -143,7 +143,10 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   this, a plugin-only install never said where: on a real dsh, a model in a fresh
   workspace searched the user's home folder and read an old memory backup, then wrote its
   first index into the session's directory, where recall and the memory page never look.
-- **dsh: the cap guards the index recall reads, in two configurations where it did not.**
+- **SKILL.md §0 names the default store as the installer makes it:** `.engramory-memory/`
+  at the root of the active project (it said `memory/`), noting that a host may default
+  elsewhere — on dsh, one global store under `$DSH_HOME`.
+- **dsh: the cap guards the index recall reads, in three cases where it did not.**
   A relative `indexPath` — and on Windows one rooted without a drive, `\notes\INDEX.md` —
   is now resolved against each session's working directory by the guard, as recall always
   resolved it; the guard keyed it once against dsh's own process directory, so the file
@@ -151,9 +154,15 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   `indexName` that is not a plain file name (a path separator, `:`, `.` or `..`) now falls
   back to `MEMORY.md`, as an empty one does: recall read the nested file it named while the
   guard compared base names. A profile that used one keeps its old index unread: move that
-  index to `MEMORY.md` beside its notes, or pin it with an absolute `indexPath`. Both date
-  from dsh-engramory 0.2.x. (Still open, as before: a Windows 8.3 short name for the index
-  or a folder on its path is not matched by the guard.)
+  index to `MEMORY.md` beside its notes, or pin it with an absolute `indexPath`. And on
+  Windows a path is now resolved by the OS for the guard's identity, as for the stranger
+  filter: Node's JS realpath kept an 8.3 short name (`PROGRA~1`, `AVERYV~1.MD`), so a
+  write through one — to a pinned index, or to one matched by a long `indexName` — was
+  not the guarded index (where the OS will not resolve a path, Node's walk is used, as
+  before). All three date from dsh-engramory 0.2.x. With them, a pinned index's identity
+  is found on every write rather than once at start, so a folder on its path that becomes
+  a link later is still matched; and a project store's index is in its project only when
+  both resolve, never by spelling alone.
 - **Defaults are otherwise unchanged in English.** With companion mode off, private, and
   English (an English dsh or system, or `language: en`), the injected index and every
   guard verdict are byte-identical to 0.12.4 (34 outputs compared), and the skill differs

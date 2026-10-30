@@ -41,8 +41,10 @@ and resumable project state. Do not create a second "handoff" memory type or a
 parallel handoff store: unfinished-task continuity belongs in a `project` note
 and follows the same index, dedup, correction, and retirement rules.
 
-- Default: a `memory/` directory the user configures (e.g. inside their notes
-  folder, or a `memory/` folder at the root of the active project).
+- Default: `.engramory-memory/` at the root of the active project — what
+  `tools/engramory_init.py` creates (a host may default elsewhere: on dsh it is one
+  global store under `$DSH_HOME`; see the host's adapter README) — or a folder the
+  user configures (e.g. inside their notes folder).
 - It MUST be configurable; never hard-code an absolute path in the skill.
 - If `<MEMORY_ROOT>` lives inside a git repository, it MUST be git-ignored —
   memories routinely contain machine-local, sensitive but non-credential detail

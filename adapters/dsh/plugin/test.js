@@ -9,7 +9,7 @@
  * (issue #8), so the mock now enforces the same access rules the real host does.
  */
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import {
   chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
   utimesSync, writeFileSync,
@@ -478,6 +478,63 @@ test('a relative pinned index is the one in the session\'s directory, as recall 
   mount({ indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   writeFileSync(join(a, 'notes', 'INDEX.md'), '- [a](a.md) - pinned here\n', 'utf8')
   assert.match(prompt.contexts[0].text(at(a)), /pinned here/)
+})
+
+test('a write through an 8.3 short name is a write to the file it stands for', (t) => {
+  if (process.platform !== 'win32') return t.skip('8.3 short names are a Windows form')
+  // Node's JS realpath kept `AVERYV~1.MD`: through it, a pinned index, or one matched by a
+  // long name, was written past the cap
+  const dir = realpathSync.native(scratch('short-names'))
+  const long = join(dir, 'averyveryverylongindexname.md')
+  writeFileSync(long, '- x\n', 'utf8')
+  const short = execSync(`cmd /c for %I in ("${long}") do @echo %~sI`, { encoding: 'utf8' }).trim()
+  // the file's own name must have a short form, not only a folder above it
+  if (basename(short).toLowerCase() === basename(long).toLowerCase()) return t.skip('this volume makes no 8.3 names')
+  assert.match(mount({ indexPath: long }).guard(write(short, big(300))), /300 lines/, short)
+  assert.match(mount({ indexName: basename(long) }).guard(write(short, big(300))), /300 lines/, short)
+  // and a shrinking write through it still passes
+  assert.equal(mount({ indexPath: long }).guard(write(short, '- y\n')), undefined)
+})
+
+test('where the OS will not resolve a path, Node\'s walk does, and a link out of a project stays out', (t) => {
+  if (process.platform !== 'win32') return t.skip('the fallback is Windows-only; POSIX resolves natively as before')
+  // C:\Recovery and some volumes refuse the OS's realpath (EPERM) where Node's walk works;
+  // a spelling fallback would make a junction out of the project read as in it
+  const project = realpathSync.native(scratch('native-fails'))
+  mkdirSync(join(project, '.git'))
+  store(project, '- [p](p.md) - in the project\n')
+  const outside = realpathSync.native(scratch('native-fails-out'))
+  store(outside, '- [s](s.md) - a secret line\n')
+  const linked = realpathSync.native(scratch('native-fails-linked'))
+  mkdirSync(join(linked, '.git'))
+  symlinkSync(join(outside, '.engramory-memory'), join(linked, '.engramory-memory'), 'junction')
+  const native = realpathSync.native
+  realpathSync.native = () => { throw Object.assign(new Error('EPERM: refused'), { code: 'EPERM' }) }
+  try {
+    const prompt = promptRegistry()
+    mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    const home = scratch('native-fails-home')
+    assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /in the project/)
+    assert.doesNotMatch(withDshHome(home, () => prompt.contexts[0].text(at(linked))), /secret line/)
+    // and the cap still knows a pinned index through it
+    const pin = join(project, '.engramory-memory', INDEX)
+    assert.match(mount({ indexPath: pin }).guard(write(pin, big(300))), /300 lines/)
+  } finally {
+    realpathSync.native = native
+  }
+})
+
+test('a pinned index whose folder becomes a link after start is still the one guarded', () => {
+  // its identity was found once, at start: the folder did not exist yet, so the key named
+  // the spelling, and once it was a link the file written through it went unmatched
+  const base = realpathSync.native(scratch('pin-later'))
+  const vault = join(base, 'vault')
+  mkdirSync(vault)
+  const pin = join(base, 'store', INDEX)
+  const { guard } = mount({ indexPath: pin })
+  symlinkSync(vault, join(base, 'store'), process.platform === 'win32' ? 'junction' : 'dir')
+  assert.match(guard(write(join(vault, INDEX), big(300))), /300 lines/)
+  assert.match(guard(write(pin, big(300))), /300 lines/)
 })
 
 test('a pin rooted but naming no drive lands on the session\'s drive, as recall resolves it', async (t) => {
@@ -2285,6 +2342,31 @@ test('memory GET: a workspace whose path now leads elsewhere, or whose index is 
   if (fileLink(secret, join(repo, '.engramory-memory', INDEX)) === null) return t.skip('no symlink privilege here')
   const linked = memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'r' }] })
   assert.deepEqual((await withHomeAsync(home, () => linked.call())).body.stores, [])
+})
+
+test('memory GET: where the OS will not resolve a project\'s index, Node\'s walk does', async (t) => {
+  if (process.platform !== 'win32') return t.skip('the fallback is Windows-only; POSIX resolves natively as before')
+  const home = scratch('mem-native-home')
+  const repo = realpathSync.native(scratch('mem-native-repo'))
+  mkdirSync(join(repo, '.git'))
+  store(repo, '- [a](a.md)\n')
+  const index = join(repo, '.engramory-memory', INDEX).toLowerCase()
+  // the page reads node:fs/promises through its ES namespace: patch the module, then sync it
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const native = promises.realpath
+  promises.realpath = async (p, ...rest) => {
+    if (String(p).toLowerCase() === index) throw Object.assign(new Error('EPERM: refused'), { code: 'EPERM' })
+    return native(p, ...rest)
+  }
+  syncBuiltinESMExports()
+  try {
+    const m = memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'r' }] })
+    assert.deepEqual((await withHomeAsync(home, () => m.call())).body.stores.map((s) => s.id), ['ws:w'])
+  } finally {
+    promises.realpath = native
+    syncBuiltinESMExports()
+  }
 })
 
 test('memory GET: a pinned index lists its own directory alone; a relative pin cannot be listed', async () => {
