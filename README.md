@@ -52,8 +52,9 @@ is, how the agent should behave, and what a project needs next.
    it (without the plugin, dsh needs the read too). Bounding the
    index controls recurring context cost and avoids exceeding a host's load window.
 2. **Curated, actionable notes.** The types are
-   `user | feedback | project | reference`, plus `life` for a companion character's
-   own moments (SKILL.md §2.2). A store can be written in Chinese (§1.1). Procedural
+   `user | feedback | project | reference`, plus `moment | upcoming | self` for a
+   companion character's own life (SKILL.md §2.2). A store can be written in Chinese
+   (§1.1). Procedural
    `feedback` records reusable
    corrections with **Why:** and **How to apply:**. The agent checks for duplicates,
    updates existing notes, retires wrong or stale facts, and avoids copying what

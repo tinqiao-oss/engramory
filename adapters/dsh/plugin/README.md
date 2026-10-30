@@ -87,10 +87,15 @@ plugin. Turn it on by naming the preset(s) in `companionPresets`; a session runn
 of them is a companion conversation. Coding sessions in the same profile keep their index,
 guard and recall rules; the skill they share only gains a companion section.
 
-- **A fifth type, `life`** ([SKILL.md §2.2](../../../SKILL.md)): shared moments with
-  their dates, things coming up in the user's life, changes in the character itself.
-  Kept, folded into a monthly archive when the index fills, deleted only when the user
-  asks to forget. The other four types keep their meaning.
+- **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
+  `moment` — something the character and the user shared, with its date; kept, and
+  folded into a monthly archive when the index fills. `upcoming` — something coming up
+  in the user's life; asked about once its date passes, and rewritten as a `moment`
+  once the user has said how it went. `self` —
+  a change in the character itself, such as a nickname; updated in place, never folded.
+  A `moment` or `self` note is deleted only when the user asks to forget. In a Chinese
+  store their headings are `## 经历`, `## 约定` and `## 我自己`. The other four types
+  keep their meaning.
 - **Recall in character.** A companion conversation is told that any message, a greeting
   included, may call for recall, and to speak of what it remembered — or failed to save
   — in character, without naming files or tools.

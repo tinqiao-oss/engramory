@@ -117,7 +117,7 @@ Three things change; the rest of the format does not:
 | | English | Chinese |
 |---|---|---|
 | note name (= filename without `.md` = `name:`) | `founder-profile` | `主人生日` |
-| index type headings | `## user` `## feedback` `## project` `## reference` (`## life`, §2.2) | `## 用户` `## 反馈` `## 项目` `## 参考` (`## 人生`) |
+| index type headings | `## user` `## feedback` `## project` `## reference` (`## moment` `## upcoming` `## self`, §2.2) | `## 用户` `## 反馈` `## 项目` `## 参考` (`## 经历` `## 约定` `## 我自己`) |
 | reasoning labels (§2) | `**Why:**` `**How to apply:**` | `**为什么：**` `**怎么用：**` |
 
 Frontmatter keys, the `type:` values, dates, and the index filename stay as they are,
@@ -143,7 +143,8 @@ none yet. Never keep two headings for one type.
 
 The type tells you how to treat the memory: whether it carries an action, whether
 it goes stale, and when to recall it. A store that a companion character writes may
-also use a fifth, `life` (§2.2).
+also use three more for the character's own life — `moment`, `upcoming` and `self`
+(§2.2).
 
 ### `user` — who the user is
 Stable facts about the person: role, expertise, durable preferences, identity.
@@ -249,46 +250,74 @@ its line:
 label adds nothing there. Keep `scope` out of `MEMORY.md`: it governs curation,
 not recall, and index lines are under a hard budget (§3).
 
-### 2.2 `life` — a companion's own life (optional fifth type)
+### 2.2 A companion's life: `moment`, `upcoming`, `self` (optional types)
 
 Only for a host that runs a companion character — a persona the user chats with,
 such as the dsh plugin's companion mode (大肥鱼模式). A store without one never needs
-it, and the four types keep their meaning alongside it: who the user is stays
+them, and the four types keep their meaning alongside them: who the user is stays
 `user`; how they want to be addressed, or what never to say, stays `feedback`.
 
-`life` holds what the character has lived:
+Three types hold what the character has lived. They are split by how each is kept,
+not by topic — a topic is found by name and search, and every extra type is one more
+place to misfile a note:
 
-- a moment shared with the user, with its date — "2026-10-12, first live stream
-  together";
-- something coming up in the user's life that is worth asking about later — "job
-  interview on 2026-10-31";
-- a change in the character itself — a new liking, a catchphrase it picked up.
+| type | holds | example | index heading |
+|---|---|---|---|
+| `moment` | something the character and the user shared, with its date | "2026-10-12, first live stream together" | `## moment` (`## 经历`) |
+| `upcoming` | something coming up in the user's life, worth asking about later | "job interview on 2026-10-31" | `## upcoming` (`## 约定`) |
+| `self` | the character itself: the nickname the user calls it by, a catchphrase it picked up, a running joke between them | "the user calls me 小胖" | `## self` (`## 我自己`) |
 
-One moment or one change per file, named with its date when it has one
-(`2026-10-12-first-stream`, `2026-10-12第一次直播`). Index heading `## life` (`## 人生`
-in a Chinese store).
+The three headings sit together in the index, after the four.
 
-Its lifecycle is not `project`'s:
+Telling them from the four: a lasting fact about the user — a birthday, the cat's
+name, a new job — is `user`, and a recurring date stays there; an `upcoming` is one
+occurrence (this year's birthday dinner); a `moment` is a dated story between the two
+of them — the evening the user told the character about the new job — never a second
+copy of the `user` fact. What the user asks of the character — "say 咕噜
+when you greet me", "call yourself 小胖" — is `feedback`, with its Why and How; what
+the character has become — the catchphrase it fell into, the nickname the user calls
+it by — is `self`. Write each fact once, as one of them.
 
-- **Many are expected.** A life is a sequence of moments; the one-live-note ceiling of
-  `project` does not apply.
-- **Kept, not retired as stale.** A past moment cannot go stale. When the index nears
-  the cap, fold the oldest month: move its `life` notes to `archive/`, list them in
-  `archive/life-2026-10.md`, and leave one pointer line to that list (§6) — still on
-  disk, opened when a conversation reaches back that far.
-- **Something coming up is the exception.** Once it has happened, rewrite it as what
-  happened ("2026-10-31, the interview went well") or retire it, the next time it
-  comes up — never leave it to wait for the cap.
-- **Deleted only when the user asks to forget it** — from the archive too. A wrong
-  detail is corrected in place; that is an update, not a forgetting.
-- `**Why:**` / `**How to apply:**` are not required — a moment is not a rule — though
-  a line on why it mattered helps the next recall.
+Their lifecycles are their own, and override two general rules: an `upcoming` is a
+plan, not a settled fact (`project` above), and is kept because asking about it is
+the point; a `moment` or `self` note is corrected, not deleted, when a detail is
+wrong (§5).
 
-In a companion conversation the reporting rule of §5 still holds, spoken in
-character: say what was remembered, corrected, forgotten, or not saved, and never let
-the user believe something was kept when it was not. Line counts and check results
-only when the user asks. ID numbers, card numbers, and passwords are never written,
-even when the user asks.
+- **`moment` — many expected, kept.** One moment per file, named with its date
+  (`2026-10-12-first-stream`, `2026-10-12第一次直播`). A past moment cannot go stale,
+  and the one-live-note ceiling of `project` does not apply. When the index nears the
+  cap, fold the oldest month: move its `moment` notes to `archive/`, list them in
+  `archive/moments-2026-10.md` (`archive/经历-2026-10.md` in a Chinese store), and
+  leave one pointer line to that list (§6) — still on disk, opened when a conversation
+  reaches back that far.
+- **`upcoming` — few, and followed up.** Named with its date when it has one
+  (`2026-10-31-interview`, `2026-10-31面试`) — never the day it was saved — and with a
+  plain name while it has none (`waiting-for-admission`, `等录取结果`) — asked about
+  when the talk turns that way, and renamed with its date once it has one. It stays in
+  the index so the character can ask about it. Once its date has passed, ask how it went
+  the next time you talk; never record an outcome you were not told, and keep the note
+  until you learn it. Then rewrite it as what happened: change its type to `moment`,
+  name it with the date it happened — usually the name it already has — and move its
+  line under the `moment` heading. A lasting fact it settled — the job is theirs now —
+  goes into `user` as well. When it was called off and nothing about it is worth
+  remembering, retire it instead. It is never folded.
+- **`self` — few, never folded.** One trait per file, without a date in its name
+  (`my-nickname`, `我的外号`), updated in place when the trait changes ("the user
+  calls me 小胖 now, 胖胖 before").
+- **Deleted only when the user asks to forget** — a `moment` or a `self` note, from
+  the archive too. A wrong detail is corrected in place — renaming the note, with its
+  index line, when the wrong detail is the date in its name; that is an update, not a
+  forgetting. A note the user says never happened at all is removed: that is the user
+  asking to forget it.
+- `**Why:**` / `**How to apply:**` are not required in any of the three — a moment is
+  not a rule — though a line on why it mattered helps the next recall.
+
+In a companion conversation any message from the user, a greeting included, may call
+for recall (§4) — a greeting is exactly when to ask how the interview went. The
+reporting rule of §5 still holds, spoken in character: say what was remembered,
+corrected, forgotten, or not saved, and never let the user believe something was
+kept when it was not. Line counts and check results only when the user asks. ID
+numbers, card numbers, and passwords are never written, even when the user asks.
 
 ---
 
@@ -333,7 +362,9 @@ work counts: analysis, diagnosis, planning, and review are tasks. Changing a fil
 is not required, and neither is spanning several turns.
 
 A greeting, an acknowledgement, or a reaction does not start a task — do not open
-the store for it — and does not finish one. **Having the material in hand does not
+the store for it — and does not finish one. A companion conversation is the
+exception (§2.2): there any message from the user, a greeting included, may call for
+recall. **Having the material in hand does not
 make work a non-task.** A diff pasted for review is a task even though every line
 needed to answer is on screen: what the store holds is not the diff, it is how you
 are meant to review one.
@@ -424,8 +455,9 @@ session. Before writing, run the checks in this order:
 5. **Delete when wrong.** If a memory turns out to be false or obsolete, delete
    the file (or move it to `archive/`) and remove its index line. Forgetting is a
    first-class operation — a store full of stale facts is worse than a small one.
-   A companion's `life` note is the exception (§2.2): a wrong detail is corrected in
-   place, and the note is deleted only when the user asks to forget it.
+   A companion's `moment` and `self` notes are the exception (§2.2): a wrong detail
+   is corrected in place, and the note is deleted only when the user asks to forget
+   it. An `upcoming` note that has happened is rewritten as a `moment`.
 
 ### Task-completion checkpoint
 
@@ -537,9 +569,10 @@ judgment are your job either way.
    doctor deliberately skips it, so those notes become undiscoverable — kept on
    disk, but effectively deleted. If you will not write the pointer file, delete
    the notes outright and say so; silently stranding them is the worse outcome.
-   A companion's `life` notes are folded by month instead, never deleted (§2.2):
-   the oldest month's notes move into `archive/`, `archive/life-YYYY-MM.md` lists
-   them, and one pointer line to that list stays in the index.
+   A companion's `moment` notes are folded by month instead, never deleted (§2.2):
+   the oldest month's notes move into `archive/`, `archive/moments-YYYY-MM.md` lists
+   them, and one pointer line to that list stays in the index. Its `upcoming` and
+   `self` notes are never folded.
 4. **Split a bloated note into conclusion + history.** For a note that has grown
    into a timeline (see the size note above), keep the slug and rewrite it as the
    *conclusion layer* — invariants, decisions, pitfalls, how to resume — and move

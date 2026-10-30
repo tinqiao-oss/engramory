@@ -20,13 +20,18 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   its errors only for a note written in Chinese, and compares filenames, pointers,
   wikilinks and names without case or Unicode form: macOS can return NFD where an
   editor wrote NFC, and two normalisations of one name are now a duplicate slug.
-- **A fifth, optional type: `life`** (SKILL.md §2.2), for a companion character the
-  user chats with — the community's 大肥鱼, or any persona. It holds the character's
-  own life: dated moments shared with the user, things coming up in the user's life
-  worth asking about, changes in the character itself. Many are expected; they are kept,
-  folded by month into `archive/` when the index fills, corrected in place, and deleted
-  only when the user asks to forget. No Why/How. The other four types keep their
-  meaning; §5, §6 and the report contract name the exception.
+- **Three optional types for a companion's own life** (SKILL.md §2.2), for a companion
+  character the user chats with — the community's 大肥鱼, or any persona. They are split
+  by how each is kept, not by topic: `moment` (`## 经历` in a Chinese store), something
+  that happened with the user, with its date — many expected, kept, folded by month into
+  `archive/` when the index fills; `upcoming` (`## 约定`), something coming up in the
+  user's life — asked about once its date passes, and rewritten as a `moment` once the
+  user has said how it went, never with an invented outcome; `self` (`## 我自己`), a
+  change in the character itself, such as a nickname — updated in place, never folded.
+  A `moment` or `self` note is corrected in place and deleted only when the user asks
+  to forget. None needs Why/How. Tie-breaks with the four: a lasting fact about the
+  user (a birthday) stays `user`, and what the user asks of the character stays
+  `feedback`. §4, §5, §6 and the report contract name the exceptions.
 - **dsh companion mode (大肥鱼模式).** `companionPresets` names the persona preset(s);
   a session running one — the preset it runs now, read from dsh's `agentPreset`
   projection — is a companion conversation, and coding sessions in the same profile are
@@ -50,9 +55,10 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   coding sessions keep their index, their guard and their recall rules.
 - **Defaults are unchanged.** With companion mode off and English, the skill, the
   injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
-  compared). Two rounds of cross-review (GPT and DeepSeek) found, before release, a
+  compared). Four rounds of cross-review (GPT and DeepSeek) found, before release, a
   stranger planting a store that did not exist yet, forks inheriting the owner's role,
-  case / 8.3 aliases past the filter, a tree search over another project's store, a
+  case / 8.3 / junction / dangling-link aliases past the filter, a tree search over
+  another project's store, a
   stray argument standing in for a search root, a failed preset lookup trusting the
   header, subagents stranded after a restart, unbounded sync I/O on long paths, and the
   skill telling a companion conversation that a greeting gets no recall.

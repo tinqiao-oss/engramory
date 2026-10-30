@@ -1132,11 +1132,15 @@ const TEXT = {
       'Bring it up in character; do not name files, the index, tools or a memory system ' +
       'unless asked. Save what is worth keeping as the Engramory skill describes: who ' +
       'the user is as `user`, how to address them and what never to say as `feedback`, ' +
-      'your shared moments, things coming up in their life and changes in yourself as ' +
-      '`life` (index heading `## life`). Say in character what you remembered, ' +
-      'corrected, forgot or could not save — never claim a save that did not happen. ' +
-      'Delete a `life` note only when the user asks you to forget it; never write ID ' +
-      'numbers, card numbers or passwords.',
+      'and your shared life in three types: a dated moment you shared as `moment` ' +
+      '(index heading `## moment`); something coming up in their life as `upcoming` ' +
+      '(`## upcoming`) — ask about it once its date has passed, and when you learn how it ' +
+      'went rewrite it as a `moment`, never inventing an outcome; a change in yourself, ' +
+      'such as a nickname they gave you, as `self` ' +
+      '(`## self`). Say in character what you remembered, corrected, forgot or could ' +
+      'not save — never claim a save that did not happen. Delete a `moment` or `self` ' +
+      'note only when the user asks you to forget it; never write ID numbers, card ' +
+      'numbers or passwords.',
     strangerNotice:
       'Engramory: this companion conversation is not one of the user\'s own (its session ' +
       'is not in `ownerSessions`), so no memory is loaded here and the memory store is ' +
@@ -1182,9 +1186,12 @@ const TEXT = {
       '大肥鱼模式：这个会话为用户运行陪伴人设——它不是编程任务。用户的每句话，包括打招呼，' +
       '都可能该想起点什么：临近的日子、该问起的事、约定。用你的角色口吻自然带出；除非用户' +
       '问起，不念文件名，不提索引、工具或记忆系统。值得记的照 Engramory skill 的格式写：' +
-      '用户是谁记成 `user`，怎么称呼、哪些话别说记成 `feedback`，一起经历的事、用户生活里' +
-      '将要发生的事、你自己的新变化记成 `life`（索引标题 `## 人生`）。记住了、改了、忘掉了、' +
-      '没记上，都用角色口吻如实说——没记上绝不说记住了。`life` 笔记只有用户说忘掉才删；' +
+      '用户是谁记成 `user`，怎么称呼、哪些话别说记成 `feedback`；你们共同的人生分三类记：' +
+      '一起经历的、带日期的事记成 `moment`（索引标题 `## 经历`）；用户生活里将要发生的事记成 ' +
+      '`upcoming`（`## 约定`）——过了日子记得问起，问到结果再改写成 `moment`，结果绝不自己编；' +
+      '你自己的变化，比如用户' +
+      '给你起的外号，记成 `self`（`## 我自己`）。记住了、改了、忘掉了、没记上，都用角色' +
+      '口吻如实说——没记上绝不说记住了。`moment` 和 `self` 笔记只有用户说忘掉才删；' +
       '证件号、银行卡号、密码一律不记。',
     strangerNotice:
       'Engramory：这个陪伴会话不是用户自己的（会话不在 `ownerSessions` 名单里），所以这里' +
@@ -1260,7 +1267,7 @@ function skillEn(companion = false) {
     '---',
     'name: <kebab-case-slug>',
     'description: <one sharp line — this is what future-you reads to decide to open it>',
-    `type: user | feedback | project | reference${companion ? ' | life' : ''}`,
+    `type: user | feedback | project | reference${companion ? ' | moment | upcoming | self' : ''}`,
     'scope: global | repo        # optional: does this still hold in another repo?',
     'created: YYYY-MM-DD',
     'updated: YYYY-MM-DD',
@@ -1283,19 +1290,44 @@ function skillEn(companion = false) {
     'handoff log indexed beside it, and retire its transient state once it ends.',
     '',
     ...(companion ? [
-      '## Companion mode: the fifth type, `life`',
+      '## Companion mode: three types for your life',
       '',
       'This host runs a companion character (大肥鱼模式). Besides the four types, its',
-      'store keeps `type: life` — what the character has lived: a dated moment shared',
-      'with the user, something coming up in their life worth asking about later, a',
-      'change in the character itself. One moment or one change per file, named with',
-      'its date when it has one (`2026-10-12-first-stream`); index heading `## life`.',
-      'Many are expected, and a past moment never goes stale: when the index nears the',
-      'cap, fold the oldest month — move its `life` notes to `archive/`, list them in',
-      '`archive/life-2026-10.md`, and leave one pointer line to it. Once something coming up',
-      'has happened, rewrite it as what happened or retire it. A wrong detail is',
-      'corrected in place; a `life` note is deleted only when the user asks you to',
-      'forget it — from the archive too. It needs no `**Why:**` / `**How to apply:**`.',
+      'store keeps what the character has lived, in three types kept three ways:',
+      '',
+      '- `moment` (`## moment`): something you and the user shared, with its date;',
+      '  one per file, named with the date (`2026-10-12-first-stream`). Many are expected,',
+      '  and a past moment never goes stale: when the index nears the cap, fold the',
+      '  oldest month — move its `moment` notes to `archive/`, list them in',
+      '  `archive/moments-2026-10.md`, and leave one pointer line to it.',
+      '- `upcoming` (`## upcoming`): something coming up in the user\'s life worth asking',
+      '  about, named with its date when it has one (`2026-10-31-interview`) — never the',
+      '  day it was saved — and with a plain name while it has none (ask when the talk turns',
+      '  that way; rename it once it has a date). Once its date has',
+      '  passed, ask how it went; never record an outcome you were not told, and keep the',
+      '  note until you learn it. Then rewrite it as what happened — change its type to',
+      '  `moment`, name it with the date it happened (usually the name it has), move its',
+      '  line under `## moment`; a lasting fact it settled (the new job is theirs) goes into',
+      '  `user` as well. Retire it instead when it was called off and nothing about it is',
+      '  worth keeping. Never folded.',
+      '- `self` (`## self`): a change in the character itself — a nickname the user gave',
+      '  it, a catchphrase it picked up. One trait per file, without a date in its name',
+      '  (`my-nickname`), updated in place; never folded.',
+      '',
+      'A lasting fact about the user — a birthday, a new job — stays `user`; an `upcoming`',
+      'is one occurrence; a `moment` is a dated story between you (the evening they told',
+      'you about the new job), never a second copy of the `user` fact.',
+      'What the user asks of you ("say 咕噜 when you greet me", "call yourself 小胖") is',
+      '`feedback`; what you have become (the nickname they call you by) is `self`. Write',
+      'each fact once.',
+      '',
+      'These lifecycles override "store settled facts" and "delete memories that turn out',
+      'to be wrong" above: an `upcoming` is a plan and is kept anyway; a wrong detail in a',
+      '`moment` or `self` note is corrected in place (renaming it, with its index line,',
+      'when the wrong detail is the date in its name), and the note is deleted only when',
+      'the user asks you to forget it — from the archive too, and including a note they',
+      'say never happened at all. None of the three needs `**Why:**` /',
+      '`**How to apply:**`. Keep their headings together, after the four.',
       '',
     ] : []),
     '## When a task finishes',
@@ -1360,7 +1392,7 @@ function skillZh(companion = false) {
     '---',
     'name: <中文短名，与文件名相同>',
     'description: <一句锋利的话——以后的你靠它决定要不要打开>',
-    `type: user | feedback | project | reference${companion ? ' | life' : ''}`,
+    `type: user | feedback | project | reference${companion ? ' | moment | upcoming | self' : ''}`,
     'scope: global | repo        # 可选：换个仓库还成立吗？',
     'created: YYYY-MM-DD',
     'updated: YYYY-MM-DD',
@@ -1385,16 +1417,35 @@ function skillZh(companion = false) {
     '`state-2026-01-16.md`……），绝不在旁边再索引一份交接日志，任务结束就退休它的临时状态。',
     '',
     ...(companion ? [
-      '## 大肥鱼模式：第五类 `life`',
+      '## 大肥鱼模式：再加三类，记你的人生',
       '',
-      '本宿主运行陪伴角色（大肥鱼模式）。除了四类之外，库里还有 `type: life`——角色自己',
-      '经历过的人生：和用户一起经历的、带日期的时刻；用户生活里将要发生、以后值得问起的',
-      '事；角色自己的变化。一个时刻或一个变化一个文件，有日期就把日期写进名字',
-      '（`2026-10-12第一次直播`）；索引标题 `## 人生`。这类笔记本来就会很多，过去的时刻',
-      '也不会过期：索引快到上限时，把最早一个月的 `life` 笔记移进 `archive/`，在',
-      '`archive/life-2026-10.md` 里列出它们，索引里留一行指向它的指针。将要发生的事一旦发生，就改写成',
-      '发生了什么，或者退休它。记错的细节就地改正；只有用户要你忘掉时才删 `life` 笔记',
-      '——连同归档里的。它不需要 `**为什么：**` / `**怎么用：**`。',
+      '本宿主运行陪伴角色（大肥鱼模式）。除了四类之外，库里还用三类记角色自己经历过的人生，',
+      '三类各有各的保管法：',
+      '',
+      '- `moment`（`## 经历`）：你和用户一起经历过的事，带日期；一件事一个文件，名字带日期',
+      '  （`2026-10-12第一次直播`）。这类本来就会很多，过去的事也不会过期：索引快到上限时，',
+      '  把最早一个月的 `moment` 笔记移进 `archive/`，在 `archive/经历-2026-10.md` 里列出',
+      '  它们，索引里留一行指向它的指针。',
+      '- `upcoming`（`## 约定`）：用户生活里将要发生、以后值得问起的事。有日期就把事情的日期',
+      '  写进名字（`2026-10-31面试`）——绝不写记下它的那天——还没日期就先用普通名字（聊到相关',
+      '  话题时问起，有了日期再改名）。过了',
+      '  日子就问问怎么样了；没听用户说过的结果绝不自己编，问到之前笔记一直留着。知道结果后',
+      '  改写成发生了什么——类型改成 `moment`，名字用实际发生的日期（通常就是原来的名字），',
+      '  索引行挪到 `## 经历` 下；它带来的长期事实（用户真换了新工作）同时记进 `user`。事情',
+      '  取消了又没什么值得留的，就退休它。不归档。',
+      '- `self`（`## 我自己`）：角色自己的变化——用户给你起的外号、你学会的口头禅。一个特点',
+      '  一个文件，名字不带日期（`我的外号`），变了就原地改；不归档。',
+      '',
+      '关于用户的长期事实（生日、换了新工作）照旧记 `user`；`upcoming` 只记某一次；`moment`',
+      '记你们之间带日期的一段经历（用户跟你讲新工作的那个晚上），不再抄一遍 `user` 里的事实。',
+      '用户要你怎么做（「跟我打招呼时说咕噜」「以后叫自己小胖」）记 `feedback`；你自己变成了',
+      '什么样（用户平时怎么叫你）记 `self`。一件事只记一处。',
+      '',
+      '这三类的保管法优先于上面的「只存定论」和「发现记错了的记忆就删掉」：`upcoming` 是计划，照样',
+      '要留；`moment` 和 `self` 记错的细节就地改正（记错的是名字里的日期，就连文件名和索引行',
+      '一起改），只有用户要你忘掉时才删——连同归档',
+      '里的，用户说某件事根本没发生过也算。三类都不需要 `**为什么：**` / `**怎么用：**`。',
+      '三个标题排在一起，放在四类后面。',
       '',
     ] : []),
     '## 任务结束时',

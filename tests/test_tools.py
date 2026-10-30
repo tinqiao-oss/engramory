@@ -549,17 +549,30 @@ def test_doctor_chinese_label_without_colon_gets_hint(tmp_path):
     assert rc == 1 and out.count("without its colon") == 2
 
 
-def test_doctor_life_is_a_valid_type_without_why_how(tmp_path):
-    # SKILL.md §2.2: a companion's moments, many per store, folded by month
-    _note(tmp_path / "2026-10-12第一次直播.md", "2026-10-12第一次直播", ntype="life",
+def test_doctor_companion_types_are_valid_without_why_how(tmp_path):
+    # SKILL.md §2.2: a companion's moments (folded by month), what is coming up, itself
+    _note(tmp_path / "2026-10-12第一次直播.md", "2026-10-12第一次直播", ntype="moment",
           body="和主人第一次一起直播。")
+    _note(tmp_path / "2026-10-31面试.md", "2026-10-31面试", ntype="upcoming",
+          body="主人10月31日面试，到时候问问。")
+    _note(tmp_path / "我的外号.md", "我的外号", ntype="self", body="主人叫我小胖。")
     (tmp_path / "archive").mkdir()
-    (tmp_path / "archive" / "life-2026-09.md").write_text("- 九月的事\n", encoding="utf-8")
+    (tmp_path / "archive" / "经历-2026-09.md").write_text("- 九月的事\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text(
-        "# 索引\n## 人生\n- [第一次直播](2026-10-12第一次直播.md) — 10-12\n"
-        "- [九月](archive/life-2026-09.md) — 更早的回忆\n", encoding="utf-8")
+        "# 索引\n## 经历\n- [第一次直播](2026-10-12第一次直播.md) — 10-12\n"
+        "- [九月](archive/经历-2026-09.md) — 更早的回忆\n"
+        "## 约定\n- [面试](2026-10-31面试.md) — 10-31\n"
+        "## 我自己\n- [外号](我的外号.md) — 小胖\n", encoding="utf-8")
     rc, out = _run(DOCTOR, str(tmp_path))
     assert rc == 0 and "clean" in out
+
+
+def test_doctor_rejects_the_withdrawn_life_type(tmp_path):
+    # 0.13.0 split the draft `life` type in three before it shipped; it is not valid
+    _note(tmp_path / "m.md", "m", ntype="life")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [M](m.md) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "invalid type" in out
 
 
 def test_doctor_name_matches_filename_across_unicode_normalisation(tmp_path):

@@ -1102,7 +1102,7 @@ test('companion mode: the user\'s own companion conversation gets the index and 
   const see = (session) => withDshHome(scratch('home'), () => prompt.contexts[0].text(as(session)))
   const own = see(sessionOf('own-1', project, { agentPreset: 'whale' }))
   assert.match(own, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
-  assert.match(own, /Companion mode \(大肥鱼模式\)[\s\S]*`life`/)
+  assert.match(own, /Companion mode \(大肥鱼模式\)[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
   // by prefix too
   assert.match(see(sessionOf('wx-owner-42', project, { agentPreset: 'whale' })), /Companion mode/)
   // a session on another preset is not a companion conversation: nothing changes
@@ -1338,17 +1338,20 @@ test('companion mode: a network $DSH_HOME is not walked for a stranger, only ref
   assert.ok(Date.now() - started < 500)
 })
 
-test('companion rules restrict "delete only when asked to forget" to life notes', () => {
-  for (const [language, rule] of [
-    ['en', 'Delete a `life` note only when the user asks you to forget it'],
-    ['zh', '`life` 笔记只有用户说忘掉才删'],
+test('companion rules name the three life headings and keep "delete only when asked" to moment and self', () => {
+  for (const [language, ...rules] of [
+    ['en', 'Delete a `moment` or `self` note only when the user asks you to forget it',
+      '`## moment`', '`## upcoming`', '`## self`', 'rewrite it as a `moment`',
+      'never inventing an outcome'],
+    ['zh', '`moment` 和 `self` 笔记只有用户说忘掉才删',
+      '`## 经历`', '`## 约定`', '`## 我自己`', '问到结果再改写成 `moment`', '结果绝不自己编'],
   ]) {
     const project = scratch('companion')
     const prompt = promptRegistry()
     mount({ ...COMPANION, language }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
     const text = withDshHome(scratch('home'), () =>
       prompt.contexts[0].text(as(sessionOf('own-1', project, { agentPreset: 'whale' }))))
-    assert.ok(text.includes(rule), language)
+    for (const rule of rules) assert.ok(text.includes(rule), `${language}: ${rule}`)
   }
 })
 
@@ -1402,20 +1405,36 @@ test('companion mode tells the skill a companion conversation is the exception t
   }
 })
 
-test('companion mode adds the fifth type to the skill, in either language', () => {
+test('companion mode adds the three life types to the skill, in either language', () => {
   for (const [language, marks] of [
-    ['en', ['## Companion mode: the fifth type, `life`', 'index heading `## life`']],
-    ['zh', ['## 大肥鱼模式：第五类 `life`', '索引标题 `## 人生`']],
+    ['en', ['## Companion mode: three types for your life', '`moment` (`## moment`)',
+      '`upcoming` (`## upcoming`)', '`self` (`## self`)', 'archive/moments-2026-10.md',
+      'never record an outcome you were not told',
+      '`moment`, name it with the date it happened (usually the name it has), move its',
+      'without a date in its name', '`feedback`; what you',
+      'These lifecycles override "store settled facts" and "delete memories that turn out',
+      'say never happened at all', 'day it was saved — and with a plain name while it has none',
+      'note until you learn it', 'a lasting fact it settled (the new job is theirs) goes into',
+      'never a second copy of the `user` fact', 'rename it once it has a date',
+      '"call yourself 小胖"', 'corrected in place (renaming it, with its index line,']],
+    ['zh', ['## 大肥鱼模式：再加三类，记你的人生', '`moment`（`## 经历`）',
+      '`upcoming`（`## 约定`）', '`self`（`## 我自己`）', 'archive/经历-2026-10.md',
+      '没听用户说过的结果绝不自己编', '类型改成 `moment`，名字用实际发生的日期',
+      '名字不带日期', '（用户平时怎么叫你）记 `self`', '「以后叫自己小胖」', '有了日期再改名',
+      '就连文件名和索引行',
+      '优先于上面的「只存定论」和「发现记错了的记忆就删掉」', '用户说某件事根本没发生过也算',
+      '绝不写记下它的那天', '还没日期就先用普通名字', '问到之前笔记一直留着', '同时记进 `user`',
+      '不再抄一遍 `user` 里的事实']],
   ]) {
     const on = mount({ ...COMPANION, language }).skills[0]
-    assert.match(on.content, /type: user \| feedback \| project \| reference \| life/)
+    assert.match(on.content, /type: user \| feedback \| project \| reference \| moment \| upcoming \| self/)
     for (const mark of marks) assert.ok(on.content.includes(mark), `${language}: ${mark}`)
     assert.ok(on.whenToUse.length > mount({ language }).skills[0].whenToUse.length)
     const off = mount({ language }).skills[0]
-    assert.doesNotMatch(off.content, /\blife\b/)
+    assert.doesNotMatch(off.content, /`moment`|`upcoming`|`self`|\| moment/)
   }
   // one preset may be written as a plain string
-  assert.match(mount({ companionPresets: 'whale' }).skills[0].content, /\| life/)
+  assert.match(mount({ companionPresets: 'whale' }).skills[0].content, /\| moment \| upcoming \| self/)
 })
 
 test('companion mode keeps its notes with injectIndex: false, which only drops the index', () => {

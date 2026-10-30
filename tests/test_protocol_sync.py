@@ -37,18 +37,48 @@ class ContinuityProtocolTests(unittest.TestCase):
             r"type:\s*[^\n]*\|\s*handoff(?:\s|\|)",
         )
 
-    def test_life_is_an_optional_fifth_type_with_its_own_lifecycle(self):
+    def test_companion_types_keep_their_own_lifecycles(self):
         """§2.2 and the rules it overrides must agree: §5 deletes what is wrong,
-        §6 archives cold notes, and the report contract names sizes — a `life`
-        note is corrected in place, folded by month, and reported in character."""
-        section = self.skill.split("### 2.2 `life`", 1)[1].split("\n---", 1)[0]
-        for phrase in ("Many are expected", "Deleted only when the user asks to forget it",
-                       "archive/life-2026-10.md", "are not required"):
+        §6 archives cold notes, and the report contract names sizes — a `moment` is
+        folded by month, an `upcoming` becomes a `moment` once its outcome is known, a
+        `self` stays, neither a `moment` nor a `self` is deleted unasked, and all are
+        reported in character."""
+        section = self.skill.split("### 2.2 A companion's life", 1)[1].split("\n---", 1)[0]
+        for phrase in ("`## moment` (`## 经历`)", "`## upcoming` (`## 约定`)",
+                       "`## self` (`## 我自己`)", "many expected, kept",
+                       "archive/moments-2026-10.md", "change its type to `moment`",
+                       "never record an outcome you were not told", "never folded",
+                       "a recurring date stays there", "is `feedback`, with its Why and How",
+                       "without a date in its name",
+                       "the evening the user told the character about the new job",
+                       "goes into `user` as well", "never the day it was saved",
+                       "until you learn it. Then rewrite it as what happened",
+                       "renamed with its date once it has one", "renaming the note, with its",
+                       "\"call yourself 小胖\"",
+                       "name it with the date it happened", "never happened at all is removed",
+                       "override two general rules",
+                       "Deleted only when the user asks to forget", "are not required"):
             self.assertIn(phrase, section)
-        self.assertIn("A companion's `life` note is the exception (§2.2)", self.skill)
-        self.assertIn("`life` notes are folded by month instead, never deleted (§2.2)", self.skill)
+        self.assertIn("A companion's `moment` and `self` notes are the exception (§2.2)", self.skill)
+        self.assertIn("`moment` notes are folded by month instead, never deleted (§2.2)", self.skill)
+        self.assertIn("Its `upcoming` and\n   `self` notes are never folded.", self.skill)
+        # §4's "a greeting opens no store" names the companion exception
+        self.assertIn("exception (§2.2): there any message from the user, a greeting included",
+                      self.skill)
         self.assertIn("In a companion conversation the report is spoken in character, and the index size\n"
                       "and check result are given only when the user asks (§2.2)", self.skill)
+
+    def test_docs_name_the_three_companion_types_not_the_withdrawn_one(self):
+        """0.13.0 split a draft `life` type in three before release; a README or the
+        changelog still describing `life` would ship a type the doctor rejects."""
+        for rel in ("README.md", "README.zh-CN.md", "adapters/dsh/plugin/README.md",
+                    "adapters/dsh/plugin/README.zh-CN.md", "CHANGELOG.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for name in ("moment", "upcoming"):
+                self.assertIn(name, text, rel)
+            self.assertRegex(text, r"\bself`", rel)  # `self`, or the last of `a | b | self`
+            self.assertNotIn("`life`", text, rel)
+            self.assertNotRegex(text, r"type:\s*life\b", rel)
 
     def test_language_section_keeps_types_and_labels_paired(self):
         section = self.skill.split("### 1.1 Language", 1)[1].split("\n## 2.", 1)[0]

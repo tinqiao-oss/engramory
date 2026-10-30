@@ -37,7 +37,8 @@ PROTOCOL SCHEMA (ISSUE -> exit 1): the spec's required fields are enforced — e
 note must have well-formed frontmatter (no malformed lines, unclosed or malformed
 quotes, or a missing closing fence) carrying a non-empty `name`, `description`, a
 valid `type`
-(user|feedback|project|reference, or a companion's `life`, SKILL.md §2.2), and
+(user|feedback|project|reference, or a companion's moment|upcoming|self, SKILL.md
+§2.2), and
 real-calendar `created` + `updated` dates;
 feedback/project notes must carry `Why:` + `How to apply:` (or the Chinese labels
 `为什么：` + `怎么用：`, SKILL.md §1.1); an optional `scope`
@@ -82,10 +83,11 @@ import re
 import sys
 import unicodedata
 
-# `life` is the optional fifth type a companion character writes (SKILL.md §2.2).
-# Valid in every store — a store is shared across hosts, and only some of them run a
-# companion — and like `user`/`reference` it needs no Why/How: a moment is not a rule.
-VALID_TYPES = {"user", "feedback", "project", "reference", "life"}
+# `moment`/`upcoming`/`self` are the optional types a companion character writes for
+# its own life (SKILL.md §2.2). Valid in every store — a store is shared across hosts,
+# and only some of them run a companion — and like `user`/`reference` they need no
+# Why/How: a moment is not a rule.
+VALID_TYPES = {"user", "feedback", "project", "reference", "moment", "upcoming", "self"}
 # `scope` (optional) answers "does this still hold in another repo?" — orthogonal to
 # `type`. Absent stays VALID: the field postdates existing stores, and an unlabelled
 # reach beats a guessed one. feedback/project get an INFO nudge, nothing harder,
