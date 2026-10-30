@@ -909,7 +909,7 @@ test('an index past the byte cap is read only as far as the cap, BOM included', 
 test('the skill only says the index is in context when it is', () => {
   const { skills } = mount()
   const flat = skills[0].content.replace(/\s+/g, ' ')
-  assert.match(flat, /when one is there, use it instead of reading the file; when none is, read MEMORY.md as usual/)
+  assert.match(flat, /when one is there, use it instead of reading the file; when none is, read the index of the store above/)
   assert.match(flat, /"Memory index"/)
 })
 
@@ -1103,6 +1103,94 @@ test('language: zh registers the same rules in Chinese, and how a Chinese store 
     '`为什么：`', '`怎么用：`', 'frontmatter的键和`type:`的取值保持英文',
     '`##用户`/`##反馈`/`##项目`/`##参考`', '一个类型绝不留两个标题', '全库唯一',
   ]) assert.ok(flat.includes(rule), 'zh skill lacks: ' + rule)
+})
+
+test('the skill says where the store is: the global one the AI creates, a project\'s only the user does', () => {
+  // A plugin-only install used to say nowhere: a model in a fresh workspace searched the
+  // disk, then wrote its first index into the session's directory, where recall and the
+  // memory page never look.
+  const home = scratch('skillhome')
+  const global = join(home, '.engramory-memory')
+  // wrapping is not part of a rule: English collapses whitespace, Chinese drops it
+  const flatten = { en: (s) => s.replace(/\s+/g, ' '), zh: (s) => s.replace(/\*\*/g, '').replace(/\s+/g, '') }
+  for (const [language, rules] of [
+    ['en', [`Your store is the global one: \`${global}\`, its index \`MEMORY.md\``,
+      'create the folder and the index if they do not exist yet',
+      'only the user creates one — never create it yourself',
+      'what holds only in that project goes there',
+      'anything you are unsure of go in the global store',
+      'Never write `MEMORY.md` or a note anywhere else, and never search the disk for memory',
+      'when none is, read the index of the store above, if there is one yet']],
+    ['zh', [`你的记忆库是全局库：\`${global}\`，索引是 \`MEMORY.md\``,
+      '文件夹或索引还不存在就新建', '只能由用户来建，你绝不自己建', '只在这个项目成立的事记在那里',
+      '以及拿不准的，记在全局库', '绝不在别处写 `MEMORY.md` 或笔记，也绝不满盘搜索记忆',
+      '没有就读上面那个记忆库的索引']],
+  ]) {
+    const flat = flatten[language]
+    const content = flat(withDshHome(home, () => mount({ language })).skills[0].content)
+    for (const rule of rules) assert.ok(content.includes(flat(rule)), `${language}: ${rule}`)
+    // a companion's own life is not a project's
+    const companion = flat(withDshHome(home, () => mount({ language, companion: true })).skills[0].content)
+    assert.ok(companion.includes(flat(language === 'en' ? 'the user, your own life, how' : '关于用户的、你自己的人生、')), language)
+    // a pinned index is the one store: no global store, no project stores
+    const pinned = join(home, 'notes', 'INDEX.md')
+    const one = flat(withDshHome(home, () => mount({ language, indexPath: pinned })).skills[0].content)
+    assert.ok(one.includes(flat(language === 'en' ? `This host pins one index: \`${pinned}\`` : `本宿主固定了一个索引：\`${pinned}\``)), language)
+    assert.ok(one.includes(flat(language === 'en' ? 'Never write `INDEX.md`' : '绝不在别处写 `INDEX.md`')), language)
+    assert.ok(!one.includes(flat(global)), language)
+    assert.ok(!one.includes(flat(language === 'en' ? 'never create it yourself' : '你绝不自己建')), language)
+    // without the index in context, where a project's own store would be, and only there
+    const blind = flat(withDshHome(home, () => mount({ language, injectIndex: false })).skills[0].content)
+    assert.ok(blind.includes(flat(language === 'en'
+      ? 'Look for its index there, nearest first, and nowhere else, and skip an index that is a link or leads out of the project'
+      : '只在这一段里找它的索引，离工作目录近的优先，别处都不找；索引是链接、或指到项目外面的，跳过')), language)
+    assert.ok(!blind.includes(flat(language === 'en' ? 'runtime context shows its index' : '运行时上下文里会出现它的「项目记忆索引」')), language)
+    // another index name is the one named, everywhere
+    const named = withDshHome(home, () => mount({ language, indexName: 'INDEX.md' })).skills[0].content
+    assert.ok(named.includes('`INDEX.md`') && !named.includes('MEMORY.md'), language)
+  }
+})
+
+test('in social mode the skill, which every conversation reads, names no store; the user\'s own learn it', () => {
+  const home = scratch('socialhome')
+  const global = join(home, '.engramory-memory')
+  const prompt = promptRegistry()
+  const { skills } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt }))
+  const skill = skills[0].content.replace(/\s+/g, ' ')
+  assert.ok(!skill.includes(global), 'no path a stranger could be told')
+  assert.match(skill, /in the user's own conversations your runtime context gives its full path/)
+  assert.match(skill, /If your runtime context says a conversation is not the user's own, the store is closed to it: do not read, create, write or name a store there/)
+  const project = scratch('socialws')
+  // no store yet: the user's own conversation is told where it will be
+  const mine = withDshHome(home, () => prompt.render(as(own('own-store', project))))
+  assert.ok(mine.includes(`Engramory: your memory store is \`${global}\`, its index \`MEMORY.md\``), mine)
+  // anyone else's: the note that the store is closed, and no path
+  const theirsText = withDshHome(home, () => prompt.render(as(theirs('qq-store', project))))
+  assert.ok(!theirsText.includes(global), theirsText)
+  assert.match(theirsText, /not the user's own/)
+  // only a project's index shown: the global store, where the rest goes, is still named
+  // (another project: recall remembers for a few seconds that the first one has no store)
+  const withStore = scratch('socialws2')
+  store(withStore, '- [p](p.md) - project\n')
+  const partly = withDshHome(home, () => prompt.render(as(own('own-store-3', withStore))))
+  assert.match(partly, /^Project memory index/)
+  assert.ok(partly.includes(`your memory store is \`${global}\``), partly)
+  // with the global store, its index shows the path as before, and the line is not repeated
+  store(home, '- [u](u.md) - user\n')
+  const shown = withDshHome(home, () => prompt.render(as(own('own-store-2', project))))
+  assert.match(shown, /User memory index/)
+  assert.doesNotMatch(shown, /your memory store is/)
+  // a pin relative to the working directory is named as this session resolves it
+  const pinPrompt = promptRegistry()
+  mount({ ...COMPANION, indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: pinPrompt })
+  const pinned = withDshHome(home, () => pinPrompt.render(as(own('own-pin', project))))
+  assert.ok(pinned.includes(`your memory store is \`${join(project, 'notes')}\`, its index \`INDEX.md\``), pinned)
+})
+
+test('a store path with backticks in it stays one code span', () => {
+  const home = join(scratch('tick'), 'odd`name')
+  const content = withDshHome(home, () => mount({ language: 'en' })).skills[0].content
+  assert.ok(content.includes(`\`\`${join(home, '.engramory-memory')}\`\``), content.slice(0, 600))
 })
 
 test('the skill names exactly the headings this language injects the index under', () => {
@@ -1601,7 +1689,8 @@ test('companion mode keeps its notes with injectIndex: false, which only drops t
     { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
   const mine = see(own('own-1', project))
-  assert.match(mine, /^大肥鱼模式已打开。你在这里为用户扮演角色时/)
+  // where the store is (the skill names none in social mode), then the rules, no index
+  assert.match(mine, /^Engramory：你的记忆库在 `[^`]+\.engramory-memory`[^\n]*\n\n大肥鱼模式已打开。你在这里为用户扮演角色时/)
   assert.doesNotMatch(mine, /first/)
   assert.match(see(theirs('douyin-3', project)), /不是用户本人的/)
 })

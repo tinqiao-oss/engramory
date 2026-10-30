@@ -127,10 +127,28 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   the shipped `minimal` preset does) left the owner with no memory at all. With either
   mode on, the memory and its rules, and social mode's note, are a runtime context marked
   `required`; with both off, the index stays optional.
-- **Defaults are unchanged in English.** With companion mode off, private, and English (an
-  English dsh or system, or `language: en`), the skill, the
-  injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
-  compared). Four rounds of cross-review (GPT and DeepSeek) found, before release, a
+- **On dsh, the skill says where the store is.** With the plugin alone — as from dsh's
+  plugin market — the store is the global one, `$DSH_HOME/.engramory-memory/`, named in
+  the skill with its full path; the AI creates it on its first save. A project's own store
+  (`.engramory-memory/` in its root) is created by the user only (the installer's
+  `--project-root`); where one exists, what holds only in that project goes there, and
+  what is about the user, the companion's own life, and anything unsure stay global. The
+  skill also forbids writing an index anywhere else or searching the disk for memory; with
+  `injectIndex: false` it says where a project's own store would be — between the working
+  directory and the project's root, nearest first, never a link — and only there; it names
+  the configured index, not `MEMORY.md`, throughout. In social mode it gives no full path
+  (every conversation reads the skill): the user's own conversations are told the store's
+  path in their runtime context whenever its index is not shown there, and the skill
+  closes the store to any other. Before
+  this, a plugin-only install never said where: on a real dsh, a model in a fresh
+  workspace searched the user's home folder and read an old memory backup, then wrote its
+  first index into the session's directory, where recall and the memory page never look.
+- **Defaults are otherwise unchanged in English.** With companion mode off, private, and
+  English (an English dsh or system, or `language: en`), the injected index and every
+  guard verdict are byte-identical to 0.12.4 (34 outputs compared), and the skill differs
+  from 0.12.4's only by the section on where the store is, the recall line pointing to
+  it, and its first sentence ("Each store is canonical" for "One canonical store"); its
+  description and trigger text are unchanged. Four rounds of cross-review (GPT and DeepSeek) found, before release, a
   stranger planting a store that did not exist yet, forks inheriting the owner's role,
   case / 8.3 / junction / dangling-link aliases past the filter, a tree search over
   another project's store, a

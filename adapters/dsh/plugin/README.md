@@ -69,9 +69,14 @@ end up with two engramory rows and the original caps still enforced):
 
 A patch replaces the targeted row's whole `config`, so list every key you mean to keep.
 
-For the store itself and the always-on block, use the installer in the Engramory repo
-(`python tools/engramory_init.py dsh --install-skill`). This plugin enforces the cap and
-supplies the protocol; it does not create the store.
+With the plugin alone, the memory is one global store, `$DSH_HOME/.engramory-memory/`
+(`$DSH_HOME` defaults to `~/.dsh`): the skill tells the AI where it is, and the AI
+creates it on its first save. A project can have a store of its own,
+`.engramory-memory/` in its root, which only you create — the installer does it and
+git-ignores it (`python tools/engramory_init.py dsh --project-root <project>`). The AI
+never creates one; where one exists, what holds only in that project goes there, and
+everything else stays in the global store. The installer also writes the always-on block
+into `AGENTS.md` (`python tools/engramory_init.py dsh --install-skill`).
 
 To uninstall:
 
@@ -129,8 +134,10 @@ nothing.
   in it too: what the memory put into it earlier stays in its history. Messages dsh
   adds itself (runtime context, skills, compaction, agent-to-agent messages) decide
   nothing.
-- **Someone else's conversation gets no memory:** no index, a note saying so, and file
-  tools that may name files only. A directory is refused (so grep, glob and directory
+- **Someone else's conversation gets no memory:** no index, a note saying so, no full path
+  to the store (the skill, which every conversation reads, gives none in social mode; your
+  own conversations are told it in their runtime context), and file tools that may name
+  files only. A directory is refused (so grep, glob and directory
   views are — any tree may hold a store), and so is any path into a store, however it is
   spelled or linked, including a store that does not exist yet, so none can be planted
   for you. A subagent is yours while its live parent is — read afresh on every call —
@@ -225,7 +232,7 @@ page's.
 | `language` | dsh's | Unset (or empty), the memory follows dsh's language — the one chosen in dsh's Settings → General, else the language of the system dsh runs on (dsh's page, with no choice made, follows the browser's, so on a remote `dsh web` the two can differ); a change applies once dsh restarts. Set it to pin one: `zh` writes the store in Chinese (SKILL.md §1.1): Chinese note names, `## 用户` / `## 反馈` / `## 项目` / `## 参考` headings, `**为什么：**` / `**怎么用：**` labels, and the skill and the injected index in Chinese. Frontmatter keys and `type:` values stay English, so every host still reads the store. The cap's refusals stay English. `zh` and its regional forms (`zh-CN`, `zh-TW`, …) select Chinese; any other string selects `en`. |
 | `companion` | `false` | `true` turns companion mode on (above): three more types for the character's own life, and recall in character. Only the boolean `true` counts. |
 | `audience` | `private` | With companion mode on, `social` turns social mode on (above): only your own conversations get the memory. Any other value is `private`, where every conversation does. Without companion mode it changes nothing. |
-| `skill` | built-in | Replace the skill body with your own markdown. |
+| `skill` | built-in | Replace the skill body with your own markdown — which must then say where the store is itself. |
 
 ## What the guard actually does
 
