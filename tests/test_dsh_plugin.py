@@ -58,8 +58,17 @@ def test_dsh_plugin_declares_the_discovery_keyword():
         pkg = json.load(fh)
     assert "dsh-plugin" in pkg["keywords"]
     assert pkg["name"] == "dsh-engramory"
-    # The published tarball must carry the code and nothing stray.
-    assert set(pkg["files"]) == {"index.js", "cordis.patch.yml", "README.md", "LICENSE"}
+    # The published tarball must carry the code and nothing stray: the host half, the
+    # browser half (the settings page), the display metadata and icon the Plugins page
+    # reads without activating the plugin, and the docs.
+    assert set(pkg["files"]) == {"index.js", "client.js", "cordis.patch.yml", "locale/*.json",
+                                 "icon.svg", "README.md", "LICENSE"}
+    assert pkg["exports"]["./client"] == "./client.js"
+    assert pkg["dsh"]["client"]["platform"] == "web"
+    for lang in ("en", "zh"):
+        with open(os.path.join(PLUGIN, "locale", f"{lang}.json"), encoding="utf-8") as fh:
+            meta = json.load(fh)["meta"]
+        assert meta["title"] and meta["description"], lang
 
 
 def test_root_discovery_manifest_stays_in_step_with_the_plugin():
@@ -181,6 +190,13 @@ def test_dsh_plugin_depends_on_nothing_but_node():
     assert all(s.startswith("node:") for s in specs), specs
     assert not re.search(r"\b(?:import|require)\s*\(\s*[^'\"\s)]", src), (
         "a dynamic import/require with a computed specifier cannot be checked")
+    # The browser half takes React from the page's module table and nothing else: dsh's
+    # own client packages change without notice, and a plain script has no type check.
+    with open(os.path.join(PLUGIN, "client.js"), encoding="utf-8") as fh:
+        client = fh.read()
+    assert set(re.findall(r"\brequire\s*\(\s*['\"]([^'\"]+)['\"]", client)) == {"react"}
+    assert not re.search(r"\brequire\s*\(\s*[^'\"\s)]", client)
+    assert not re.search(r"^\s*(?:import|export)\b", client, re.M), "client.js is a plain script"
 
 
 def test_declared_dsh_compatibility_is_backed_by_a_recorded_run():

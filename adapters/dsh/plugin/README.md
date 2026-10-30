@@ -101,8 +101,9 @@ guard and recall rules; the skill they share only gains a companion section.
   — in character, without naming files or tools.
 - **Only the user's own conversations get the memory.** A bridge usually opens one
   session per contact or group in the same profile, so a stranger's conversation runs
-  the same preset. Copy each of your own sessions' ids (the session menu's
-  *Copy Session ID*) into `ownerSessions`; a companion conversation not listed there
+  the same preset. Mark your own conversations on the settings page (below), or copy
+  their ids (the session menu's *Copy Session ID*) into `ownerSessions`; a companion
+  conversation not listed there
   gets no index, a note saying so, and its file tools may name files only: a
   directory is refused (so grep, glob and directory views are — any tree may hold a
   store), and so is any path into a store, however it is spelled or linked, including
@@ -112,11 +113,37 @@ guard and recall rules; the skill they share only gains a companion section.
   its parent cannot be found); a forked conversation is judged on its own id. A call
   with no session, or a network path, counts as a stranger's. Listing a group chat lets everyone in it reach the
   memory.
+- **The persona preset decides what it can do with memory.** What a companion
+  conversation is given — the memory and its rules, or a stranger's note — is a
+  *required* runtime context, so it arrives even under a preset that turns optional
+  context off (dsh-persona's `includeRuntimeContext: false`, as dsh's `minimal` preset
+  does). Saving is another matter: the preset needs dsh's file tools and the skill tool
+  for the character to write notes the way the skill describes. A preset with only a
+  shell can read the memory it is given, and its writes go past the guard.
 
 This keeps the user's memory out of a stranger's context by the routes dsh's own file
 tools take. It is **not** a security boundary: a shell tool reads any file, and a
 different profile on the same account can still read the store's files. Keeping
 strangers away from the store needs filesystem permissions or a sandbox.
+
+## Settings page
+
+On dsh's **Plugins** page, open *Engramory memory* and then its row: the page sets the
+memory language, which presets are companions, which of their conversations are yours —
+a switch per conversation, titled as dsh titles it, so there are no ids to paste — and
+the index cap. A listed id or `prefix*` without a conversation stays visible and
+removable, and one can be added by hand.
+
+Saving goes through dsh's own profile editor: it validates the whole config, writes it
+to your profile's `cordis.patch.yml`, and reloads the plugin with it — or leaves the
+file as it was. A save made against settings that changed elsewhere in the meantime is
+refused, and the page reads them again. Settings put back to their defaults remove
+their override instead of pinning it. Other fields (`indexName`, `indexPath`, …) stay
+in the file.
+
+Only your signed-in browser reaches the page's route: dsh answers 401 to a request
+without its login cookie and 403 to a cross-site one, so an agent cannot call it to put
+itself on the list. A dsh without the profile editor shows the page read-only.
 
 ## Configuration
 
@@ -182,8 +209,10 @@ file's line endings when sizing the result, including CRLF bytes.
   `ctx.inject()` children for the skill registry, the session working directory, the
   prompt registry, and — in companion mode — the session projections that hold each
   session's current preset; a compatible-release declaration needs recorded host
-  evidence, not just unit tests. Companion mode is checked against dsh's types and a
-  mock, not yet end to end.
+  evidence, not just unit tests. The recorded end-to-end runs cover the cap, the skill
+  and the injected index; companion mode and the settings page were checked by hand on
+  a real dsh (0.2.1-rc.5) — an owner's, a stranger's and a coding conversation, and a
+  save through the page — but are not part of that record yet.
 
 ## License
 

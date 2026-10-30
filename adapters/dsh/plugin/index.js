@@ -29,6 +29,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 export const name = 'engramory'
 
@@ -205,34 +206,321 @@ export function apply(ctx, config = {}) {
   // companion conversation gets the index and the companion rules; any other companion
   // conversation gets no store at all, only a note saying so. Those two still go in
   // with `injectIndex: false`, which only turns the index off.
+  //
+  // A companion conversation's context is a second, REQUIRED one: a persona preset may
+  // turn optional runtime context off (dsh-persona's `includeRuntimeContext: false`, as
+  // the shipped `minimal` preset does), which would leave the owner without the memory
+  // and a stranger without the note that the store is closed — seen on a real dsh. The
+  // user named those presets as companions, so the memory belongs there; every other
+  // conversation keeps the index optional, as its preset expects.
   const injectIndex = config.injectIndex !== false
   if (injectIndex || settings.companion) {
     const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
-    const recall = (context) => {
-      const role = roleOf(context?.agent)
-      if (role === 'stranger') return settings.text.strangerNotice
-      const shown = index(context)
-      if (role !== 'owner') return shown
-      return shown ? `${shown}\n\n${settings.text.companion}` : settings.text.companion
+    const contexts = [{
+      name: 'engramory:memory-index',
+      text: settings.companion
+        ? (context) => (roleOf(context?.agent) === 'normal' ? index(context) : '')
+        : index,
+    }]
+    if (settings.companion) {
+      contexts.push({
+        name: 'engramory:companion',
+        required: true,
+        text: (context) => {
+          const role = roleOf(context?.agent)
+          if (role === 'stranger') return settings.text.strangerNotice
+          if (role !== 'owner') return ''
+          let shown = ''
+          try {
+            shown = index(context)
+          } catch {
+            // an index that cannot be read must not take the companion rules with it
+          }
+          return shown ? `${shown}\n\n${settings.text.companion}` : settings.text.companion
+        },
+      })
     }
     ctx.inject(['systemPrompt'], (inner) => {
       const prompt = inner.systemPrompt
       if (typeof prompt?.context !== 'function') return
-      inner.effect(() => prompt.context({
-        name: 'engramory:memory-index',
-        order: INDEX_CONTEXT_ORDER,
-        // The index is quoted, not templated: dsh interpolates `{{name}}` groups and
-        // throws on a malformed one, which would fail the whole request.
-        interpolate: false,
-        text: (context) => {
-          try {
-            return recall(context)
-          } catch {
-            return '' // never fail a request over recall
-          }
-        },
-      }))
+      for (const { name, required, text } of contexts) {
+        inner.effect(() => prompt.context({
+          name,
+          order: INDEX_CONTEXT_ORDER,
+          // The index is quoted, not templated: dsh interpolates `{{name}}` groups and
+          // throws on a malformed one, which would fail the whole request.
+          interpolate: false,
+          ...(required ? { required: true } : {}),
+          text: (context) => {
+            try {
+              return text(context)
+            } catch {
+              return '' // never fail a request over recall
+            }
+          },
+        }))
+      }
     })
+  }
+
+  // The settings page (client.js, the Configure control on the Plugins page) reads and
+  // saves the language and companion settings through these routes, so the user picks
+  // their own conversations from a list instead of pasting session ids into YAML. The
+  // web server is optional (a headless dsh has none) and may mount late.
+  // The page is keyed to the bundle's own row, so only that row serves it: a second row
+  // of this package would otherwise claim the same path (dsh refuses a second claim) or,
+  // claiming it first, have the page save ITS config. A row whose id cannot be told
+  // serves it as before.
+  const fiber = ctx.fiber
+  // `entry.id` is scoped by the tree that holds the row (`include:engramory`); the row's
+  // own id, the one the patch names, is `options.id`.
+  const rowId = fiber?.entry?.options?.id
+  ctx.inject(['connection'], (inner) => {
+    if (rowId !== undefined && rowId !== SETTINGS_ROW) return
+    if (typeof inner.connection?.fetch?.register !== 'function') return
+    for (const route of settingsRoutes(inner, config, fiber)) {
+      // A row of the same id in a nested include claims the path first: then this one
+      // serves no page, rather than failing to mount.
+      inner.effect(() => {
+        try {
+          return inner.connection.fetch.register(route)
+        } catch {
+          return () => {}
+        }
+      })
+    }
+  })
+}
+
+/** The settings page's route; client.js fetches it relative to the page, as dsh's own pages do. */
+const SETTINGS_ROUTE = '/api/engramory/settings'
+/** The bundle patch's row id, which the Plugins page keys the page by (client.js). */
+const SETTINGS_ROW = 'engramory'
+/** Bounds on what a save may carry, and on how many conversations the page lists. */
+const MAX_LISTED = 500
+const MAX_ID_LENGTH = 200
+// apply() takes any positive cap, so a save must not refuse one a profile already has.
+const MAX_CAP_LINES = Number.MAX_SAFE_INTEGER
+const MAX_CAP_BYTES = Number.MAX_SAFE_INTEGER
+const MAX_SESSIONS = 2000
+
+/**
+ * GET answers what the settings page shows: the five settings it edits, as this plugin
+ * reads them, the presets and conversations to choose from, and whether a save can land.
+ * POST saves them through dsh's profile editor (`configEditor`), which validates the whole
+ * config, writes the profile's patch and reloads this plugin with it — or leaves the file
+ * as it was. A save carries the revision the page loaded, so an edit made elsewhere in
+ * between (by hand, in another window) is not overwritten.
+ *
+ * Only the owner's signed-in browser reaches these: dsh answers 403 to any other caller of
+ * an exact route, so an agent, a stranger's conversation included, cannot call them to
+ * list itself among the owner's conversations.
+ */
+function settingsRoutes(ctx, config, fiber) {
+  const json = (status, body) => new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  })
+  const read = async () => {
+    const entry = ownEntry(ctx.get('configEditor'), fiber)
+    const raw = entry?.options?.config ?? config
+    const shown = editableSettings(raw)
+    return json(200, {
+      ...shown,
+      revision: revisionOf(shown),
+      // A setting written as a `!!js` expression is not what the page would show.
+      editable: entry !== undefined && plainSettings(raw),
+      ...(entry === undefined ? { readOnly: 'editor' } : plainSettings(raw) ? {} : { readOnly: 'expression' }),
+      presets: await listPresets(ctx),
+      sessions: await listSessions(ctx),
+    })
+  }
+  const save = async (request) => {
+    let body
+    try {
+      body = await request.json()
+    } catch {
+      return json(400, { ok: false, error: 'invalid', field: 'body' })
+    }
+    const next = parseSettings(body)
+    if (typeof next === 'string') return json(400, { ok: false, error: 'invalid', field: next })
+    const editor = ctx.get('configEditor')
+    const entry = ownEntry(editor, fiber)
+    if (entry === undefined || !plainSettings(entry.options?.config)) {
+      return json(409, { ok: false, error: 'unavailable' })
+    }
+    const stale = new Error('stale')
+    try {
+      await editor.edit(entry, (current, inherited) => {
+        if (revisionOf(editableSettings(current)) !== body.revision) throw stale
+        return withSettings(current, next, inherited)
+      })
+    } catch (error) {
+      if (error === stale) return json(409, { ok: false, error: 'stale' })
+      const message = String(error?.message ?? error)
+      // dsh refuses a value a home patch or a command-line overlay would override anyway.
+      const overridden = /overridden/i.test(message)
+      return json(overridden ? 409 : 500,
+        { ok: false, error: overridden ? 'overridden' : 'failed', message })
+    }
+    return json(200, { ok: true })
+  }
+  // One route for both methods: dsh registers a path once, and refuses a second.
+  return [{
+    path: SETTINGS_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: (request) => (request.method === 'POST' ? save(request) : read()),
+  }]
+}
+
+/**
+ * This plugin's own row in the profile, the one the editor may write: the entry whose
+ * fiber is this plugin's. Never matched by name — two rows of one package are possible,
+ * and writing the other one's config would be worse than not writing at all.
+ */
+function ownEntry(editor, fiber) {
+  try {
+    if (fiber === undefined || typeof editor?.entries !== 'function') return undefined
+    const mine = editor.entries().filter((entry) => entry?.fiber === fiber)
+    return mine.length === 1 ? mine[0] : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The settings the page edits, read the way apply() reads them — and with duplicate ids
+ * dropped, as a save drops them, so the settings a save leaves behind read back equal.
+ */
+function editableSettings(raw) {
+  const config = raw !== null && typeof raw === 'object' ? raw : {}
+  const unique = (list) => [...new Set(list)]
+  return {
+    language: languageOf(config.language),
+    companionPresets: unique(stringList(config.companionPresets)),
+    ownerSessions: unique(stringList(config.ownerSessions)),
+    maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
+    maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
+  }
+}
+
+const revisionOf = (shown) => JSON.stringify(shown)
+
+/**
+ * Whether the settings the page edits are plain values in `raw`: absent, or the strings,
+ * string lists and numbers apply() reads. A `!!js` expression arrives as an object and is
+ * evaluated by dsh, so the page can neither show it nor treat it as a default.
+ */
+function plainSettings(raw) {
+  const config = raw !== null && typeof raw === 'object' ? raw : {}
+  const plain = {
+    language: (v) => typeof v === 'string',
+    companionPresets: (v) => typeof v === 'string' || (Array.isArray(v) && v.every((s) => typeof s === 'string')),
+    ownerSessions: (v) => typeof v === 'string' || (Array.isArray(v) && v.every((s) => typeof s === 'string')),
+    maxLines: (v) => typeof v === 'number',
+    maxBytes: (v) => typeof v === 'number',
+  }
+  return Object.entries(plain).every(([key, ok]) => config[key] === undefined || ok(config[key]))
+}
+
+/** A save's settings, or the name of the first field that is not acceptable. */
+function parseSettings(body) {
+  if (body === null || typeof body !== 'object') return 'body'
+  if (typeof body.revision !== 'string') return 'revision'
+  if (body.language !== 'en' && body.language !== 'zh') return 'language'
+  const next = { language: body.language }
+  for (const key of ['companionPresets', 'ownerSessions']) {
+    const list = body[key]
+    if (!Array.isArray(list) || list.length > MAX_LISTED) return key
+    const clean = []
+    for (const item of list) {
+      const value = typeof item === 'string' ? item.trim() : ''
+      if (!value || value.length > MAX_ID_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) return key
+      if (!clean.includes(value)) clean.push(value)
+    }
+    next[key] = clean
+  }
+  for (const [key, max] of [['maxLines', MAX_CAP_LINES], ['maxBytes', MAX_CAP_BYTES]]) {
+    if (!Number.isInteger(body[key]) || body[key] < 1 || body[key] > max) return key
+  }
+  next.maxLines = body.maxLines
+  next.maxBytes = body.maxBytes
+  return next
+}
+
+/**
+ * The row's next config. dsh's profile patch replaces a row's config whole, so the
+ * fields the page does not edit are carried over as they are; the five it edits are
+ * written only where they differ from the plugin's own defaults, so a later default is
+ * not masked by a pinned copy. Saved back to the defaults, with nothing else changed,
+ * the row gets its inherited config back — the editor then drops the override.
+ */
+function withSettings(current, next, inherited) {
+  const out = { ...current }
+  const set = (key, value, isDefault) => {
+    if (isDefault) delete out[key]
+    else out[key] = value
+  }
+  set('language', next.language, next.language === 'en')
+  set('companionPresets', next.companionPresets, next.companionPresets.length === 0)
+  set('ownerSessions', next.ownerSessions, next.ownerSessions.length === 0)
+  set('maxLines', next.maxLines, next.maxLines === DEFAULT_MAX_LINES)
+  set('maxBytes', next.maxBytes, next.maxBytes === DEFAULT_MAX_BYTES)
+  const managed = ['language', 'companionPresets', 'ownerSessions', 'maxLines', 'maxBytes']
+  const others = (config) => Object.fromEntries(Object.entries(config ?? {})
+    .filter(([key]) => !managed.includes(key)))
+  const base = inherited !== null && typeof inherited === 'object' ? inherited : {}
+  if (managed.every((key) => !(key in out)) && plainSettings(base) &&
+      revisionOf(editableSettings(base)) === revisionOf(editableSettings({})) &&
+      isDeepStrictEqual(others(out), others(base))) {
+    return structuredClone(base)
+  }
+  return out
+}
+
+/** The agent presets to choose companions from, or null where dsh has no registry. */
+async function listPresets(ctx) {
+  try {
+    const presets = await ctx.get('agentPresets')?.list?.()
+    if (!Array.isArray(presets)) return null
+    return presets.filter((p) => typeof p?.id === 'string' && p.id)
+      .map((p) => (typeof p.name === 'string' && p.name ? { id: p.id, name: p.name } : { id: p.id }))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The conversations to mark as the user's own: every session that runs a preset, newest
+ * first, with the preset it runs now (a live session may have switched from its header's).
+ * Subagents are left out — they take their parent's role. Null where dsh cannot list them.
+ */
+async function listSessions(ctx) {
+  try {
+    const records = await ctx.get('sessionQuery')?.listSessions?.()
+    if (!Array.isArray(records)) return null
+    const live = ctx.get('sessions')
+    const projections = ctx.get('sessionProjections')
+    const out = []
+    for (const record of records) {
+      const header = record?.header
+      if (typeof header?.id !== 'string' || header.origin === 'subagent') continue
+      const started = typeof header.agentPreset === 'string' ? header.agentPreset : undefined
+      let preset = started
+      try {
+        // A live session's own answer stands, "no preset" included: it may have switched.
+        const session = record.live ? live?.get?.(header.id) : undefined
+        if (session !== undefined) preset = presetOf(session, projections)
+      } catch {
+        preset = started
+      }
+      if (preset === undefined) continue
+      out.push({ id: header.id, preset, createdAt: Number(header.createdAt) || 0 })
+    }
+    return out.sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_SESSIONS)
+  } catch {
+    return null
   }
 }
 

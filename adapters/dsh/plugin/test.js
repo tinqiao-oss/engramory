@@ -20,7 +20,7 @@ import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
 
-function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt } = {}) {
+function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId } = {}) {
   let guard
   const skills = []
   const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
@@ -36,8 +36,15 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt 
   // callback waits for the service. A regression to a bare top-level `ctx.skills`
   // read fails every test in this file, not just a real dsh boot.
   const pending = []
+  // the plugin's own fiber, as the profile editor's entries name it. Its entry, as on a real
+  // dsh 0.2.1-rc.5: `id` scoped by the include tree, `options.id` the row id the patch names
+  const fiber = {
+    name: 'engramory fiber',
+    ...(rowId === undefined ? {} : { entry: { id: `include:${rowId}`, options: { id: rowId } } }),
+  }
   const makeCtx = (declared) => new Proxy({}, {
     get(_, prop) {
+      if (prop === 'fiber') return fiber
       if (prop === 'get') return (name) => services[name]
       if (prop === 'effect') return (fn) => fn()
       if (prop === 'inject') {
@@ -65,7 +72,7 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt 
     }
   }
   const mountSkillsLate = () => mountLate('skills', skillRegistry)
-  return { guard, skills, mountSkillsLate, mountLate }
+  return { guard, skills, mountSkillsLate, mountLate, fiber }
 }
 
 /** dsh 0.2's per-session directory owner: `get(session)` is its synchronous read. */
@@ -74,7 +81,12 @@ const sessionDirs = () => ({ get: (session) => session.cwd })
 /** dsh's prompt registry, keeping every runtime context registered on it. */
 const promptRegistry = () => {
   const contexts = []
-  return { contexts, context: (spec) => { contexts.push(spec); return () => {} } }
+  // What reaches the model: every non-empty context in order; with `optionalOff`, as under
+  // a persona preset that turns optional runtime context off, only the required ones.
+  const render = (context, { optionalOff = false } = {}) => contexts
+    .filter((spec) => !optionalOff || spec.required === true)
+    .map((spec) => spec.text(context)).filter(Boolean).join('\n\n')
+  return { contexts, render, context: (spec) => { contexts.push(spec); return () => {} } }
 }
 
 /** Run `fn` with `$DSH_HOME` set to `home` (or unset), then put it back. */
@@ -1099,7 +1111,7 @@ test('companion mode: the user\'s own companion conversation gets the index and 
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.contexts[0].text(as(session)))
+  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
   const own = see(sessionOf('own-1', project, { agentPreset: 'whale' }))
   assert.match(own, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
   assert.match(own, /Companion mode \(大肥鱼模式\)[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
@@ -1118,7 +1130,7 @@ test('companion mode: anyone else\'s companion conversation gets no memory, only
   store(home, '- [u](u.md) - user\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (context) => withDshHome(home, () => prompt.contexts[0].text(context))
+  const see = (context) => withDshHome(home, () => prompt.render(context))
   for (const context of [
     as(sessionOf('douyin-abc', project, { agentPreset: 'whale' })),
     {}, // no session to tell by: fails closed
@@ -1138,7 +1150,7 @@ test('companion mode follows the preset a session runs now, not the one it start
   mountLate('sessionProjections', {
     stateOf: (session, key) => (key === 'agentPreset' ? session.now : undefined),
   })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.contexts[0].text(as(session)))
+  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
   assert.match(see({ ...sessionOf('s1', project, { agentPreset: 'default' }), now: 'whale' }),
     /not one of the user's own/)
   assert.match(see({ ...sessionOf('s2', project, { agentPreset: 'whale' }), now: null }), /- first/)
@@ -1235,7 +1247,7 @@ test('companion mode: the user\'s listing vouches for a subagent whose parent ca
     ...as(sessionOf('kid-listed', project, { origin: 'subagent', parentSession: 'gone' })) })), undefined)
   // a listed id on a coding preset is still a coding session: no companion rules
   const text = withDshHome(home, () =>
-    prompt.contexts[0].text(as(sessionOf('code-7', project, { agentPreset: 'default' }))))
+    prompt.render(as(sessionOf('code-7', project, { agentPreset: 'default' }))))
   assert.match(text, /- first/)
   assert.doesNotMatch(text, /Companion mode/)
 })
@@ -1265,7 +1277,7 @@ test('companion mode: a subagent of a coding session stays a coding session, wha
   withDshHome(home, () => guard({ name: 'todo_write', arguments: {},
     ...as(sessionOf('code-9', project, { agentPreset: 'default' })) }))
   const kid = sessionOf('kid-9', project, { agentPreset: 'whale', origin: 'subagent', parentSession: 'code-9' })
-  const text = withDshHome(home, () => prompt.contexts[0].text(as(kid)))
+  const text = withDshHome(home, () => prompt.render(as(kid)))
   assert.match(text, /- first/)
   assert.doesNotMatch(text, /Companion mode|not one of the user's own/)
 })
@@ -1352,7 +1364,7 @@ test('companion rules name the three life headings and keep "delete only when as
     const prompt = promptRegistry()
     mount({ ...COMPANION, language }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
     const text = withDshHome(scratch('home'), () =>
-      prompt.contexts[0].text(as(sessionOf('own-1', project, { agentPreset: 'whale' }))))
+      prompt.render(as(sessionOf('own-1', project, { agentPreset: 'whale' }))))
     for (const rule of rules) assert.ok(text.includes(rule), `${language}: ${rule}`)
   }
 })
@@ -1445,7 +1457,7 @@ test('companion mode keeps its notes with injectIndex: false, which only drops t
   const prompt = promptRegistry()
   mount({ ...COMPANION, injectIndex: false, language: 'zh' },
     { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.contexts[0].text(as(session)))
+  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
   const own = see(sessionOf('own-1', project, { agentPreset: 'whale' }))
   assert.match(own, /^大肥鱼模式：这个会话为用户运行陪伴人设/)
   assert.doesNotMatch(own, /first/)
@@ -1479,4 +1491,291 @@ test('a skill registry that activates after the plugin still gets the skill', ()
   const declined = mount({ registerSkill: false }, { withSkills: false })
   declined.mountSkillsLate()
   assert.equal(declined.skills.length, 0)
+})
+
+test('companion context is required, so a persona preset with optional context off keeps it', () => {
+  // dsh-persona `includeRuntimeContext: false` (the shipped `minimal` preset) drops
+  // optional contexts; seen on a real dsh, the owner then got no memory at all
+  const project = scratch('companion')
+  store(project, '- [birthday](birthday.md) - May 3\n')
+  const prompt = promptRegistry()
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const off = (session) => withDshHome(scratch('home'),
+    () => prompt.render(as(session), { optionalOff: true }))
+  const owner = off(sessionOf('own-1', project, { agentPreset: 'whale' }))
+  assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
+  assert.match(owner, /Companion mode \(大肥鱼模式\)/)
+  assert.match(off(sessionOf('douyin-1', project, { agentPreset: 'whale' })), /not one of the user's own/)
+  // a coding session keeps its preset's choice: its index stays optional
+  assert.equal(off(sessionOf('code-1', project, { agentPreset: 'default' })), '')
+  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]),
+    [['engramory:memory-index', false], ['engramory:companion', true]])
+
+  const plain = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: plain })
+  assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]), [['engramory:memory-index', false]])
+})
+
+// --- the settings page's routes (client.js) ---
+
+/** A mount with dsh's web server, the profile editor on this plugin's own row, and `extra`. */
+/** The bundle patch's own row config: what a profile override is compared with. */
+const BUNDLE_ROW = { indexName: 'MEMORY.md', maxLines: 200, maxBytes: 25600 }
+
+function webMount(config = {}, { rowConfig = config, extra = {}, editor: makeEditor, rowId } = {}) {
+  const m = mount(config, { rowId })
+  const routes = []
+  const edits = []
+  const entry = { fiber: m.fiber, options: { id: 'engramory', name: 'dsh-engramory', config: rowConfig } }
+  const editor = makeEditor ? makeEditor(entry, edits) : {
+    entries: () => [entry],
+    // like dsh's editor: `change(current, inherited)`; a result equal to the inherited
+    // config drops the override (recorded here as `null`)
+    edit: async (target, change) => {
+      const next = change(structuredClone(target.options.config ?? {}), structuredClone(BUNDLE_ROW))
+      const dropped = JSON.stringify(next) === JSON.stringify(BUNDLE_ROW)
+      edits.push(dropped ? null : next)
+      target.options.config = next
+    },
+  }
+  for (const [key, service] of Object.entries({ configEditor: editor, ...extra })) {
+    if (service !== undefined) m.mountLate(key, service)
+  }
+  m.mountLate('connection', {
+    fetch: {
+      // dsh's registry takes a path once and throws on a second (dsh-client-connection)
+      register: (route) => {
+        if (routes.some((r) => r.path === route.path)) {
+          throw new Error(`connection: exact Fetch route ${JSON.stringify(route.path)} is already registered`)
+        }
+        routes.push(route)
+        return async () => {}
+      },
+    },
+  })
+  const call = async (method, body) => {
+    const route = routes.find((r) => r.methods.includes(method) && r.path === '/api/engramory/settings')
+    const init = { method }
+    if (body !== undefined) {
+      init.body = typeof body === 'string' ? body : JSON.stringify(body)
+      init.headers = { 'content-type': 'application/json' }
+    }
+    const response = await route.fetch(new Request(`http://127.0.0.1${route.path}`, init))
+    return { status: response.status, body: await response.json() }
+  }
+  return { ...m, routes, call, edits, entry }
+}
+
+const saveBody = (revision, patch = {}) => ({
+  revision, language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1'],
+  maxLines: 200, maxBytes: 25600, ...patch,
+})
+
+test('settings routes: none without a web server, one exact route for both methods with it', () => {
+  const headless = mount({})
+  assert.ok(headless.guard) // a headless dsh mounts the cap as before
+  const { routes } = webMount({})
+  assert.deepEqual(routes.map((r) => [r.path, r.methods.join(), r.requestBody]),
+    [['/api/engramory/settings', 'GET,POST', 'buffered']])
+})
+
+test('settings GET: the row settings as the plugin reads them, presets, and conversations to choose from', async () => {
+  const liveSession = { id: 'live-1', header: { id: 'live-1', agentPreset: 'default' } }
+  const { call } = webMount({}, {
+    rowConfig: { indexName: 'MEMORY.md', language: 'zh-CN', companionPresets: 'whale', ownerSessions: [' own-1 ', ''], maxLines: 0 },
+    extra: {
+      agentPresets: { list: async () => [{ id: 'default' }, { id: 'whale', name: '大肥鱼' }, { name: 'no id' }] },
+      sessionQuery: {
+        listSessions: async () => [
+          { header: { id: 'old', agentPreset: 'whale', createdAt: 1 }, live: false },
+          { header: { id: 'sub', agentPreset: 'whale', origin: 'subagent', parentSession: 'old', createdAt: 9 }, live: false },
+          { header: { id: 'plain', createdAt: 5 }, live: false },
+          { header: { id: 'live-1', agentPreset: 'default', createdAt: 3 }, live: true },
+        ],
+      },
+      sessions: { get: (id) => (id === 'live-1' ? liveSession : undefined) },
+      // a blank live session switched to the companion preset after it was created
+      sessionProjections: { stateOf: (session) => (session === liveSession ? 'whale' : undefined) },
+    },
+  })
+  const { status, body } = await call('GET')
+  assert.equal(status, 200)
+  assert.deepEqual(
+    { language: body.language, companionPresets: body.companionPresets, ownerSessions: body.ownerSessions, maxLines: body.maxLines, maxBytes: body.maxBytes },
+    { language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1'], maxLines: 200, maxBytes: 25600 })
+  assert.equal(typeof body.revision, 'string')
+  assert.equal(body.editable, true)
+  assert.deepEqual(body.presets, [{ id: 'default' }, { id: 'whale', name: '大肥鱼' }])
+  // no subagent (it takes its parent's role), none without a preset, newest first, current preset
+  assert.deepEqual(body.sessions, [
+    { id: 'live-1', preset: 'whale', createdAt: 3 },
+    { id: 'old', preset: 'whale', createdAt: 1 },
+  ])
+})
+
+test('settings route: served by the row the page is keyed to, never by a second row of the package', () => {
+  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 1)
+  // a second row would claim the same path, or claim it first and have the page save it
+  assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
+})
+
+test('settings GET: a live session that cleared its preset is not listed by the one it started with', async () => {
+  const cleared = { id: 'was-whale', header: { id: 'was-whale', agentPreset: 'whale' } }
+  const { call } = webMount({}, {
+    extra: {
+      sessionQuery: { listSessions: async () => [{ header: { id: 'was-whale', agentPreset: 'whale', createdAt: 1 }, live: true }] },
+      sessions: { get: () => cleared },
+      sessionProjections: { stateOf: () => null }, // registered, and no preset now
+    },
+  })
+  assert.deepEqual((await call('GET')).body.sessions, [])
+})
+
+test('settings route: a row of the same id in a nested include does not fail to mount', () => {
+  const taken = new Set(['/api/engramory/settings'])
+  const m = mount({}, { rowId: 'engramory' })
+  assert.doesNotThrow(() => m.mountLate('connection', {
+    fetch: {
+      register: (route) => {
+        if (taken.has(route.path)) throw new Error(`connection: exact Fetch route ${route.path} is already registered`)
+        return async () => {}
+      },
+    },
+  }))
+})
+
+test('settings: a setting written as a !!js expression makes the page read-only, and is never taken for a default', async () => {
+  const expression = { __jsExpr: "['whale']" } // how dsh hands an unevaluated `!!js` value to the editor
+  const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, companionPresets: expression } })
+  const { body } = await w.call('GET')
+  assert.equal(body.editable, false)
+  assert.equal(body.readOnly, 'expression')
+  assert.deepEqual(await w.call('POST', saveBody(body.revision)),
+    { status: 409, body: { ok: false, error: 'unavailable' } })
+  assert.equal(w.edits.length, 0)
+
+  // an inherited expression: saving the defaults must not hand it back as "the defaults"
+  const inheritedExpr = webMount({}, {
+    rowConfig: { indexName: 'MEMORY.md', companionPresets: ['whale'] },
+    editor: (entry, edits) => ({
+      entries: () => [entry],
+      edit: async (target, change) => {
+        edits.push(change(structuredClone(target.options.config), { indexName: 'MEMORY.md', companionPresets: expression }))
+      },
+    }),
+  })
+  const { body: shown } = await inheritedExpr.call('GET')
+  await inheritedExpr.call('POST', saveBody(shown.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
+  assert.deepEqual(inheritedExpr.edits.at(-1), { indexName: 'MEMORY.md' }) // an override, so the expression no longer applies
+})
+
+test('settings GET reads duplicate ids once, as a save leaves them, so a save reads back equal', async () => {
+  const w = webMount({}, { rowConfig: { ownerSessions: ['own-1', 'own-1', 'own-2'], companionPresets: ['whale', 'whale'] } })
+  const { body } = await w.call('GET')
+  assert.deepEqual(body.ownerSessions, ['own-1', 'own-2'])
+  assert.deepEqual(body.companionPresets, ['whale'])
+  await w.call('POST', saveBody(body.revision, { ownerSessions: body.ownerSessions, companionPresets: body.companionPresets }))
+  const { body: after } = await w.call('GET')
+  assert.equal(after.revision, JSON.stringify({ language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1', 'own-2'], maxLines: 200, maxBytes: 25600 }))
+})
+
+test('settings GET without the editor or the registries: read-only, from the plugin config', async () => {
+  const { call } = webMount({ companionPresets: ['whale'] }, { editor: () => undefined })
+  const { body } = await call('GET')
+  assert.equal(body.editable, false)
+  assert.deepEqual(body.companionPresets, ['whale'])
+  assert.equal(body.presets, null)
+  assert.equal(body.sessions, null)
+})
+
+test('settings POST saves through the profile editor, keeping other fields and writing defaults as absence', async () => {
+  const w = webMount({}, { rowConfig: { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', maxLines: 200, maxBytes: 25600 } })
+  const { body: shown } = await w.call('GET')
+  const saved = await w.call('POST', saveBody(shown.revision, { ownerSessions: ['own-1', ' own-1', 'wx-*'], maxLines: 150 }))
+  assert.deepEqual(saved, { status: 200, body: { ok: true } })
+  // the caps go in only where they differ from the plugin's defaults, so a later default is not masked
+  assert.deepEqual(w.edits.at(-1), {
+    indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', maxLines: 150,
+    language: 'zh', companionPresets: ['whale'], ownerSessions: ['own-1', 'wx-*'],
+  })
+  // back to the defaults: a field the page does not edit (indexPath) keeps the override
+  const { body: again } = await w.call('GET')
+  await w.call('POST', saveBody(again.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md' })
+})
+
+test('settings POST back to the defaults on a bundle-only row hands back the inherited config, dropping the override', async () => {
+  const w = webMount({}, { rowConfig: { ...BUNDLE_ROW } })
+  const { body: shown } = await w.call('GET')
+  await w.call('POST', saveBody(shown.revision, { ownerSessions: [] }))
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', language: 'zh', companionPresets: ['whale'] })
+  const { body: again } = await w.call('GET')
+  await w.call('POST', saveBody(again.revision, { language: 'en', companionPresets: [], ownerSessions: [] }))
+  assert.equal(w.edits.at(-1), null) // equal to the inherited config: the editor drops the override
+})
+
+test('settings POST accepts any positive cap a profile may already carry', async () => {
+  const w = webMount({}, { rowConfig: { maxLines: 250000, maxBytes: 300 * 1024 * 1024 } })
+  const { body: shown } = await w.call('GET')
+  const result = await w.call('POST', saveBody(shown.revision, { maxLines: 250000, maxBytes: 300 * 1024 * 1024 }))
+  assert.deepEqual(result, { status: 200, body: { ok: true } })
+})
+
+test('settings POST refuses a save made against settings that changed in between', async () => {
+  const w = webMount({}, { rowConfig: { maxLines: 200 } })
+  const { body: shown } = await w.call('GET')
+  w.entry.options.config = { maxLines: 200, ownerSessions: ['added-by-hand'] } // edited elsewhere
+  const result = await w.call('POST', saveBody(shown.revision))
+  assert.deepEqual(result, { status: 409, body: { ok: false, error: 'stale' } })
+  assert.equal(w.edits.length, 0)
+  assert.deepEqual(w.entry.options.config.ownerSessions, ['added-by-hand'])
+})
+
+test('settings POST rejects malformed values, naming the field, and writes nothing', async () => {
+  const w = webMount({})
+  const { body: shown } = await w.call('GET')
+  for (const [patch, field] of [
+    [{ language: 'fr' }, 'language'],
+    [{ ownerSessions: ['ok', 'line\nbreak'] }, 'ownerSessions'],
+    [{ ownerSessions: 'own-1' }, 'ownerSessions'],
+    [{ companionPresets: ['x'.repeat(201)] }, 'companionPresets'],
+    [{ companionPresets: Array.from({ length: 501 }, (_, i) => `p${i}`) }, 'companionPresets'],
+    [{ maxLines: 0 }, 'maxLines'],
+    [{ maxBytes: 1.5 }, 'maxBytes'],
+    [{ revision: undefined }, 'revision'],
+  ]) {
+    const result = await w.call('POST', saveBody(shown.revision, patch))
+    assert.deepEqual(result, { status: 400, body: { ok: false, error: 'invalid', field } }, field)
+  }
+  assert.deepEqual(await w.call('POST', 'not json'),
+    { status: 400, body: { ok: false, error: 'invalid', field: 'body' } })
+  assert.equal(w.edits.length, 0)
+})
+
+test('settings POST reports what the profile editor refused', async () => {
+  for (const [message, status, error] of [
+    ['Configuration for "engramory" is overridden by a home patch or command-line overlay', 409, 'overridden'],
+    ['Profile patch must be a YAML sequence', 500, 'failed'],
+  ]) {
+    const w = webMount({}, {
+      editor: (entry) => ({ entries: () => [entry], edit: async () => { throw new Error(message) } }),
+    })
+    const { body: shown } = await w.call('GET')
+    const result = await w.call('POST', saveBody(shown.revision))
+    assert.deepEqual(result, { status, body: { ok: false, error, message } })
+  }
+})
+
+test('settings POST writes only this plugin own row, never another of the same package', async () => {
+  const w = webMount({}, {
+    editor: (entry, edits) => {
+      const other = { fiber: { name: 'another row' }, options: { ...entry.options, id: 'engramory-2' } }
+      return { entries: () => [other], edit: async (target, change) => { edits.push(change({}, {})) } }
+    },
+  })
+  const { body: shown } = await w.call('GET')
+  assert.equal(shown.editable, false)
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision)),
+    { status: 409, body: { ok: false, error: 'unavailable' } })
+  assert.equal(w.edits.length, 0)
 })

@@ -53,6 +53,30 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   it is best-effort, not access control: a shell tool reads any file (SECURITY.md).
   With companion mode on, the skill every session shares gains its companion section;
   coding sessions keep their index, their guard and their recall rules.
+- **A settings page on dsh** (the plugin's first browser half, `client.js`). On the
+  Plugins page, Engramory's row opens a page that sets the memory language, the
+  companion presets, which of their conversations are the user's own — one switch per
+  conversation, so no session id is pasted into YAML — and the index cap. It saves
+  through dsh's own profile editor (validated, written to the profile's
+  `cordis.patch.yml`, plugin reloaded, or the file left as it was), refuses a save made
+  against settings changed elsewhere, and writes defaults as absence. Its route is
+  reached only by the owner's signed-in browser: dsh answers 401 without the login
+  cookie and 403 to a cross-site request, so an agent cannot list itself as an owner.
+  Plain script, no build, React from the page, host theme tokens, Chinese and English.
+  The package now also exports display metadata (`locale/*.json`) and an icon. Two
+  rounds of cross-review (GPT and DeepSeek) and runs on a real dsh found, before
+  release: a second row of the package claiming the route (or having the page save its
+  config), duplicate ids that never read back equal after a save, fetches without a
+  deadline (body included), a cleared preset listed by the one a session started with,
+  default caps pinned into the profile, a `!!js` value taken for a default, and the
+  row id read from the tree-scoped `entry.id` (`include:engramory`) instead of
+  `options.id`.
+- **A companion conversation's context is required.** On a real dsh, a persona preset
+  that turns optional runtime context off (dsh-persona `includeRuntimeContext: false`,
+  as the shipped `minimal` preset does) left the owner with no memory at all. The
+  owner's memory and rules, and a stranger's note, are now a second runtime context
+  marked `required`; every other conversation's index stays optional. Checked by hand
+  on dsh 0.2.1-rc.5 with an owner's, a stranger's and a coding conversation.
 - **Defaults are unchanged.** With companion mode off and English, the skill, the
   injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
   compared). Four rounds of cross-review (GPT and DeepSeek) found, before release, a
