@@ -71,8 +71,8 @@ class ContinuityProtocolTests(unittest.TestCase):
     def test_docs_name_the_three_companion_types_not_the_withdrawn_one(self):
         """0.13.0 split a draft `life` type in three before release; a README or the
         changelog still describing `life` would ship a type the doctor rejects."""
-        for rel in ("README.md", "README.zh-CN.md", "adapters/dsh/plugin/README.md",
-                    "adapters/dsh/plugin/README.zh-CN.md", "CHANGELOG.md"):
+        for rel in ("README.md", "README.en.md", "adapters/dsh/plugin/README.md",
+                    "adapters/dsh/plugin/README.en.md", "CHANGELOG.md"):
             text = (ROOT / rel).read_text(encoding="utf-8")
             for name in ("moment", "upcoming"):
                 self.assertIn(name, text, rel)

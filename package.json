@@ -10,7 +10,7 @@
   "name": "dsh-engramory",
   "version": "1.0.0",
   "private": true,
-  "description": "Curated file-based long-term memory for DeepSeek Harness — discovery manifest for the installable plugin in adapters/dsh/plugin/",
+  "description": "DeepSeek Harness 的长期记忆插件（仓库根的发现清单，可安装的包在 adapters/dsh/plugin/）",
   "author": "tinqiao-oss",
   "license": "MIT",
   "repository": {

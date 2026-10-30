@@ -1,107 +1,60 @@
-[English](README.md) | [简体中文](README.zh-CN.md)
+**简体中文** | [English](README.en.md)
 
 # dsh-engramory
 
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(dsh). What the AI remembers is kept as plain markdown files you can open and edit
-at any time. Part of [Engramory](https://github.com/tinqiao-oss/engramory).
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）用的长期记忆插件。AI 记住的东西存成一个个普通 markdown 文件，你随时能打开看、能改。属于 [Engramory](https://github.com/tinqiao-oss/engramory)。
 
-![The memory page](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
+![记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
-## What it does
+## 它做什么
 
-- **The memory index rides along on every step.** The index, `MEMORY.md`, lists the
-  notes by name. The plugin puts it into dsh's context on every step, so the AI knows
-  what it has saved without reading a file first, and opens a note when it needs the
-  detail. A write shows up on the next request; whatever is past the cap is left
-  out, and the AI is told to compact.
-- **The index has a hard cap.** 200 lines / 25 KB by default. When the AI writes the
-  index with dsh's file tools and the plugin can work out the result, a write that
-  would grow it past the cap is refused before it happens, and the AI is told to
-  compact; compaction still passes. Details in [How the cap decides](#how-the-cap-decides).
-- **The rules come with it.** What to save, how, and when to clean up: the rules
-  (a skill) are registered by the plugin, with no files to install.
-- **A Memory page in the sidebar.** Read-only; it lists the notes by name and opens
-  one in your computer's default app.
+- **每轮自动带上记忆索引。** 索引 `MEMORY.md` 只列笔记名字，插件每一步都把它放进上下文，AI 不用先读文件就知道自己记过什么，要细节再打开那条笔记。写入后下一轮就能看到；超出上限的部分不带上，并提醒 AI 压缩。
+- **索引有硬上限。** 默认 200 行 / 25 KB。AI 用 dsh 的文件工具写索引时，只要插件算得出写完的样子，会超上限就在写入前拒绝，让它先压缩；压缩照样放行。细节见[上限怎么判](#上限怎么判)。
+- **自带记忆规则。** 记什么、怎么记、什么时候清理，这套规则（skill）随插件注册，不用另外装文件。
+- **侧栏多一个「记忆」页。** 只读，列出笔记名字，点名字用电脑上的默认程序打开。
 
-## Install
+## 安装
 
-Needs Node.js 18+ and `pnpm` on PATH (dsh's plugin command uses it). In dsh's desktop
-app you can also search for `dsh-engramory` on the Plugins page.
+需要 Node.js 18+，PATH 里要有 `pnpm`（dsh 的插件命令要用）。dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。
 
 ```sh
-dsh plugin --profile <name> add dsh-engramory
+dsh plugin --profile <名字> add dsh-engramory
 ```
 
-To uninstall, use `remove` instead of `add`. Compatible dsh releases are listed in
-`dsh.compatibility.dshReleases` in [`package.json`](package.json); an unlisted release
-is unverified.
+卸载把 `add` 换成 `remove`。兼容的 dsh 版本见 [`package.json`](package.json) 里的 `dsh.compatibility.dshReleases`，没列出的版本未经验证。
 
-**Where the memory lives:**
+**记忆存在哪：**
 
-- **The global store**, `~/.dsh/.engramory-memory/` (under `$DSH_HOME` when it is set).
-  With the plugin alone this is the only store; the AI creates it on its first save.
-- **A project store** (optional), `.engramory-memory/` in a project's root, is created
-  by you only: run `python tools/engramory_init.py dsh --project-root <project>` from
-  the Engramory repo, which also git-ignores it. Where one exists, what holds only in
-  that project goes there; everything else stays in the global store.
+- **全局库** `~/.dsh/.engramory-memory/`（设了 `$DSH_HOME` 就在它下面）。只装插件就用这一个，AI 第一次保存时自己建。
+- **项目库**（可选）是项目根目录下的 `.engramory-memory/`，只能由你来建：在 Engramory 仓库里运行 `python tools/engramory_init.py dsh --project-root <项目>`，它会顺手加进 `.gitignore`。有项目库时，只在这个项目成立的事记在那里，其余仍记全局库。
 
-Only one AI may write a store; two writers overwrite each other. To share it, let the
-others read it only: see [one writer, many readers](../../reader/README.md). Memories are plain text and carry machine-local detail. Inside a project's git repo
-the store must be git-ignored; a dedicated private repo for the store is fine.
+一个库只能有一个 AI 写，同时写会互相覆盖；想让别的 AI 也用，让它只读，见[单写者、多读者](../../reader/README.md)。记忆是明文，带着本机细节。放在项目的 git 仓库里必须 git-ignore；给记忆库单独开一个私有仓没问题。
 
-**Without the plugin:** `python tools/engramory_init.py dsh --install-skill` writes the
-rules into `$DSH_HOME/AGENTS.md`, installs the skill in `$DSH_HOME/skills/engramory/`
-(`$DSH_HOME` defaults to `~/.dsh`) and creates the global store. The AI still keeps memory, but reads the index itself, and
-the cap holds only if it runs `engramory_check.py` after each write.
+**不装插件也能用：** `python tools/engramory_init.py dsh --install-skill` 把记忆规则写进 `$DSH_HOME/AGENTS.md`、把 skill 装进 `$DSH_HOME/skills/engramory/`（`$DSH_HOME` 默认 `~/.dsh`），并建好全局库。AI 照样会记，但索引要它自己去读，上限只靠它写完后自觉运行 `engramory_check.py`。
 
-## Companion mode (大肥鱼模式)
+## 大肥鱼模式
 
-For a character you chat with: the community's 大肥鱼, or any persona. Turn on the
-companion switch on the settings page, or set `companion: true`.
+给陪你聊天的角色用（社区里的大肥鱼，或任何人设）。在设置页打开「大肥鱼模式」，或在配置里写 `companion: true`。
 
-![The memory page in companion mode](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/companion-mode.png)
+![大肥鱼模式下的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/companion-mode.png)
 
-- **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
-  `moment`, something you shared, with its date, folded into a monthly archive when
-  the index fills; `upcoming`, something coming up in your life, asked about once its
-  date passes and rewritten as a moment once you say how it went; `self`, a change in
-  the character itself, such as a nickname. A moment or self note is deleted only when
-  you ask it to forget.
-- **Recall in character.** Even a greeting may call for recall, and what it remembered,
-  or failed to save, is told in the character's voice, without naming files or tools.
-- **The persona preset needs the file tools.** The memory arrives even under a preset
-  that turns optional context off (dsh's `minimal`, for one). To save notes, though, the
-  preset needs dsh's file tools and the skill tool; a preset with only a shell reads the
-  memory, and its writes go past the cap.
+- **多记三类角色自己的事**（[SKILL.md §2.2](../../../SKILL.md)）：`moment`（经历）是和你一起经历的事，带日期，索引满了按月归档；`upcoming`（约定）是你将要发生的事，日子过了会问起结果，问到了再改写成经历；`self`（我自己）是角色自己的变化，比如外号。经历和我自己只有你说忘掉才删。
+- **用角色口吻回忆。** 打招呼也可能让它想起点什么；记住了、没记上，都用角色的话说，不提文件和工具。
+- **人设预设要留着文件工具。** 记忆总会送到，哪怕预设关掉了可选上下文（比如 dsh 的 `minimal`）。但角色要保存记忆，预设得带上 dsh 的文件工具和 skill 工具；只给了 shell 的预设读得到记忆，写入却绕过上限。
 
-## Social mode
+## 社交模式
 
-A choice inside companion mode, for a character other people can talk to as well, such
-as one wired to QQ, WeChat, Douyin or Bilibili through a bridge plugin. Choose *Social*
-under *Memory access* on the settings page, or set `audience: social`. If only you talk
-to this dsh, keep the default, *Private*.
+大肥鱼模式里的一个选项，给别人也能聊的角色用，比如通过接入插件接到 QQ、微信、抖音、B 站的角色。在设置页「记忆权限」选「社交」，或写 `audience: social`。只有你自己跟这个 dsh 聊，就保持默认的「专属」。
 
-With it on, **only your own conversations get the memory**: one is yours when you have
-typed in it in dsh's own window (the desktop app or `dsh web`) and nobody else has.
-A subagent goes with its parent. Messages from a bridge plugin (unless it marks them as
-the owner's, below), `dsh headless`, other programs, and terminal or editor clients
-count as someone else's. Once anyone else has written in a conversation it stays
-theirs, and the memory already put into it stays in its history.
+打开后，**只有你本人的会话拿得到记忆**：你在 dsh 自己的窗口（桌面版或 `dsh web`）里亲手发过消息、且没有别人说过话的会话才算你的。子 agent 跟着它的父会话算。接入插件转来的消息（标明是主人的除外，见下文）、`dsh headless`、外部程序、终端和编辑器客户端发的都算别人的；一个会话只要有别人说过话，就一直算别人的，之前已经带进去的记忆仍留在对话记录里。
 
-Someone else's conversation gets no index and is not told where the store is; dsh's
-file tools there may name files only (every directory is refused), and any path into
-a store is refused however it is spelled. This is **not** a security boundary: a shell
-tool reads any file, and another profile on the same account can read the store too.
-Real isolation needs filesystem permissions or a sandbox.
+别人的会话拿不到索引，也不知道记忆库在哪；dsh 的文件工具只能指名文件（任何目录都不让列），指向记忆库的路径不管怎么写都拒绝。这**不是**安全边界：shell 工具照样能读任何文件，同一账户下的另一个 profile 也读得到。要真正隔离，得靠文件权限或沙箱。
 
-### For bridge authors
+### 给接入插件作者
 
-With social mode on, every message a bridge submits counts as someone else's. For a
-message from the owner's own account (their private QQ chat with the character, say),
-put a `speaker` on its source:
+社交模式下，接入插件转进来的消息默认都算别人的。来自主人自己账号的消息（比如主人和角色的 QQ 私聊），在来源章上标 `speaker`：
 
 ```js
 agent.followup(createUserMessage({
@@ -110,37 +63,24 @@ agent.followup(createUserMessage({
 }))
 ```
 
-| `speaker.role` | Meaning |
+| `speaker.role` | 含义 |
 |---|---|
-| `owner` | The owner wrote it: it comes from the account the user set as theirs in your bridge. |
-| `guest` | Someone else wrote it, the same as no `speaker` at all. |
-| `none` | Nobody wrote it: your plugin's own report, reminder or notice. It does not make the owner's conversation someone else's. |
+| `owner` | 主人发的：来自用户在你插件里设为"自己"的那个账号。 |
+| `guest` | 别人发的，和不写 `speaker` 一样。 |
+| `none` | 不是人发的：你插件自己的汇报、提醒或通知，不会让主人的会话变成别人的。 |
 
-A group conversation stays someone else's once anyone else in it speaks. A program
-that talks to dsh only through dsh web's API cannot set a source, so its messages count
-as someone else's; if it sends `clientTimeZone` with a prompt it is taken for the
-owner, so a program forwarding other people's messages must leave it out.
+群聊里只要有别人说话，那个会话就一直算别人的。只通过 dsh web 接口发消息的程序设不了来源章，消息都算别人的；它若带上 `clientTimeZone`，会被当成主人，所以替别人转发消息的程序不要带。
 
-## Settings page and memory page
+## 设置页与记忆页
 
-![The settings page](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/settings-page.png)
+![设置页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/settings-page.png)
 
-- **Settings page:** on dsh's *Plugins* page, open *Engramory memory* to set companion
-  mode, memory access and the index cap. Saving goes through dsh's own profile editor,
-  which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
-  in, can call it, so an agent cannot use it to switch social mode off.
-- **Memory page:** *Memory* in the sidebar. It lists the global store and each
-  workspace's project store (with an absolute `indexPath`, that store alone; with a
-  relative one, none), with each index's size against the cap, its notes' names
-  by type, and its archive. Read-only, never a note's text; a name, *Open the index* and
-  *Open the folder* open on the machine dsh runs on. The two switches at the top save
-  as you flip them.
+- **设置页**：dsh 的「插件」页里点开「Engramory 记忆」，能改大肥鱼模式、记忆权限和索引上限。保存走 dsh 自己的配置服务，写进你 profile 的 `cordis.patch.yml` 并重新加载插件。这个接口只有登录了的你能调，AI 没法调用它关掉社交模式。
+- **记忆页**：左侧栏「记忆」。列出全局库和各工作区的项目库（设了绝对路径的 `indexPath` 时只列那一个，相对路径则列不出），显示索引离上限还有多远、按类型分组的笔记名字和归档。只读，不显示正文；点名字、「打开索引」「打开文件夹」都在运行 dsh 的那台机器上打开。顶部的两个开关拨了就保存。
 
-## Configuration
+## 配置
 
-Settings the page does not cover go in your profile's `cordis.patch.yml`. Patch the
-EXISTING row by id; a second `- insert:` adds another engramory row and leaves the old
-caps in force. A patch replaces the row's whole `config`, so list every key you keep:
+设置页没有的配置，写在你 profile 的 `cordis.patch.yml` 里：按 id 改已有的那一行，别再写一个 `- insert:`（那会多出第二行 engramory，旧上限照样生效）。一次 patch 会整体替换 `config`，要保留的键都列上：
 
 ```yaml
 - id: engramory
@@ -150,61 +90,45 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
     maxBytes: 25600
 ```
 
-| Field | Default | Meaning |
+| 字段 | 默认值 | 含义 |
 |---|---|---|
-| `indexName` | `MEMORY.md` | The file name treated as the index, case-insensitive. |
-| `maxLines` | `200` | Line cap for the index. |
-| `maxBytes` | `25600` | UTF-8 byte cap for the index (25 KB). |
-| `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |
-| `registerSkill` | `true` | `false` keeps the cap but skips the built-in rules. |
-| `injectIndex` | `true` | `false` stops putting the index into context; the AI reads it instead. |
-| `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other value is English. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
-| `companion` | `false` | `true` turns companion mode on. |
-| `audience` | `private` | With companion mode on, `social` turns social mode on. |
-| `skill` | built-in | Your own markdown in place of the built-in rules; it must then say where the store is. |
+| `indexName` | `MEMORY.md` | 哪个文件名算索引，不分大小写。 |
+| `maxLines` | `200` | 索引行数上限。 |
+| `maxBytes` | `25600` | 索引字节上限（25 KB）。 |
+| `indexPath` | 不设 | 只认这一个索引：绝对路径，或相对会话目录。不设时，任何项目里叫 `MEMORY.md` 的文件都按索引卡上限；记忆库不在默认位置时也要设它，否则不会自动带上。 |
+| `registerSkill` | `true` | `false`：不注册内置的记忆规则，只留上限。 |
+| `injectIndex` | `true` | `false`：不再每轮带上索引，改由 AI 自己读。 |
+| `language` | 跟随 dsh | `zh`（`zh-CN` 等也算）用中文写记忆（笔记名、`## 用户` 这类标题、**为什么：**/**怎么用：**），其他值用英文。不设就跟 dsh 的语言，改了要重启 dsh。frontmatter 的键和 `type:` 取值始终是英文，别的宿主照样能读。 |
+| `companion` | `false` | `true` 打开大肥鱼模式。 |
+| `audience` | `private` | 大肥鱼模式下设 `social` 打开社交模式。 |
+| `skill` | 内置 | 用你自己的 markdown 换掉内置规则，这时得自己写明记忆库在哪。 |
 
-## How the cap decides
+## 上限怎么判
 
-| Case | Decision |
+| 情况 | 结果 |
 |---|---|
-| The index ends within the caps | allow |
-| The write grows the index past a cap | **deny**, with the numbers and what to compact |
-| The index is over a cap and the write shrinks it or keeps its size | allow, so compaction can go step by step (210 → 205 → 198) |
-| An edit with `old_str`/`new_str` | its result is worked out first, then judged as above |
-| A partial edit whose result cannot be worked out (e.g. `insert`) | deny on an over-cap index, else allow |
-| The index is missing, unreadable, or not a regular file | a whole-file write is judged as if it were empty; a partial edit passes |
-| The index is past the read limit (`min(16 MiB, max(1 MiB, 4 × maxBytes))`) | not read whole: a whole-file write is judged on bytes alone; a partial edit passes |
-| Reads, writes to other files, unknown tools or arguments | allow; reads are never blocked, even over the cap |
+| 写完后索引在上限内 | 放行 |
+| 写入让索引变大，并超过上限 | **拒绝**，报出数字，提示压缩什么 |
+| 索引已超限，写入让它变小或不变 | 放行（压缩可以一步步来：210 → 205 → 198） |
+| 带 `old_str`/`new_str` 的编辑 | 先算出改完的结果，再按上面三条判 |
+| 算不出结果的局部编辑（如 `insert`） | 索引已超限时拒绝，否则放行 |
+| 索引不存在、读不到，或不是普通文件 | 整文件写入当它是空的来判；局部编辑放行 |
+| 索引大到超过读取上限（`min(16 MiB, max(1 MiB, 4 × maxBytes))`） | 不整份读：整文件写入只按字节比大小；局部编辑放行 |
+| 读文件、写别的文件、不认识的工具或参数 | 放行；索引超限也不挡读取 |
 
-Lines and bytes are judged apart: only a dimension that is over its cap AND grew is
-refused, so a write with fewer bytes but lines grown past the cap is still refused.
-The line count ignores a trailing newline, so an index exactly at the cap stays
-writable. This table is pinned by `node --test` in CI.
+行数和字节分开判：只拒绝既超上限、又比原来变大的那一项，所以字节变少但行数涨过上限的写入照样被拒。行数不算末尾换行，正好卡在上限的索引还能写。这张表由 CI 里的 `node --test` 固定。
 
-## Known limits
+## 已知限制
 
-- **Only dsh's own file tools are capped** (`write`, `edit`, `str_replace_editor` and
-  the like). Shell tools, MCP file tools and external editors go past it: run
-  `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
-- **Stores are found only where the installer puts them.** Elsewhere, or for a project
-  store that links out of the project, set `indexPath`. A project's root is found by
-  its `.git` only, and a project store created mid-session can take ten seconds to appear.
-- **Social mode knows you by what dsh's window sends.** Apart from a bridge's owner
-  messages, only what you type in dsh's own window is yours, and not when the browser's
-  time zone cannot be read. A kind of
-  message a later dsh adds counts as someone else's until this plugin knows it: your
-  conversation may lose the memory, never the other way round.
-- **Experimental:** companion mode, social mode, and the settings and memory pages may
-  change in a minor version.
+- **只拦 dsh 自带的文件工具**（`write`、`edit`、`str_replace_editor` 等）。shell、MCP 文件工具和外部编辑器写入都绕过上限；改完索引跑 `engramory_check.py`，定期跑 `engramory_doctor.py`。
+- **记忆库只在默认位置自动找到。** 放在别处，或项目库是指向项目外的链接，要设 `indexPath`；项目根只按 `.git` 认；会话中途新建的项目库最多十秒后才出现。
+- **社交模式靠 dsh 窗口发来的信息认你。** 除了接入插件标明的主人消息，只有 dsh 自己窗口里打的字算你的；浏览器读不出时区时也认不出。dsh 以后新加的消息种类，插件认识之前都算别人的：你的会话可能拿不到记忆，但不会把记忆漏给别人。
+- **实验性功能**：大肥鱼模式、社交模式、设置页和记忆页在小版本里也可能改。
 
-## Versions
+## 版本
 
-This package carries Engramory's version: `dsh-engramory@X.Y.Z` is the repo's
-`vX.Y.Z`. The cap's decisions (the table above) and the settings outside the
-experimental features change incompatibly only in a major version. See Engramory's
-[Versioning](https://github.com/tinqiao-oss/engramory#versioning); history is in the
-[CHANGELOG](../../../CHANGELOG.md).
+本包和 Engramory 用同一个版本号：`dsh-engramory@X.Y.Z` 就是仓库的 `vX.Y.Z`。上限判定（上面那张表）和实验性功能以外的配置，只在主版本做不兼容改动。详见[版本规则](https://github.com/tinqiao-oss/engramory#版本规则)，改动历史见 [CHANGELOG](../../../CHANGELOG.md)。
 
-## License
+## 许可
 
-MIT — see the [Engramory repository](https://github.com/tinqiao-oss/engramory).
+MIT，见 [Engramory 仓库](https://github.com/tinqiao-oss/engramory)。

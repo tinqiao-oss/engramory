@@ -1,7 +1,7 @@
 {
   "name": "dsh-engramory",
   "version": "1.0.0",
-  "description": "Curated file-based long-term memory for DeepSeek Harness — human-readable markdown notes, one plain-file store shared across hosts (git-ignored when it lives inside a project repo), and a deterministic index cap enforced by ctx.tools.guard()",
+  "description": "DeepSeek Harness 的长期记忆插件：AI 记住的东西存成普通 markdown 文件，每轮自动带上记忆索引，索引有大小上限。",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

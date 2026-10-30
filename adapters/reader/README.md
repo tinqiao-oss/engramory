@@ -1,61 +1,46 @@
 # Read-only reader (any host)
 
-Wire **any agent** to *recall* from a memory store that **another agent owns and writes** —
-most usefully, Claude Code's native auto-memory. The reader reads the index and opens the
-notes it needs; it never writes. Use it when one agent is the primary curator and you hand
-delegated work (a review, a build task, a sub-agent run) to a second agent, and want that
-run grounded in the same project memory without hand-feeding it.
-
-This generalizes the pattern to **one writer, N readers**. The store is plain markdown, so
-any agent that can read files can read it; the read-only recall rule is host-agnostic text.
-The only per-host difference is **which always-loaded rules file** it goes in.
+Let a second agent **recall** from a store another agent owns and writes (most often
+Claude Code's auto-memory): it reads the index, opens the notes it needs, and never
+writes. Useful when you hand a review, a build or a sub-agent run to another agent
+and want it grounded in the same project memory.
 
 ## Why read-only (the single-writer invariant)
 
-Engramory assumes a **single writer / serialized writes** — the store has no locking, so two
-agents writing the same index race and lose updates (`SKILL.md` §8). One designated writer
-(e.g. Claude Code, which also has the deterministic index-size hook) stays the curator; every
-reader only reads. You can attach many readers safely; you must not attach a second writer.
+The store has no locking: two agents writing the same index race and lose updates
+(`SKILL.md` §8). So one writer curates (ideally one with a pre-write cap, such as
+Claude Code or dsh), and any number of readers only read. Never attach a second writer.
 
 ## Quick start
-
-Point a reader at an **existing** store — e.g. Claude Code's memory directory:
 
 ```sh
 # Codex (dogfooded)
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
 
-# any other host — same shape, different rules file:
+# any other host: same shape, different rules file
 python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
   --memory-root ~/.claude/projects/<project>/memory
 ```
 
-- `--project-root` is where the host's rules file lives (e.g. `~/.codex` for a global Codex
-  `AGENTS.md`, or a repo for a project-scoped rule). It must be **outside** the store.
-- `--memory-root` **must** be an existing store (a directory with `MEMORY.md`). The reader
-  never creates one and refuses otherwise.
+- `--project-root` is where the host's rules file lives (`~/.codex` for a global Codex
+  `AGENTS.md`, or a repo), and must be **outside** the store.
+- `--memory-root` **must** already hold a `MEMORY.md`; the reader never creates a store.
 
-## Supported reader hosts
+Supported hosts and their verification status are in
+[PORTING.md](../../PORTING.md#read-only-host-wiring); only `codex-reader` and
+`dsh-reader` are verified on a real host.
 
-The [host wiring and verification table](../../PORTING.md#read-only-host-wiring)
-is maintained in PORTING.md, including the Cline / Windsurf directory fallback.
-Only `codex-reader` and `dsh-reader` have real-host verification here; the installer
-labels the other wirings unverified.
-
-## What the reader is told
-
-The rules (in [`reader-snippet.md`](reader-snippet.md)) instruct the agent to: read
-`MEMORY.md` at the start of a task, open only the relevant notes, treat recall as fallible
-background to verify, and **never create, edit, or delete anything in the store** — if it
-learns something durable, surface it to the user instead of writing it.
+The rules ([`reader-snippet.md`](reader-snippet.md)) tell the agent to read
+`MEMORY.md` at the start of a task, open only relevant notes, treat recall as fallible,
+and **never create, edit, or delete anything in the store**: a durable new fact goes to
+the user instead.
 
 ## Reliability & privacy notes
 
-- **The read-only rule is instruction-level, not a hard guard.** Nothing physically blocks a
-  file write. For a hard stop on hosts that support it, run the reader under a read-only
-  sandbox (e.g. `codex exec -s read-only`) for recall-only tasks.
-- **Data egress.** A reader sends what it reads to its model provider. If the store holds
-  sensitive project detail, be deliberate about which agent you point at it, and scope
-  `--memory-root` to a store (or curated subset) you're comfortable sending off-machine.
-- Index-size guards are a writer concern; see the [host reliability ladder](../../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook).
+- **Read-only is an instruction, not a guard.** Nothing blocks a write. Where the host
+  has one, run recall-only tasks in a read-only sandbox (e.g. `codex exec -s read-only`).
+- **Data egress.** A reader sends what it reads to its model provider. Point only an
+  agent you trust with it at a store holding sensitive detail.
+- Index caps are the writer's concern; see the
+  [reliability ladder](../../PORTING.md#4-enforce-the-size-cap--the-degradation-ladder-no-pretooluse-hook).

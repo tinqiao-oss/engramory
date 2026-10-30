@@ -10,7 +10,7 @@ by helpfully "fixing" memories you were never asked to touch.
 
 This file is the procedure that keeps both from happening. Work through it in order.
 
-- **Not for humans installing it themselves** — that is [`README.md`](README.md)
+- **Not for humans installing it themselves** — that is [`README.en.md`](README.en.md)
   (per-host install) and [`hooks/INSTALL.md`](hooks/INSTALL.md) (the Claude Code hook).
 - **Not the protocol** — that is [`SKILL.md`](SKILL.md), which you follow *after*
   installation, on every task.
@@ -227,7 +227,7 @@ what people mean by "shared agent memory" is a different thing wearing the same 
 - **A team handoff channel** between several agents writing concurrently. Engramory
   assumes one writer and has no lock (Step 3, *Ownership*).
 - **A store past the always-loaded window.** Once the active set outgrows the index cap,
-  the right answer is a retrieval system, not a bigger index — [`README.md`](README.md)
+  the right answer is a retrieval system, not a bigger index — [`README.en.md`](README.en.md)
   names that boundary and does not pretend otherwise.
 
 None of these are failures of the user's setup, and none are a reason to bend the
@@ -278,7 +278,7 @@ states rather than as a yes/no — the difference matters and the failure modes 
 Two traps in particular:
 
 - **A half install looks like a working one.** The standing-rules snippet is the
-  *primary* install step for Claude Code ([`README.md`](README.md)), yet it is the
+  *primary* install step for Claude Code ([`README.en.md`](README.en.md)), yet it is the
   easiest to skip — a store plus a skill plus a hook, with no snippet in the rules file,
   leaves the discipline off the always-loaded path, so an ordinary task may run without
   it. If you find this, say so loudly; it is invisible from the outside and the store
@@ -340,7 +340,7 @@ decisions only they can make. This is Gate 2.
 
 ## Step 8 — Install (only after Gate 2)
 
-Follow [`README.md`](README.md) for the host, or `engramory_init.py` where an adapter
+Follow [`README.en.md`](README.en.md) for the host, or `engramory_init.py` where an adapter
 exists. Two things to carry into your report afterwards:
 
 - **There is no AUTOMATIC rollback.** Several targets are user-owned files, so a failure
@@ -490,7 +490,7 @@ the detail is the explanation. Never open with it.
 
 Cap values, the host capability matrix, the ladder definition, and per-host install
 commands are **not** repeated here. They live in [`SKILL.md`](SKILL.md),
-[`PORTING.md`](PORTING.md), [`README.md`](README.md), [`hooks/INSTALL.md`](hooks/INSTALL.md),
+[`PORTING.md`](PORTING.md), [`README.en.md`](README.en.md), [`hooks/INSTALL.md`](hooks/INSTALL.md),
 and the tools' own output. This file is the procedure only, so that it cannot come to
 describe behavior the code no longer has — a drift this project has had to clean up
 before.
