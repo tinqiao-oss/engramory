@@ -143,6 +143,17 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   this, a plugin-only install never said where: on a real dsh, a model in a fresh
   workspace searched the user's home folder and read an old memory backup, then wrote its
   first index into the session's directory, where recall and the memory page never look.
+- **dsh: the cap guards the index recall reads, in two configurations where it did not.**
+  A relative `indexPath` — and on Windows one rooted without a drive, `\notes\INDEX.md` —
+  is now resolved against each session's working directory by the guard, as recall always
+  resolved it; the guard keyed it once against dsh's own process directory, so the file
+  each session recalled could grow past the cap while one nobody used was guarded. An
+  `indexName` that is not a plain file name (a path separator, `:`, `.` or `..`) now falls
+  back to `MEMORY.md`, as an empty one does: recall read the nested file it named while the
+  guard compared base names. A profile that used one keeps its old index unread: move that
+  index to `MEMORY.md` beside its notes, or pin it with an absolute `indexPath`. Both date
+  from dsh-engramory 0.2.x. (Still open, as before: a Windows 8.3 short name for the index
+  or a folder on its path is not matched by the guard.)
 - **Defaults are otherwise unchanged in English.** With companion mode off, private, and
   English (an English dsh or system, or `language: en`), the injected index and every
   guard verdict are byte-identical to 0.12.4 (34 outputs compared), and the skill differs

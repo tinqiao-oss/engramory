@@ -98,7 +98,10 @@ export function apply(ctx, config = {}) {
   const settings = {
     indexName: indexNameOf(config.indexName),
     indexPath,
-    indexKey: indexPath === undefined ? undefined : pathKey(indexPath),
+    // A relative pin names a file in each session's directory, as recall and dsh's own
+    // file tools resolve it: its key is found per call (pinnedKey), not once against
+    // the process's directory, where it named a file nobody was writing.
+    indexKey: indexPath === undefined || !qualified(indexPath) ? undefined : pathKey(indexPath),
     // When pinned, the name to match is the pinned file's own basename.
     matchName: (indexPath === undefined
       ? indexNameOf(config.indexName)
@@ -658,7 +661,7 @@ function canOpen(opener) {
  */
 function candidatesOf(settings, registry) {
   if (settings.indexPath !== undefined) {
-    return isAbsolute(settings.indexPath)
+    return qualified(settings.indexPath)
       ? { list: [{ id: 'pinned', kind: 'pinned' }], more: false }
       : { list: [], more: false, pinned: 'relative' }
   }
@@ -1647,8 +1650,9 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
   // Python guard: on a case-sensitive FS this can gate an unrelated lowercase twin —
   // rename it, or pin `indexPath`.)
   const named = (p) => basename(p).toLowerCase() === settings.matchName
-  const isIndex = settings.indexKey !== undefined
-    ? pathKey(target) === settings.indexKey
+  const pinned = pinnedKey(exec, settings, sessionCwd)
+  const isIndex = pinned !== undefined
+    ? pathKey(target) === pinned
     : named(filePath) || named(pathKey(target))
   if (!isIndex) return undefined
 
@@ -1703,6 +1707,26 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
     `is a table of contents, and anything past the cap stops being recalled.` +
     notMyIndexHint(settings)
   )
+}
+
+/**
+ * The pinned index's identity for this call, or undefined when nothing is pinned: an
+ * absolute pin's, computed once; a relative pin's, resolved against the calling
+ * session's directory as recall resolves it (hostPath) — the process's only when the
+ * session has none, as dsh 0.1.x's tools do.
+ */
+function pinnedKey(exec, settings, sessionCwd) {
+  if (settings.indexPath === undefined) return undefined
+  return settings.indexKey ?? pathKey(hostPath(sessionCwd(exec), settings.indexPath))
+}
+
+/**
+ * A path that names one file from wherever it is resolved: on Windows only with a drive
+ * or a UNC root — `\notes\INDEX.md` is "absolute" to Node, yet lands on the drive of
+ * whichever directory resolves it, as `C:notes\INDEX.md` does.
+ */
+function qualified(p) {
+  return process.platform === 'win32' ? /^(?:[A-Za-z]:[\\/]|[\\/]{2})/.test(p) : isAbsolute(p)
 }
 
 /**
@@ -1998,10 +2022,15 @@ function pathKey(p) {
 /**
  * An empty or non-string indexName must fall back, not silently disable the cap:
  * the numeric caps already recover from nonsense values, and this field is the one
- * that decides whether the guard fires at all.
+ * that decides whether the guard fires at all. So must one that is not a plain file
+ * name: recall joins it under the store (`sub/INDEX.md` read a nested file) while the
+ * guard matches base names (`INDEX.md`), so writes to the file recall read went uncapped.
  */
 function indexNameOf(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_INDEX_NAME
+  const name = typeof value === 'string' ? value.trim() : ''
+  return name && name !== '.' && name !== '..' && !/[\\/:\u0000-\u001f]/.test(name)
+    ? name
+    : DEFAULT_INDEX_NAME
 }
 
 /**
@@ -2195,7 +2224,7 @@ function whereEn(stores, companion) {
   const store = stores.pinned !== undefined
     ? [stores.social
       ? 'This host pins one index; in the user\'s own conversations your runtime context gives its path.'
-      : `This host pins one index: ${code(stores.pinned)}${isAbsolute(stores.pinned) ? '' : ', relative to your working directory'}.`,
+      : `This host pins one index: ${code(stores.pinned)}${qualified(stores.pinned) ? '' : ', relative to your working directory'}.`,
     'Its folder is the store: every note goes there, beside it.']
     : [stores.social
       ? 'Your store is the global one, `.engramory-memory/` in dsh\'s home folder; in the user\'s own conversations your runtime context gives its full path.'
@@ -2227,7 +2256,7 @@ function whereZh(stores, companion) {
   const store = stores.pinned !== undefined
     ? [stores.social
       ? '本宿主固定了一个索引；在用户本人的会话里，运行时上下文会给出它的路径。'
-      : `本宿主固定了一个索引：${code(stores.pinned)}${isAbsolute(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
+      : `本宿主固定了一个索引：${code(stores.pinned)}${qualified(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
     '它所在的文件夹就是记忆库：每条笔记都写在那里，放在索引旁边。']
     : [stores.social
       ? '你的记忆库是全局库，即 dsh 主目录下的 `.engramory-memory/`；在用户本人的会话里，运行时上下文会给出完整路径。'

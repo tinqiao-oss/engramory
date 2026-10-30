@@ -448,6 +448,52 @@ test('an empty or non-string indexName falls back instead of disabling the guard
   assert.match(mount({ indexName: 42 }).guard(write(`/s/${INDEX}`, big(300))), /300 lines/)
 })
 
+test('an indexName that is not a plain file name falls back too', () => {
+  // recall joined `sub/INDEX.md` under the store while the guard matched base names, so
+  // the nested file recall read could grow past the cap
+  for (const indexName of ['sub/INDEX.md', 'sub\\INDEX.md', 'INDEX.md:stream', '..', '.']) {
+    const { guard, skills } = mount({ indexName })
+    assert.match(guard(write(`/s/${INDEX}`, big(300))), /300 lines/, indexName)
+    assert.equal(guard(write('/s/INDEX.md', big(300))), undefined, indexName)
+    assert.match(skills[0].content, /`MEMORY\.md`/, indexName)
+  }
+  // a plain name of another kind is kept
+  assert.match(mount({ indexName: 'INDEX.md' }).guard(write('/s/INDEX.md', big(300))), /300 lines/)
+})
+
+test('a relative pinned index is the one in the session\'s directory, as recall reads it', () => {
+  // The guard keyed it once, against the process's directory: the file recall read in
+  // each session went uncapped, and a file nobody used was guarded instead.
+  const a = realpathSync.native(scratch('pin-a'))
+  const b = realpathSync.native(scratch('pin-b'))
+  for (const dir of [a, b]) mkdirSync(join(dir, 'notes'))
+  const { guard } = mount({ indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs() })
+  const writeIn = (cwd, file_path) => ({ name: 'write', agent: { session: { cwd } }, arguments: { file_path, content: big(300) } })
+  assert.match(guard(writeIn(a, join(a, 'notes', 'INDEX.md'))), /300 lines/)
+  assert.match(guard(writeIn(a, 'notes/INDEX.md')), /300 lines/, 'relative, as the tools resolve it')
+  assert.equal(guard(writeIn(a, join(b, 'notes', 'INDEX.md'))), undefined, 'another session\'s file is not this one\'s index')
+  assert.match(guard(writeIn(b, join(b, 'notes', 'INDEX.md'))), /300 lines/, 'and in that session it is')
+  // recall reads the same file
+  const prompt = promptRegistry()
+  mount({ indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  writeFileSync(join(a, 'notes', 'INDEX.md'), '- [a](a.md) - pinned here\n', 'utf8')
+  assert.match(prompt.contexts[0].text(at(a)), /pinned here/)
+})
+
+test('a pin rooted but naming no drive lands on the session\'s drive, as recall resolves it', async (t) => {
+  if (process.platform !== 'win32') return t.skip('a drive-less rooted path is a Windows form')
+  // `\Users\...\INDEX.md` is "absolute" to Node, yet a session on C: means C:'s file; keyed
+  // once against the process's drive (the repo's, often another), the guard missed it
+  const dir = realpathSync.native(scratch('pin-drive'))
+  const pin = join(dir.slice(2), 'INDEX.md')
+  const { guard } = mount({ indexPath: pin }, { workingDirectory: sessionDirs() })
+  const exec = { name: 'write', agent: { session: { cwd: dir } }, arguments: { file_path: join(dir, 'INDEX.md'), content: big(300) } }
+  assert.match(guard(exec), /300 lines/)
+  // and the memory page, which has no session, does not list it as a fixed place
+  const shown = (await withHomeAsync(scratch('pin-drive-home'), () => memoryMount({ indexPath: pin }).call())).body
+  assert.deepEqual([shown.stores, shown.pinned], [[], 'relative'])
+})
+
 test('a sub-1 positive cap falls back rather than flooring to zero', () => {
   const { guard } = mount({ maxLines: 0.5 })
   assert.equal(guard(write(`/s/${INDEX}`, big(199))), undefined)
