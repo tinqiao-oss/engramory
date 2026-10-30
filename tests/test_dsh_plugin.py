@@ -94,6 +94,50 @@ def test_root_discovery_manifest_stays_in_step_with_the_plugin():
     # Same patch FILE the plugin itself ships, not a diverging copy.
     assert os.path.normpath(os.path.join(root_dir, patch)) == os.path.normpath(
         os.path.join(PLUGIN, plugin["dsh"]["bundle"]["patch"]))
+    assert root["author"] == plugin["author"]
+
+
+def test_storefront_screenshots_resolve_inside_the_plugin():
+    """Storefronts (awesome-dsh-plugin, dsh-market) read screenshots.json next to the
+    plugin's package.json: 1-8 paths relative to it that may not leave the plugin
+    directory. A renamed image would 404 on every storefront without failing anything
+    here, so each path must exist. The images stay out of the npm package."""
+    import fnmatch
+    import json
+
+    with open(os.path.join(PLUGIN, "screenshots.json"), encoding="utf-8") as fh:
+        shots = json.load(fh)
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        shipped = json.load(fh)["files"]
+    plugin_real = os.path.realpath(PLUGIN)
+    assert 1 <= len(shots) <= 8
+    for path in shots:
+        assert "\\" not in path and ":" not in path and not path.startswith("/"), path
+        assert ".." not in path.split("/"), path
+        real = os.path.realpath(os.path.join(PLUGIN, path))
+        assert os.path.commonpath([real, plugin_real]) == plugin_real, path
+        assert os.path.isfile(real), path
+        assert not any(fnmatch.fnmatch(path, f) or path.startswith(f.rstrip("/") + "/")
+                       for f in shipped), path
+
+
+def test_dev_scripts_in_the_plugin_dir_are_named_as_tests():
+    """dsh-xray (a scanner the directories link to) tells test code from shipped code
+    by name: `*.test.js` or a `tests/` directory. A file plainly called `test.js` read
+    as shipped code, and its child_process import rated the plugin "executes system
+    commands" (C3) although npm never ships it. Anything here npm does not ship must
+    carry a test-shaped name."""
+    import fnmatch
+    import json
+
+    with open(os.path.join(PLUGIN, "package.json"), encoding="utf-8") as fh:
+        shipped = json.load(fh)["files"]
+    for name in os.listdir(PLUGIN):
+        if not name.endswith((".js", ".mjs", ".cjs")):
+            continue
+        if any(fnmatch.fnmatch(name, f) for f in shipped):
+            continue
+        assert name.endswith((".test.js", ".test.mjs", ".test.cjs")), name
 
 
 def test_one_version_number_for_the_repo_and_the_plugin():

@@ -59,6 +59,7 @@
     "README.md",
     "LICENSE"
   ],
+  "author": "tinqiao-oss",
   "license": "MIT",
   "repository": {
     "type": "git",

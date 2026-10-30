@@ -11,6 +11,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Curated file-based long-term memory for DeepSeek Harness — discovery manifest for the installable plugin in adapters/dsh/plugin/",
+  "author": "tinqiao-oss",
   "license": "MIT",
   "repository": {
     "type": "git",

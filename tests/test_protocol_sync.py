@@ -170,7 +170,7 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
     Phrases are asserted whole rather than by keyword: "flat" and "subdirectories"
     both appear in a sentence that says the opposite, so a keyword pair proves
     nothing. The dsh plugin is NOT checked here — its rules are asserted against the
-    registered skill content in adapters/dsh/plugin/test.js, which a comment or dead
+    registered skill content in adapters/dsh/plugin/index.test.js, which a comment or dead
     code cannot satisfy; test_dsh_surface_is_covered_by_the_node_suite keeps that
     coverage from quietly disappearing.
     """
@@ -297,7 +297,7 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
         Commenting the assertions out would defeat a plain substring search, so each
         one must also be on a line that is not commented.
         """
-        lines = (ROOT / "adapters" / "dsh" / "plugin" / "test.js").read_text(
+        lines = (ROOT / "adapters" / "dsh" / "plugin" / "index.test.js").read_text(
             encoding="utf-8").splitlines()
         live = [ln for ln in lines if not ln.lstrip().startswith("//")]
         for phrase in (
@@ -313,7 +313,7 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
         ):
             self.assertTrue(
                 any(phrase in ln and "assert" in ln for ln in live),
-                "no live assertion in adapters/dsh/plugin/test.js for: " + phrase)
+                "no live assertion in adapters/dsh/plugin/index.test.js for: " + phrase)
 
     def test_no_standing_surface_is_left_unregistered(self):
         """A new host must be added to one of the lists above, not forgotten.
