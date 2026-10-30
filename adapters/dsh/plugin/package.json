@@ -66,7 +66,7 @@
     "url": "git+https://github.com/tinqiao-oss/engramory.git",
     "directory": "adapters/dsh/plugin"
   },
-  "homepage": "https://github.com/tinqiao-oss/engramory/tree/master/adapters/dsh#readme",
+  "homepage": "https://github.com/tinqiao-oss/engramory/tree/master/adapters/dsh/plugin#readme",
   "bugs": {
     "url": "https://github.com/tinqiao-oss/engramory/issues"
   },

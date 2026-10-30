@@ -424,10 +424,9 @@ def _dsh_note(index_display, check_display, protocol_display,
   oversized project `AGENTS.md` can silently cut this block. Keep the memory index inside
   its own cap and this block short.
 - After editing `{index_display}`, run `python {check_display} {index_display}` and compact
-  immediately if it reports `OVER`. dsh's deterministic deny path is `ctx.tools.guard()`
-  inside a *TypeScript* plugin — `dsh-engramory` ships exactly that, but until it is
-  installed AND running in your profile (upstream `dsh plugin` cannot mount third-party
-  plugins yet), the cap here is rules + this check (see adapters/dsh/README.md).
+  immediately if it reports `OVER`. dsh's deterministic deny is the `dsh-engramory`
+  plugin (`ctx.tools.guard()`); until it is installed AND running in your profile, the
+  cap here is rules + this check (see adapters/dsh/plugin/README.md).
 - Full protocol reference: `{protocol_display}`. dsh's filesystem skill provider scans
   `$DSH_HOME/skills` (user-global) and `<project>/.dsh/skills` (project) among its
   roots, so an install there is discovered and offered by relevance; you can also just

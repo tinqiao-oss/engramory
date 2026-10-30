@@ -101,7 +101,7 @@ passwords); see [`SKILL.md` §5](../SKILL.md).
 
 Use [PORTING.md](../PORTING.md) for host capabilities and the degradation ladder,
 and the [Codex](../adapters/codex/README.md),
-[dsh](../adapters/dsh/README.md), [OpenClaw](../adapters/openclaw/README.md), or
+[dsh](../adapters/dsh/plugin/README.md), [OpenClaw](../adapters/openclaw/README.md), or
 [Kiro](../adapters/kiro/README.md) guide for setup. Codex lifecycle assistance is
 configured and verified separately in its adapter; it does not enforce the cap.
 Read-only access to another agent's store uses the

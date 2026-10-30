@@ -17,7 +17,7 @@
     "type": "git",
     "url": "git+https://github.com/tinqiao-oss/engramory.git"
   },
-  "homepage": "https://github.com/tinqiao-oss/engramory/tree/master/adapters/dsh#readme",
+  "homepage": "https://github.com/tinqiao-oss/engramory/tree/master/adapters/dsh/plugin#readme",
   "dsh": {
     "bundle": {
       "patch": "./adapters/dsh/plugin/cordis.patch.yml"

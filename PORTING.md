@@ -205,10 +205,10 @@ python tools/engramory_init.py openclaw                       --install-skill   
 python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
 ```
 
-See the [Codex](adapters/codex/README.md),
-[OpenClaw](adapters/openclaw/README.md), and [dsh](adapters/dsh/README.md) adapters
-for setup and limits; the dsh deterministic guard is installed separately as
-[`dsh-engramory >= 0.2.7`](adapters/dsh/plugin/README.md).
+See the [Codex](adapters/codex/README.md) and
+[OpenClaw](adapters/openclaw/README.md) adapters and the
+[dsh plugin](adapters/dsh/plugin/README.md) for setup and limits; the dsh
+deterministic guard is the plugin, `dsh-engramory >= 0.2.7`.
 
 Kiro has no init helper yet — wire it manually (one always-on steering file + a
 non-steering `.engramory-memory/` store) per
