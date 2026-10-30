@@ -121,7 +121,7 @@ async function loadClient() {
   return { registered, mod, react }
 }
 
-/** Apply the client with the page services, capturing the slot registration. */
+/** Apply the client with the page services, capturing the slot registrations. */
 async function applied() {
   const { registered, mod, react } = await loadClient()
   const dictionaries = {}
@@ -134,14 +134,19 @@ async function applied() {
   const ctx = {
     effect: (fn) => fn(),
     get: () => undefined,
-    locale: { register: (ns, dicts) => { dictionaries[ns] = dicts; return () => {} } },
+    locale: {
+      register: (ns, dicts) => { dictionaries[ns] = dicts; return () => {} },
+      bind: (ns) => (key) => dictionaries[ns].zh[key],
+    },
     slots: {
-      inject: (owner, fn) => { assert.equal(owner, 'plugins.bundle.config'); fn() },
+      // each registration is made inside the inject of the slot it fills
+      inject: (owner, fn) => { const before = slots.length; fn(); assert.equal(slots[before].options.name, owner) },
       register: (options, component) => { slots.push({ options, component }); return () => {} },
     },
   }
   mod.apply(ctx)
-  return { registered, mod, react, dictionaries, slots, styles }
+  const page = slots.find((s) => s.options.name === 'main')
+  return { registered, mod, react, dictionaries, slots, styles, page }
 }
 
 const settingsData = (patch = {}) => ({
@@ -162,22 +167,35 @@ function fakeFetch(responses) {
   return sent
 }
 
-test('client: registers as the package, on the package\'s own page, with matching dictionaries', async () => {
+test('client: registers the package\'s page, the sidebar entry and its page, with matching dictionaries', async () => {
   const { registered, mod, dictionaries, slots, styles } = await applied()
   assert.equal(registered.id, 'dsh-engramory')
   assert.deepEqual(mod.inject, ['slots', 'locale'])
-  assert.equal(slots.length, 1)
+  assert.deepEqual(slots.map((s) => s.options.name), ['plugins.bundle.config', 'main', 'sidebar.panellist'])
+  const [settings, page, entry] = slots
   // the Plugins page shows a package's own settings above its rows, keyed by package name
-  assert.equal(slots[0].options.name, 'plugins.bundle.config')
   const pkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'))
-  assert.equal(slots[0].options.key, pkg.name)
-  assert.equal(slots[0].options.locale, 'engramory')
+  assert.equal(settings.options.key, pkg.name)
+  // the sidebar entry opens the main-column page of the same id, after dsh's own entries
+  assert.equal(page.options.key, 'engramory')
+  assert.equal(entry.options.id, 'engramory')
+  assert.equal(entry.options.order, 20)
+  for (const { options } of slots) assert.equal(options.locale, 'engramory')
+  assert.equal(entry.options.label(), '记忆') // read when shown, so it follows the language
+  // the icon draws at the size the row asks for, in the row's own colour
+  const icon = entry.component({ size: 18, active: false })
+  assert.deepEqual([icon.type, icon.props.width, icon.props.height, icon.props.stroke], ['svg', 18, 18, 'currentColor'])
   assert.equal(styles.length, 1)
   const { zh, en } = dictionaries.engramory
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort())
-  // every key the page asks for exists in both languages
-  const used = new Set([...SOURCE.matchAll(/\bt\('([A-Za-z]+)'\)/g)].map((m) => m[1]))
+  // every key the pages ask for exists in both languages, with the same placeholders
+  const used = new Set([...SOURCE.matchAll(/\bt\('([A-Za-z]+)'[,)]/g)].map((m) => m[1]))
+  for (const type of ['User', 'Feedback', 'Project', 'Reference', 'Moment', 'Upcoming', 'Self', 'Other']) used.add(`type${type}`)
+  // the listing's failures and the opener's, looked up by name
+  for (const key of ['listFailed', 'listTimeout', 'openUnavailable', 'openMissing', 'openBusy']) used.add(key)
   for (const key of used) assert.ok(key in zh && key in en, key)
+  const holes = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join()
+  for (const key of Object.keys(zh)) assert.equal(holes(zh[key]), holes(en[key]), key)
 })
 
 test('client: the summary view is one line, and the page reads the settings route relative to itself', async () => {
@@ -356,4 +374,245 @@ test('client: an index cap that is not a positive whole number blocks the save',
   lines.props.onChange({ target: { value: '150' } })
   await page.settle()
   assert.equal(button(page.tree, 'save').props.disabled, false)
+})
+
+// --- the sidebar's memory page ---
+
+const SETTINGS = 'api/engramory/settings'
+const MEMORY = 'api/engramory/memory'
+
+/** A fetch that answers `"METHOD url"` from `routes`, recording what was sent. */
+function routeFetch(routes) {
+  const sent = []
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method ?? 'GET'
+    sent.push({ url, method, body: init.body && JSON.parse(init.body) })
+    const next = routes[`${method} ${url}`]
+    if (next === undefined) throw new Error(`no route ${method} ${url}`)
+    const value = typeof next === 'function' ? next(sent) : next
+    return { ok: value.status === undefined || value.status < 400, status: value.status ?? 200, json: async () => value.body ?? value }
+  }
+  return sent
+}
+
+const memoryData = (patch = {}) => ({
+  stores: [{
+    id: 'user', kind: 'user', dir: 'C:\\Users\\u\\.dsh\\.engramory-memory', titles: [],
+    index: { name: 'MEMORY.md', bytes: 2048, lines: 12, over: false },
+    notes: [{ name: 'b-note.md', type: 'feedback' }, { name: 'a-note.md', type: 'feedback' },
+      { name: 'who.md', type: 'user' }, { name: 'odd.md', type: 'other' }],
+    archive: ['moments-2026-09.md'], more: false,
+  }, {
+    id: 'ws:w1', kind: 'project', dir: 'E:\\repo\\.engramory-memory', titles: ['repo', 'src'],
+    index: { name: 'MEMORY.md', bytes: 30000, over: true }, notes: [], archive: [], more: true,
+  }],
+  cap: { maxLines: 200, maxBytes: 25600 }, more: false, canOpen: true,
+  ...patch,
+})
+
+/** `t` that shows a key with its parameters, so the page's arithmetic can be read back. */
+const tp = (key, params) => (params === undefined ? key : `${key}${JSON.stringify(params)}`)
+const nameButton = (tree, label) => findAll(tree, (n) => n.type === 'button' && n.props.className === 'eng-name' && textOf(n) === label)[0]
+/** The texts of the elements of `className` — a note, the strip's line — one string each. */
+const textsOf = (tree, className) => findAll(tree, (n) => n.props.className === className).map(textOf)
+
+/** `t` over the page's own Chinese dictionary, placeholders filled, as dsh's locale does. */
+const zhOf = (dictionaries) => (key, params) =>
+  dictionaries.engramory.zh[key].replace(/\{(\w+)\}/g, (_, name) => String(params?.[name]))
+
+async function memoryPage(routes, { zh = false } = {}) {
+  const { page, react, dictionaries } = await applied()
+  const sent = routeFetch({ [`GET ${SETTINGS}`]: settingsData(), [`GET ${MEMORY}`]: memoryData(), ...routes })
+  const view = react.mount(react.React.createElement(page.component, { t: zh ? zhOf(dictionaries) : tp }))
+  return { view, sent, zh: dictionaries.engramory.zh }
+}
+
+test('client: the memory page lists each store by name, by type, with its index against the cap', async () => {
+  const { view, zh } = await memoryPage({}, { zh: true })
+  assert.match(textOf(view.tree), new RegExp(zh.listing))
+  await view.settle()
+  const text = textOf(view.tree)
+  for (const shown of [zh.memoryIntro, zh.storeUser, 'repo · src', '12 / 200 行 · 2.0 KB / 25.0 KB',
+    '29.3 KB / 25.0 KB，超出上限', '归档（1）', zh.stripNote]) {
+    assert.ok(text.includes(shown), shown)
+  }
+  assert.deepEqual(textsOf(view.tree, 'eng-note'), [zh.overHint, zh.more]) // the project store's two
+  // names only, without .md, sorted, under their types in the protocol's order
+  const groups = findAll(view.tree, (n) => n.type === 'h3' && n.props.className === 'eng-group-title').map(textOf)
+  assert.deepEqual(groups, ['用户 · 1', '反馈 · 2', '其他 · 1'])
+  const names = findAll(view.tree, (n) => n.type === 'button' && n.props.className === 'eng-name').map(textOf)
+  assert.deepEqual(names, ['who', 'a-note', 'b-note', 'odd', 'moments-2026-09'])
+  // the two settings that matter most are at its top; their explanations are not
+  assert.ok(switchFor(view.tree, zh.companion))
+  for (const hidden of [zh.companionHint, zh.capHint]) assert.ok(!text.includes(hidden), hidden)
+})
+
+test('client: an index read only in part is over the cap only when its bytes are', async () => {
+  const big = { name: 'MEMORY.md', bytes: 20000000, over: false } // past recall's read, under a huge cap
+  const store = { ...memoryData().stores[0], index: big }
+  const { view } = await memoryPage({
+    [`GET ${MEMORY}`]: memoryData({ stores: [store], cap: { maxLines: 200, maxBytes: 100000000 } }),
+  }, { zh: true })
+  await view.settle()
+  const text = textOf(view.tree)
+  assert.ok(text.includes('19531.3 KB / 97656.3 KB'), text)
+  assert.ok(!text.includes('超出上限'))
+})
+
+test('client: a name opens its note through the memory route — and the index, the folder, an archived note', async () => {
+  const { view, sent } = await memoryPage({ [`POST ${MEMORY}`]: { ok: true } })
+  await view.settle()
+  const posted = async (click) => {
+    click()
+    await view.settle()
+    return sent.filter((s) => s.method === 'POST').at(-1)
+  }
+  assert.deepEqual(await posted(() => nameButton(view.tree, 'who').props.onClick()),
+    { url: MEMORY, method: 'POST', body: { store: 'user', file: 'who.md' } })
+  assert.match(textOf(view.tree), /opened\{"name":"who"\}/)
+  assert.deepEqual((await posted(() => nameButton(view.tree, 'moments-2026-09').props.onClick())).body,
+    { store: 'user', file: 'moments-2026-09.md', archive: true })
+  assert.deepEqual((await posted(() => button(view.tree, 'openIndex').props.onClick())).body,
+    { store: 'user', file: 'MEMORY.md' })
+  assert.deepEqual((await posted(() => button(view.tree, 'openFolder').props.onClick())).body, { store: 'user' })
+})
+
+test('client: a store with no index offers its notes but no index or folder to open', async () => {
+  const store = { ...memoryData().stores[0], index: null }
+  const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [store] }) })
+  await view.settle()
+  assert.match(textOf(view.tree), /noIndex/)
+  assert.equal(button(view.tree, 'openIndex'), undefined)
+  assert.equal(button(view.tree, 'openFolder'), undefined)
+  assert.ok(nameButton(view.tree, 'who'))
+})
+
+test('client: a note that will not open says why', async () => {
+  for (const [reply, said] of [
+    [{ status: 404, body: { ok: false, error: 'missing' } }, /openMissing/],
+    [{ status: 409, body: { ok: false, error: 'unavailable' } }, /openUnavailable/],
+    [{ status: 502, body: { ok: false, error: 'failed', message: 'no handler' } }, /openFailed\{"reason":"no handler"\}/],
+    [{ status: 503, body: { ok: false, error: 'timeout' } }, /listTimeout/],
+    [{ status: 409, body: { ok: false, error: 'busy' } }, /openBusy/],
+    [{ status: 400, body: { ok: false, error: 'constructor' } }, /openFailed\{"reason":"constructor"\}/],
+    [{ status: 500, body: 'not json' }, /openFailed/],
+  ]) {
+    const { view } = await memoryPage({ [`POST ${MEMORY}`]: reply })
+    await view.settle()
+    nameButton(view.tree, 'who').props.onClick()
+    await view.settle()
+    assert.match(textOf(view.tree), said)
+  }
+})
+
+test('client: where dsh cannot open files, the names are text and the page says where they are', async () => {
+  const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ canOpen: false }) })
+  await view.settle()
+  assert.equal(findAll(view.tree, (n) => n.type === 'button' && n.props.className === 'eng-name').length, 0)
+  assert.equal(findAll(view.tree, (n) => n.type === 'span' && n.props.className === 'eng-name').length, 5)
+  assert.equal(button(view.tree, 'openIndex'), undefined)
+  assert.equal(button(view.tree, 'openFolder'), undefined)
+  const text = textOf(view.tree)
+  assert.match(text, /memoryIntroNoOpen/)
+  assert.match(text, /openUnavailable/)
+  assert.match(text, /E:\\repo\\\.engramory-memory/)
+})
+
+test('client: the memory page says what it could not list, and lists again on refresh', async () => {
+  for (const [reply, said] of [
+    [{ status: 503, body: { error: 'timeout' } }, ['listTimeout']],
+    [{ status: 500, body: {} }, ['listFailed']],
+    [memoryData({ stores: [] }), ['empty']],
+    [memoryData({ stores: [], pinned: 'relative' }), ['pinnedRelative']],
+  ]) {
+    const { view } = await memoryPage({ [`GET ${MEMORY}`]: reply })
+    await view.settle()
+    assert.deepEqual([...textsOf(view.tree, 'eng-banner'), ...textsOf(view.tree, 'eng-note')], said)
+  }
+  let calls = 0
+  const { view, sent } = await memoryPage({
+    [`GET ${MEMORY}`]: () => (++calls === 1 ? { status: 500, body: {} } : memoryData()),
+  })
+  await view.settle()
+  assert.match(textOf(view.tree), /listFailed/)
+  button(view.tree, 'refresh').props.onClick()
+  await view.settle()
+  assert.match(textOf(view.tree), /storeUser/)
+  assert.equal(sent.filter((s) => s.url === MEMORY).length, 2)
+})
+
+test('client: a listing a refresh overtook is dropped', async () => {
+  const { page, react } = await applied()
+  const replies = []
+  globalThis.fetch = async (url) => {
+    if (url === SETTINGS) return { ok: true, status: 200, json: async () => settingsData() }
+    return new Promise((resolve) => replies.push(resolve))
+  }
+  const view = react.mount(react.React.createElement(page.component, { t: tp }))
+  await view.settle()
+  button(view.tree, 'refresh').props.onClick()
+  await view.settle()
+  assert.equal(replies.length, 2)
+  const answer = (data) => ({ ok: true, status: 200, json: async () => data })
+  replies[1](answer(memoryData({ stores: [] })))
+  await view.settle()
+  replies[0](answer(memoryData())) // the first request, answering last
+  await view.settle()
+  assert.deepEqual(textsOf(view.tree, 'eng-note'), ['empty'])
+  assert.doesNotMatch(textOf(view.tree), /storeUser/)
+})
+
+test('client: the switches atop the memory page save as they are switched, with what they do not show', async () => {
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn) => realTimeout(fn, 0)
+  try {
+    let current = settingsData({ maxLines: 150 })
+    const { view, sent } = await memoryPage({
+      [`GET ${SETTINGS}`]: () => current,
+      [`POST ${SETTINGS}`]: (log) => { current = settingsData({ ...log.at(-1).body }); return { ok: true } },
+    })
+    await view.settle()
+    assert.equal(button(view.tree, 'audienceSocial'), undefined) // a choice inside companion mode
+    const saved = async () => {
+      for (let i = 0; i < 40 && textsOf(view.tree, 'eng-strip-note')[0] !== 'saved'; i++) await view.settle()
+      assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['saved'])
+    }
+    const posts = () => sent.filter((s) => s.method === 'POST').map((s) => s.body)
+    switchFor(view.tree, 'companion').props.onClick()
+    switchFor(view.tree, 'companion').props.onClick() // a second click before the page re-renders
+    await saved()
+    assert.deepEqual(posts(), [{ revision: 'r1', companion: true, audience: 'private', maxLines: 150, maxBytes: 25600 }])
+    assert.equal(switchFor(view.tree, 'companion').props['aria-checked'], true)
+    button(view.tree, 'audienceSocial').props.onClick()
+    await view.settle() // the line shows the save under way, then that it is done
+    await saved()
+    assert.deepEqual(posts()[1], { revision: 'r1', companion: true, audience: 'social', maxLines: 150, maxBytes: 25600 })
+    assert.equal(button(view.tree, 'audienceSocial').props['aria-pressed'], true)
+    // choosing what is already chosen saves nothing
+    button(view.tree, 'audienceSocial').props.onClick()
+    await view.settle()
+    assert.equal(posts().length, 2)
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
+
+  // where the page cannot save, the switches are there but cannot be switched
+  const { view } = await memoryPage({ [`GET ${SETTINGS}`]: settingsData({ editable: false }) })
+  await view.settle()
+  assert.equal(switchFor(view.tree, 'companion').props.disabled, true)
+  assert.match(textOf(view.tree), /stripReadOnly/)
+})
+
+test('client: settings that could not be read are offered again, not hidden', async () => {
+  let reads = 0
+  const { view } = await memoryPage({
+    [`GET ${SETTINGS}`]: () => (++reads === 1 ? { status: 500, body: {} } : settingsData()),
+  })
+  await view.settle()
+  assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['loadFailed'])
+  assert.equal(switchFor(view.tree, 'companion'), undefined)
+  button(view.tree, 'retry').props.onClick()
+  await view.settle()
+  assert.ok(switchFor(view.tree, 'companion'))
+  assert.match(textOf(view.tree), /storeUser/) // the listing was there all along
 })

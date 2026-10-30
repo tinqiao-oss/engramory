@@ -24,12 +24,13 @@
  * Zero dependencies, no build step: plain ESM, node: builtins only.
  */
 import {
-  closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, realpathSync,
-  statSync,
+  closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, realpath,
+  realpathSync, statSync,
 } from 'node:fs'
+import * as fsp from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 
 export const name = 'engramory'
 
@@ -301,13 +302,30 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  // The settings page (client.js, on the package's page in the Plugins page) reads and
-  // saves companion mode, its memory access and the cap through these routes (the language
-  // follows dsh's, memoryLanguage). The web server is optional (a headless dsh has none)
-  // and may mount late. Only the bundle's own row serves them: a second row of this
-  // package would otherwise claim the same path (dsh refuses a second claim) or, claiming
-  // it first, have the page save ITS config. A row whose id cannot be told serves them as
-  // before.
+  // The memory page (client.js, the sidebar's Memory entry) finds the projects' stores
+  // through dsh's workspace registry and opens a file through its session controller. Both
+  // are optional and may come up late, like the services above: without the registry the
+  // page lists the global store only, without the controller it opens nothing.
+  const desk = {}
+  for (const service of ['workspaceRegistry', 'sessionController']) {
+    ctx.inject([service], (inner) => {
+      inner.effect(() => {
+        const current = inner[service]
+        desk[service] = current
+        return () => {
+          if (desk[service] === current) desk[service] = undefined
+        }
+      })
+    })
+  }
+
+  // The settings (client.js, on the package's page in the Plugins page and atop the memory
+  // page) read and save companion mode, its memory access and the cap through these routes
+  // (the language follows dsh's, memoryLanguage); the memory page lists and opens the
+  // stores through them. The web server is optional (a headless dsh has none) and may
+  // mount late. Only the bundle's own row serves them: a second row of this package would
+  // otherwise claim the same paths (dsh refuses a second claim) or, claiming them first,
+  // have the page save ITS config. A row whose id cannot be told serves them as before.
   const fiber = ctx.fiber
   // `entry.id` is scoped by the tree that holds the row (`include:engramory`); the row's
   // own id, the one the patch names, is `options.id`.
@@ -315,7 +333,7 @@ export function apply(ctx, config = {}) {
   ctx.inject(['connection'], (inner) => {
     if (rowId !== undefined && rowId !== SETTINGS_ROW) return
     if (typeof inner.connection?.fetch?.register !== 'function') return
-    for (const route of settingsRoutes(inner, config, fiber)) {
+    for (const route of [...settingsRoutes(inner, config, fiber), memoryRoute(settings, desk)]) {
       // A row of the same id in a nested include claims the path first: then this one
       // serves no page, rather than failing to mount.
       inner.effect(() => {
@@ -337,6 +355,16 @@ const SETTINGS_ROW = 'engramory'
 const MAX_CAP_LINES = Number.MAX_SAFE_INTEGER
 const MAX_CAP_BYTES = Number.MAX_SAFE_INTEGER
 
+/** Every answer of the routes below: JSON, never cached, never sniffed as anything else. */
+const json = (status, body) => new Response(JSON.stringify(body), {
+  status,
+  headers: {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  },
+})
+
 /**
  * GET answers what the settings page shows: the four settings it edits, as this plugin
  * reads them, and whether a save can land. POST saves them through dsh's profile editor
@@ -350,10 +378,6 @@ const MAX_CAP_BYTES = Number.MAX_SAFE_INTEGER
  * conversation included, cannot call them to switch social mode off.
  */
 function settingsRoutes(ctx, config, fiber) {
-  const json = (status, body) => new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-  })
   const read = () => {
     const entry = ownEntry(ctx.get('configEditor'), fiber)
     const raw = entry?.options?.config ?? config
@@ -494,6 +518,489 @@ function withSettings(current, next, inherited) {
     return structuredClone(base)
   }
   return out
+}
+
+/** The memory page's route; client.js fetches it relative to the page, as the settings route. */
+const MEMORY_ROUTE = '/api/engramory/memory'
+/** Where a store keeps the notes it has folded away (SKILL.md §6). */
+const ARCHIVE_DIR = 'archive'
+/**
+ * Bounds on one listing, whatever the disks hold: entries looked at per directory,
+ * workspaces looked into, names returned in all. A store is one small file per fact; past
+ * these the page says there is more rather than paying for it.
+ */
+const MAX_DIR_ENTRIES = 2000
+const MAX_WORKSPACES = 200
+const MAX_NOTES = 5000
+/** How much of a note is read for its `type:`: the frontmatter, which opens the file. */
+const HEAD_BYTES = 4096
+/** How long a page waits for a listing, and for the desktop to take a file. */
+const LIST_MS = 10000
+const OPEN_MS = 15000
+/** The types the page groups notes by (SKILL.md §2, §2.2); any other is `other`. */
+const NOTE_TYPES = new Set(['user', 'feedback', 'project', 'reference', 'moment', 'upcoming', 'self'])
+/**
+ * A note's name as the page lists it and may send it back: one `*.md` name — no path, no
+ * stream (`:`), no dot file. A name it cannot send back is not listed either.
+ */
+const NOTE_NAME = /^(?![.\s])[^\\/:*?"<>|\u0000-\u001f]{1,240}\.md$/i
+const TIMED_OUT = Symbol('timed out')
+
+/**
+ * The memory page's one route. GET lists the stores recall can use, by name only: where each
+ * is, its index's size against the cap, its notes' names with their types, its archive's
+ * names. POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
+ * app — or, with no `file`, shows the store's index in the file manager — through dsh's
+ * session controller, which checks the path once more. The page never sends a path: a store
+ * is the id the listing gave it, a file a name in that store's directory, and both are found
+ * again before anything opens. Nothing is written, and no note's text reaches the page.
+ *
+ * Only the owner reaches it — a signed-in browser, or a program or plugin holding the
+ * owner's login — as the settings route: dsh answers exact routes for owner peers alone.
+ *
+ * Disks may be slow or gone (a workspace on a network drive), so everything here is
+ * asynchronous, one step at a time, and one listing at a time: a page that asks while one
+ * runs is given that one. A stalled drive then holds one of libuv's threads, never dsh's
+ * main thread, and the page stops waiting after LIST_MS.
+ */
+function memoryRoute(settings, desk) {
+  // A listing stuck on a drive that never answers stays the listing — pages are told it
+  // timed out until it settles — rather than each retry holding one more thread.
+  let listing
+  const list = () => {
+    listing ??= listStores(settings, desk.workspaceRegistry).finally(() => { listing = undefined })
+    return listing
+  }
+  // One lookup for opening at a time too: a click while one runs is told to wait, rather
+  // than queued behind a lookup that may never finish.
+  let looking = false
+  const read = async () => {
+    const found = await deadline(list(), LIST_MS)
+    if (found === TIMED_OUT) return json(503, { error: 'timeout' })
+    return json(200, { ...found, canOpen: canOpen(desk.sessionController) })
+  }
+  const open = async (request) => {
+    let body
+    try {
+      body = await request.json()
+    } catch {
+      return json(400, { ok: false, error: 'invalid', field: 'body' })
+    }
+    const field = body === null || typeof body !== 'object' ? 'body'
+      : typeof body.store !== 'string' ? 'store'
+        : body.file !== undefined && typeof body.file !== 'string' ? 'file'
+          : body.archive !== undefined && typeof body.archive !== 'boolean' ? 'archive'
+            : undefined
+    if (field !== undefined) return json(400, { ok: false, error: 'invalid', field })
+    const opener = desk.sessionController
+    if (!canOpen(opener)) return json(409, { ok: false, error: 'unavailable' })
+    if (looking) return json(409, { ok: false, error: 'busy' })
+    looking = true
+    const lookup = targetOf(settings, desk.workspaceRegistry, body).finally(() => { looking = false })
+    const target = await deadline(lookup, LIST_MS)
+    if (target === TIMED_OUT) return json(503, { ok: false, error: 'timeout' })
+    if (target === undefined) return json(404, { ok: false, error: 'missing' })
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), OPEN_MS)
+    try {
+      await opener.openWorkspacePath(target, abort.signal)
+      return json(200, { ok: true })
+    } catch (error) {
+      return json(502, { ok: false, error: 'failed', message: String(error?.message ?? error) })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return {
+    path: MEMORY_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: (request) => (request.method === 'POST' ? open(request) : read()),
+  }
+}
+
+/** `promise`, or TIMED_OUT once `ms` have passed; the work itself goes on. */
+function deadline(promise, ms) {
+  let timer
+  const late = new Promise((resolve) => { timer = setTimeout(resolve, ms, TIMED_OUT) })
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer))
+}
+
+/** Whether dsh can hand a path to this desktop: not on a headless host, nor over SSH. */
+function canOpen(opener) {
+  try {
+    return typeof opener?.openWorkspacePath === 'function' && opener.canOpenWorkspacePath?.() === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The stores the page may list, by id, as recall uses them: with `indexPath` pinned, its
+ * directory alone — and only for an absolute pin, since a relative one is resolved against
+ * each session's directory, which a page has none of; else the global store under
+ * `$DSH_HOME` and each workspace's project store.
+ */
+function candidatesOf(settings, registry) {
+  if (settings.indexPath !== undefined) {
+    return isAbsolute(settings.indexPath)
+      ? { list: [{ id: 'pinned', kind: 'pinned' }], more: false }
+      : { list: [], more: false, pinned: 'relative' }
+  }
+  let workspaces = []
+  try {
+    const all = registry?.list?.()
+    if (Array.isArray(all)) workspaces = all
+  } catch {
+    // a registry this port predates: the global store alone
+  }
+  const list = [{ id: 'user', kind: 'user' }]
+  for (const w of workspaces) {
+    if (list.length > MAX_WORKSPACES) return { list, more: true }
+    if (typeof w?.id !== 'string' || typeof w.path !== 'string' || !isAbsolute(w.path)) continue
+    list.push({
+      id: `ws:${w.id}`, kind: 'project', path: w.path,
+      title: typeof w.title === 'string' && w.title ? w.title : basename(w.path),
+    })
+  }
+  return { list, more: false }
+}
+
+/**
+ * Every store the page lists, one at a time, each read on its own (an unreadable one
+ * drops out, the rest are listed). A store two workspaces reach is listed once, under
+ * both titles.
+ */
+async function listStores(settings, registry) {
+  const { list, more, pinned } = candidatesOf(settings, registry)
+  const budget = { notes: MAX_NOTES }
+  const stores = []
+  for (const candidate of list) {
+    try {
+      const store = await locate(candidate, settings)
+      if (store === undefined) continue
+      const twin = stores.find((s) => s.key === store.key)
+      if (twin !== undefined) {
+        if (candidate.title !== undefined) twin.titles.push(candidate.title)
+        continue
+      }
+      stores.push({ ...store, titles: candidate.title === undefined ? [] : [candidate.title],
+        ...await contents(store, settings, budget) })
+    } catch {
+      // unreadable now: left out
+    }
+  }
+  return {
+    stores: stores.map(({ key, real, indexName, ...shown }) => shown),
+    cap: { maxLines: settings.maxLines, maxBytes: settings.maxBytes },
+    more,
+    ...(pinned === undefined ? {} : { pinned }),
+  }
+}
+
+/**
+ * A candidate's directory, if it is a store now: `{ id, kind, dir, real, key, indexName }`.
+ * The global store and a pinned index's directory are the user's own, links and all; a
+ * project store is found as recall finds one (projectStore), so a checkout cannot point it
+ * elsewhere — and its directory, as it resolves now, is still inside the project.
+ */
+async function locate(candidate, settings) {
+  let dir
+  let root
+  let indexName = settings.indexName
+  if (candidate.kind === 'user') {
+    dir = join(dshHome(), STORE_DIR)
+  } else if (candidate.kind === 'pinned') {
+    dir = dirname(settings.indexPath)
+    indexName = basename(settings.indexPath)
+  } else {
+    const found = await projectStoreOf(candidate.path, indexName)
+    if (found === undefined) return undefined
+    ;({ dir, root } = found)
+  }
+  const real = await fsp.realpath(dir)
+  if (!(await fsp.stat(real)).isDirectory()) return undefined
+  // the very path every later check is held to, not a second resolution of `dir`; the
+  // project's root itself counts, as a store linked to it holds an index recall accepts
+  if (root !== undefined) {
+    const realRoot = await fsp.realpath(root)
+    if (folded(real) !== folded(realRoot) && !contains(realRoot, real)) return undefined
+  }
+  return { id: candidate.id, kind: candidate.kind, dir, real, key: folded(real), indexName }
+}
+
+/**
+ * projectStore() for a workspace, asynchronously: the nearest store between the workspace's
+ * directory and its project root whose index is a regular file, not a link, really under
+ * that root. dsh records a workspace's real path when it is added and never rewrites it, so
+ * a path that is now a link, or resolves elsewhere, is not that workspace any more; and a
+ * network path is not looked into at all, since every call on an unreachable share waits
+ * for it (as refuseStranger).
+ */
+async function projectStoreOf(start, indexName) {
+  if (/^[\\/]{2}/.test(start)) return undefined
+  try {
+    if (!(await fsp.lstat(start)).isDirectory()) return undefined
+    if (folded(await fsp.realpath(start)) !== folded(start)) return undefined
+  } catch {
+    return undefined
+  }
+  let root = start
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (await existsAsync(join(dir, '.git'))) {
+      root = dir
+      break
+    }
+    if (dirname(dir) === dir) break
+  }
+  let realRoot
+  try {
+    realRoot = await recallRealpath(root)
+  } catch {
+    return undefined
+  }
+  for (let dir = start; ; dir = dirname(dir)) {
+    const store = join(dir, STORE_DIR)
+    if (await projectIndexAsync(join(store, indexName), realRoot)) return { dir: store, root }
+    if (dir === root || dirname(dir) === dir) return undefined
+  }
+}
+
+async function existsAsync(path) {
+  try {
+    await fsp.stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** projectIndex(), asynchronously, against a root already resolved by recallRealpath. */
+async function projectIndexAsync(path, realRoot) {
+  try {
+    const link = await fsp.lstat(path)
+    if (link.isSymbolicLink() || !link.isFile()) return false
+    return contains(realRoot, await recallRealpath(path))
+  } catch {
+    return false
+  }
+}
+
+/** Is real path `p` below real path `root` (not `root` itself), as inside() compares them? */
+function contains(root, p) {
+  const rel = relative(folded(root), folded(p))
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+}
+
+/**
+ * The realpath pathKey() resolves with, asynchronously: Node's JS one on Windows, which
+ * keeps an 8.3 short name as written, the OS's elsewhere — so a store is inside its project
+ * here exactly when projectIndex() says so for recall.
+ */
+const recallRealpath = process.platform === 'win32' ? promisify(realpath) : fsp.realpath
+
+/** A real path as compared here: case folded on Windows only, as pathKey(). */
+const folded = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)
+
+/** What the page shows of a store: its index's size, and its notes' and archive's names. */
+async function contents(store, settings, budget) {
+  const index = await indexSize(join(store.dir, store.indexName), settings)
+  const listed = await noteNames(store.dir, store.indexName, budget)
+  const notes = []
+  for (const name of listed.names) notes.push({ name, type: await noteType(join(store.dir, name)) })
+  const folder = join(store.dir, ARCHIVE_DIR)
+  // a folder of its own, not a link out of the store
+  const archive = await plainDirectory(folder)
+    ? await noteNames(folder, undefined, budget)
+    : { names: [], more: false }
+  return {
+    index: index === undefined ? null : { name: store.indexName, ...index },
+    notes,
+    archive: archive.names,
+    more: listed.more || archive.more,
+  }
+}
+
+async function plainDirectory(path) {
+  try {
+    return (await fsp.lstat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The names of the notes directly in `dir`: regular files by their directory entry — not a
+ * link, a folder, a FIFO or a device — named as NOTE_NAME allows, the index left out. At
+ * most MAX_DIR_ENTRIES entries are looked at, one at a time, and the budget shared by the
+ * whole listing is not exceeded; `more` says something was left. (On a filesystem whose
+ * directory entries carry no type — some network mounts — Node stats each entry
+ * synchronously to type it: that much main-thread I/O, bounded by MAX_DIR_ENTRIES.)
+ */
+async function noteNames(dir, skip, budget) {
+  const names = []
+  let more = false
+  let handle
+  try {
+    handle = await fsp.opendir(dir)
+    for (let seen = 0; ; seen++) {
+      const entry = await handle.read()
+      if (entry === null) break
+      if (seen >= MAX_DIR_ENTRIES || names.length >= budget.notes) {
+        more = true
+        break
+      }
+      if (!entry.isFile() || !NOTE_NAME.test(entry.name)) continue
+      if (skip !== undefined && entry.name.toLowerCase() === skip.toLowerCase()) continue
+      names.push(entry.name)
+    }
+  } catch {
+    // unreadable part way: what was read
+  } finally {
+    await handle?.close().catch(() => {})
+  }
+  budget.notes -= names.length
+  return { names, more }
+}
+
+/** Open a file a listing found for reading: a FIFO does not wait for a writer, a device fails. */
+async function openRegular(path) {
+  const handle = await fsp.open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+  try {
+    const info = await handle.stat()
+    if (info.isFile()) return { handle, size: info.size }
+  } catch {
+    // not even a stat: as not a regular file
+  }
+  await handle.close().catch(() => {})
+  return undefined
+}
+
+/** A note's type, from its head only; `other` when it cannot be told. */
+async function noteType(path) {
+  let opened
+  try {
+    opened = await openRegular(path)
+    if (opened === undefined) return 'other'
+    // one byte more than the head, to tell a line that ends there from one cut there
+    const head = Buffer.alloc(HEAD_BYTES + 1)
+    const { bytesRead } = await opened.handle.read(head, 0, HEAD_BYTES + 1, 0)
+    const cut = bytesRead > HEAD_BYTES && head[HEAD_BYTES] !== 0x0a && head[HEAD_BYTES] !== 0x0d
+    return typeIn(head.subarray(0, Math.min(bytesRead, HEAD_BYTES)).toString('utf8'), cut)
+  } catch {
+    return 'other'
+  } finally {
+    await opened?.handle.close().catch(() => {})
+  }
+}
+
+/**
+ * A frontmatter's `type:` as the doctor reads it (tools/engramory_doctor.py `_frontmatter`):
+ * between an opening line that is `---` and a closing one that starts the line, indentation
+ * ignored (so a host's nested `metadata:` block counts), one matching quote pair stripped.
+ * A frontmatter that does not close within the head, a repeated `type`, or a type outside
+ * the protocol's reads as `other`.
+ */
+function typeIn(text, cut) {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/)
+  if (cut) lines.pop() // the head ends inside its last line
+  if (lines.length === 0 || lines[0].trim() !== '---') return 'other'
+  let type
+  for (const raw of lines.slice(1)) {
+    if (/^---[ \t]*$/.test(raw)) return NOTE_TYPES.has(type) ? type : 'other'
+    const match = /^\s*type\s*:(.*)$/.exec(raw)
+    if (match === null) continue
+    if (type !== undefined) return 'other'
+    const value = match[1].trim()
+    const quote = value[0]
+    type = (quote === '"' || quote === "'") && value.length >= 2 && value.endsWith(quote)
+      ? value.slice(1, -1)
+      : value
+  }
+  return 'other'
+}
+
+/**
+ * The index's size against the cap, read as far as recall reads it: lines are known only
+ * when the whole file was read; past that only its bytes tell whether it is over the cap.
+ */
+async function indexSize(path, settings) {
+  let opened
+  try {
+    opened = await openRegular(path)
+    if (opened === undefined) return undefined
+    const limit = Math.min(settings.maxBytes, settings.readLimit)
+    const buffer = Buffer.alloc(Math.min(opened.size, limit) + 1)
+    let got = 0
+    while (got < buffer.length) {
+      const { bytesRead } = await opened.handle.read(buffer, got, buffer.length - got, got)
+      if (bytesRead === 0) break
+      got += bytesRead
+    }
+    const bytes = Math.max(opened.size, got)
+    // past the cap, or past recall's read ceiling under an even larger cap
+    if (got > limit) return { bytes, over: bytes > settings.maxBytes }
+    const lines = countLines(buffer.subarray(0, got).toString('utf8'))
+    return { bytes, lines, over: lines > settings.maxLines || bytes > settings.maxBytes }
+  } catch {
+    return undefined
+  } finally {
+    await opened?.handle.close().catch(() => {})
+  }
+}
+
+/**
+ * What a POST asks dsh's opener for, found again: the store by its id, the file by its name
+ * in the store's directory or its archive, and only a regular file — not a link, a folder, a
+ * FIFO or a device — opened in its default app (`{ path }`). With no `file`, the store's
+ * index, shown in the file manager (`{ path, action: 'reveal' }`): Explorer and Finder
+ * select it in its folder, Linux opens its folder. A store with no index has no folder
+ * to show, as Linux would show the folder above it.
+ *
+ * The real path is checked once more just before dsh's opener, which resolves it again
+ * itself: its directory is still the store's (or the store's archive) as found a moment
+ * ago, and it is still named as a note (or as the index). These are checks on paths: a
+ * process changing the store's files at that very moment could still redirect what the
+ * desktop finally opens, as with dsh's own opener for any workspace file.
+ */
+async function targetOf(settings, registry, body) {
+  const candidate = candidatesOf(settings, registry).list.find((c) => c.id === body.store)
+  if (candidate === undefined) return undefined
+  try {
+    const store = await locate(candidate, settings)
+    if (store === undefined) return undefined
+    if (body.file === undefined) {
+      const index = await fileIn(store, store.indexName, false)
+      return index === undefined ? undefined : { path: index, action: 'reveal' }
+    }
+    const path = await fileIn(store, body.file, body.archive === true)
+    return path === undefined ? undefined : { path }
+  } catch {
+    return undefined
+  }
+}
+
+/** The real path of note or index `name` directly in `store` (or its archive), checked as targetOf says. */
+async function fileIn(store, name, archived) {
+  const indexNamed = (n) => !archived && n.toLowerCase() === store.indexName.toLowerCase() &&
+    !/[\\/:\u0000-\u001f]/.test(n)
+  if (!NOTE_NAME.test(name) && !indexNamed(name)) return undefined
+  const dir = archived ? join(store.dir, ARCHIVE_DIR) : store.dir
+  try {
+    if (archived && !(await plainDirectory(dir))) return undefined
+    const file = join(dir, name)
+    if (!(await fsp.lstat(file)).isFile()) return undefined
+    const realDir = await fsp.realpath(dir)
+    const sameDir = archived
+      ? folded(dirname(realDir)) === store.key && basename(realDir).toLowerCase() === ARCHIVE_DIR
+      : folded(realDir) === store.key
+    if (!sameDir) return undefined
+    const real = await fsp.realpath(file)
+    if (folded(dirname(real)) !== folded(realDir)) return undefined
+    return NOTE_NAME.test(basename(real)) || indexNamed(basename(real)) ? real : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

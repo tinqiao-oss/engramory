@@ -100,6 +100,28 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   config), fetches without a deadline (body included), default caps pinned into the
   profile, a `!!js` value taken for a default, and the row id read from the tree-scoped
   `entry.id` (`include:engramory`) instead of `options.id`.
+- **A memory page on dsh.** A *Memory* entry in dsh's sidebar opens a read-only page
+  listing the stores recall can use — the global store and each workspace's project store,
+  found as recall finds one, or the pinned index's directory — with each index's size
+  against the cap and its notes' names, by type, and its archive. A name opens the note
+  in the desktop's default app through dsh's own opener (shown as text where dsh cannot
+  open on its machine); no note's text reaches the page. Companion mode and its memory
+  access sit at its top and save as they are switched. Its route answers the owner only,
+  as the settings page's; it lists asynchronously, one listing at a time, within fixed
+  bounds, never looks into a workspace on a network share path or one whose folder now
+  leads elsewhere, never lists a note that is a link, and opens only a note or the index it
+  finds again by name, directly in a store it finds again by id, its real path checked once
+  more just before dsh's opener (checks on paths: a process changing the store's files at
+  that very moment could still redirect what the desktop opens); *Open the folder* shows
+  the index in the file manager rather than opening a folder. Cross-review (GPT and DeepSeek) of the
+  design, before any code, found the synchronous store discovery recall uses unfit for a
+  page that walks every workspace, workspaces whose folder had become a link, an archive
+  note's address colliding with a store note's, and a relative `indexPath` that no page
+  can resolve; of the code, a file or folder swapped for a link between the checks and the
+  opener (a folder could then have been opened as a program), quick clicks queuing without
+  bound, Windows 8.3 names judged unlike recall, a frontmatter ending at the head's last
+  byte, an index past recall's read under a larger cap called over it, and settings that
+  failed to load hiding the switches for good.
 - **Companion and social mode's context is required.** On a real dsh, a persona preset
   that turns optional runtime context off (dsh-persona `includeRuntimeContext: false`, as
   the shipped `minimal` preset does) left the owner with no memory at all. With either

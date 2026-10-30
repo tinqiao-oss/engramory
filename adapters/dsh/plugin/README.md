@@ -187,6 +187,30 @@ in the file.
 Only you reach the page's route — your signed-in browser, or a program holding your
 login: dsh answers 401 to a request without it and 403 to a cross-site one, so an agent
 cannot call it to switch social mode off. A dsh without the profile editor shows the page read-only.
+Companion mode and its memory access are also at the top of the memory page (below).
+
+## Memory page
+
+dsh's sidebar gets a **Memory** entry. Its page lists the stores recall can use — the
+global store under `$DSH_HOME` and each workspace's project store, found as recall finds
+one, or, with `indexPath` pinned, that index's directory alone — with each index's size
+against the cap, its notes' names by type, and its archive. It is read-only and shows
+names only, never a note's text: a name opens the note in your computer's default app,
+through dsh's own opener, on the machine dsh runs on. Where dsh says it cannot open there
+(over SSH, say), the names are plain text and the page shows where the files are.
+*Open the index* opens the index the same way; *Open the folder* shows the index in your
+file manager (Explorer and Finder select it in the store's folder; on Linux the folder
+opens), so a store with no index has no such button. At the top, companion mode and its
+memory access save as they are switched; what they mean, and the index cap, are on the
+settings page.
+
+The listing is bounded — 2000 entries looked at per folder, 200 workspaces, 5000 names in
+all — and never looks into a workspace on a network share path (`\\server\share\…`), or
+one whose folder has since become a link to somewhere else. A note that is a link is not
+listed; what is opened is a note or the index found again, by name, directly in its store,
+and refused if it has become a link. A relative `indexPath` follows each conversation's
+directory, so the page cannot list it. Only you reach the page's route, as the settings
+page's.
 
 ## Configuration
 
@@ -262,15 +286,23 @@ file's line endings when sizing the result, including CRLF bytes.
   its own conversation, which its other messages already make someone else's.
 - **A kind of message a later dsh adds counts as someone else's** until this plugin knows
   it: a conversation of yours may lose the memory, never the other way round.
+- **The memory page reads the disks as they answer.** On a filesystem whose directory
+  entries carry no type (some network mounts), Node stats each listed entry on dsh's main
+  thread, at most 2000 per folder; and a listing stuck on a drive that never answers keeps
+  reporting a timeout until it does, rather than starting another that would get stuck too.
+- **What the memory page opens is checked by path.** dsh's opener takes a path, which it
+  resolves once more before the desktop opens it; a process changing a store's files at
+  that very moment could still redirect what the desktop opens — as with dsh's own opener
+  for any workspace file — though not to a link the page saw.
 - dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and reactive
   `ctx.inject()` children for the skill registry, the session working directory, the
   prompt registry, and — in social mode — dsh's session projections, where it folds
   who has written in each session; a compatible-release declaration needs recorded host
   evidence, not just unit tests. The recorded end-to-end runs cover the cap, the skill
-  and the injected index; companion mode, social mode and the settings page were checked by hand on
+  and the injected index; companion mode, social mode, the settings page and the memory page were checked by hand on
   a real dsh (0.2.1-rc.5) — messages typed in dsh's window, sent by `dsh headless` and by
-  a program through dsh web's API, and a save through the page — but are not part of that
-  record yet.
+  a program through dsh web's API, a save through the page, and the memory page's listing,
+  a switch saved from it and a note opened from it — but are not part of that record yet.
 
 ## License
 

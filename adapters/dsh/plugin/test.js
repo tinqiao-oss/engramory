@@ -1807,8 +1807,9 @@ test('settings routes: none without a web server, one exact route for both metho
   const headless = mount({})
   assert.ok(headless.guard) // a headless dsh mounts the cap as before
   const { routes } = webMount({})
+  // the memory page's route comes with it, from the same row
   assert.deepEqual(routes.map((r) => [r.path, r.methods.join(), r.requestBody]),
-    [['/api/engramory/settings', 'GET,POST', 'buffered']])
+    [['/api/engramory/settings', 'GET,POST', 'buffered'], ['/api/engramory/memory', 'GET,POST', 'buffered']])
 })
 
 test('settings GET: the row settings as the plugin reads them, and whether a save can land', async () => {
@@ -1827,8 +1828,8 @@ test('settings GET: the row settings as the plugin reads them, and whether a sav
 })
 
 test('settings route: served by the bundle\'s own row, never by a second row of the package', () => {
-  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 1)
-  // a second row would claim the same path, or claim it first and have the page save it
+  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 2) // settings and memory
+  // a second row would claim the same paths, or claim them first and have the page save it
   assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
 })
 
@@ -1999,4 +2000,364 @@ test('settings POST writes only this plugin own row, never another of the same p
   assert.deepEqual(await w.call('POST', saveBody(shown.revision)),
     { status: 409, body: { ok: false, error: 'unavailable' } })
   assert.equal(w.edits.length, 0)
+})
+
+// --- the memory page's route (client.js) ---
+
+/** dsh's session controller as the memory page uses it: it can open, and keeps what it was handed. */
+const openerStub = (opened) => ({
+  canOpenWorkspacePath: () => true,
+  openWorkspacePath: async (request, signal) => {
+    assert.ok(signal instanceof AbortSignal)
+    opened.push(request)
+  },
+})
+
+/** A mount with dsh's web server and, when given, its workspace registry and session controller. */
+function memoryMount(config = {}, { workspaces, opener } = {}) {
+  const m = mount(config)
+  const routes = []
+  const opened = []
+  let lists = 0
+  if (workspaces !== undefined) {
+    m.mountLate('workspaceRegistry', { list: () => { lists++; return workspaces } })
+  }
+  if (opener !== undefined) m.mountLate('sessionController', opener === true ? openerStub(opened) : opener)
+  m.mountLate('connection', { fetch: { register: (route) => { routes.push(route); return async () => {} } } })
+  const route = routes.find((r) => r.path === '/api/engramory/memory')
+  const call = async (method = 'GET', body) => {
+    const init = { method }
+    if (body !== undefined) {
+      init.body = typeof body === 'string' ? body : JSON.stringify(body)
+      init.headers = { 'content-type': 'application/json' }
+    }
+    const response = await route.fetch(new Request(`http://127.0.0.1${route.path}`, init))
+    return { status: response.status, body: await response.json(), headers: response.headers }
+  }
+  return { ...m, call, opened, lists: () => lists }
+}
+
+/** Run the async `fn` with `$DSH_HOME` set to `home`, then put it back. */
+async function withHomeAsync(home, fn) {
+  const before = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    return await fn()
+  } finally {
+    if (before === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = before
+  }
+}
+
+/** A note as the protocol writes one, of `type` (written as given, quotes and all). */
+const noteOf = (type) =>
+  `---\nname: x\ndescription: a secret line\ntype: ${type}\ncreated: 2026-10-30\nupdated: 2026-10-30\n---\n\nthe fact\n`
+
+/** A global store under a fresh `$DSH_HOME`, with an index and an archive folder. */
+function globalStore(tag, index = '# Memory\n- [a](a.md)\n- [b](b.md)\n') {
+  const home = scratch(tag)
+  const dir = join(home, '.engramory-memory')
+  mkdirSync(join(dir, 'archive'), { recursive: true })
+  writeFileSync(join(dir, INDEX), index, 'utf8')
+  return { home, dir }
+}
+
+test('memory GET: the global store by name only — the index size, the notes by type, the archive', async () => {
+  const { home, dir } = globalStore('mem-global')
+  writeFileSync(join(dir, 'user_name.md'), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'fb.md'), `\uFEFF${noteOf('"feedback"')}`, 'utf8') // BOM, quoted
+  writeFileSync(join(dir, 'cc.md'), '---\nname: cc\nmetadata:\n  type: project\n---\nthe fact\n', 'utf8')
+  writeFileSync(join(dir, 'crlf.md'), noteOf('moment').replace(/\n/g, '\r\n'), 'utf8')
+  writeFileSync(join(dir, '经历-生日.md'), noteOf('moment'), 'utf8')
+  writeFileSync(join(dir, 'odd.md'), noteOf('Feedback'), 'utf8') // not a protocol type
+  writeFileSync(join(dir, 'twice.md'), '---\ntype: user\ntype: project\n---\n', 'utf8')
+  writeFileSync(join(dir, 'open.md'), '---\ntype: user\n', 'utf8') // never closed
+  writeFileSync(join(dir, 'late.md'), `---\n${'x: y\n'.repeat(1200)}type: user\n---\n`, 'utf8') // past the head
+  writeFileSync(join(dir, 'notes.txt'), 'not a note', 'utf8')
+  writeFileSync(join(dir, '.hidden.md'), noteOf('user'), 'utf8')
+  mkdirSync(join(dir, 'folder.md'))
+  writeFileSync(join(dir, 'archive', 'moments-2026-09.md'), noteOf('moment'), 'utf8')
+  const { status, body, headers } = await withHomeAsync(home, () => memoryMount().call())
+  assert.equal(status, 200)
+  assert.equal(headers.get('cache-control'), 'no-store')
+  assert.equal(body.canOpen, false) // no session controller to open with
+  assert.deepEqual(body.cap, { maxLines: 200, maxBytes: 25600 })
+  assert.equal(body.more, false)
+  assert.equal(body.stores.length, 1)
+  const [s] = body.stores
+  assert.deepEqual([s.id, s.kind, s.dir, s.titles, s.more], ['user', 'user', dir, [], false])
+  assert.deepEqual(s.index, { name: INDEX, bytes: 33, lines: 3, over: false })
+  assert.deepEqual(Object.fromEntries(s.notes.map((n) => [n.name, n.type])), {
+    'user_name.md': 'user', 'fb.md': 'feedback', 'cc.md': 'project', 'crlf.md': 'moment',
+    '经历-生日.md': 'moment', 'odd.md': 'other', 'twice.md': 'other', 'open.md': 'other', 'late.md': 'other',
+  })
+  assert.deepEqual(s.archive, ['moments-2026-09.md'])
+  // names and types only: no note's text reaches the page
+  assert.doesNotMatch(JSON.stringify(body), /secret line|the fact/)
+})
+
+test('memory GET: a note that is a link is not listed', async (t) => {
+  const { home, dir } = globalStore('mem-link')
+  const outside = join(scratch('mem-outside'), 'id.md')
+  writeFileSync(outside, noteOf('user'), 'utf8')
+  if (fileLink(outside, join(dir, 'link.md')) === null) return t.skip('no symlink privilege here')
+  const { body } = await withHomeAsync(home, () => memoryMount().call())
+  assert.deepEqual(body.stores[0].notes, [])
+})
+
+test('memory GET: each workspace\'s project store, found as recall finds one, listed once', async () => {
+  const home = scratch('mem-nohome') // no global store
+  const repo = realpathSync.native(scratch('mem-repo'))
+  mkdirSync(join(repo, '.git'))
+  mkdirSync(join(repo, 'src'))
+  store(repo, '- [a](a.md)\n')
+  writeFileSync(join(repo, '.engramory-memory', 'a.md'), noteOf('project'), 'utf8')
+  const plain = realpathSync.native(scratch('mem-plain'))
+  const workspaces = [
+    { id: 'w1', path: repo, title: 'repo' },
+    { id: 'w2', path: join(repo, 'src'), title: 'src' }, // the same store, from below
+    { id: 'w3', path: plain, title: 'plain' }, // no store
+    { id: 'w4', path: '\\\\server\\share\\repo', title: 'unc' }, // a network path: never looked into
+    { id: 'w5', path: 'relative/path', title: 'bad' },
+    { path: repo, title: 'no id' },
+  ]
+  const m = memoryMount({}, { workspaces })
+  const { body } = await withHomeAsync(home, () => m.call())
+  assert.equal(body.stores.length, 1)
+  const [s] = body.stores
+  assert.deepEqual([s.id, s.kind, s.titles, s.dir], ['ws:w1', 'project', ['repo', 'src'], join(repo, '.engramory-memory')])
+  assert.deepEqual(s.notes, [{ name: 'a.md', type: 'project' }])
+  // no registry: the global store alone, as before
+  assert.deepEqual((await withHomeAsync(home, () => memoryMount().call())).body.stores, [])
+})
+
+test('memory GET: a workspace whose path now leads elsewhere, or whose index is a link, lists nothing', async (t) => {
+  const home = scratch('mem-nohome2')
+  const elsewhere = scratch('mem-elsewhere')
+  mkdirSync(join(elsewhere, '.git'))
+  store(elsewhere, '- a secret line\n')
+  // dsh recorded a plain directory here; it has since become a link to another tree
+  const moved = join(scratch('mem-moved'), 'ws')
+  symlinkSync(elsewhere, moved, process.platform === 'win32' ? 'junction' : 'dir')
+  const m = memoryMount({}, { workspaces: [{ id: 'w', path: moved, title: 'ws' }] })
+  assert.deepEqual((await withHomeAsync(home, () => m.call())).body.stores, [])
+
+  const repo = realpathSync.native(scratch('mem-linkrepo'))
+  mkdirSync(join(repo, '.git'))
+  mkdirSync(join(repo, '.engramory-memory'))
+  const secret = join(scratch('mem-secret'), 'secret.md')
+  writeFileSync(secret, '- a secret line\n', 'utf8')
+  if (fileLink(secret, join(repo, '.engramory-memory', INDEX)) === null) return t.skip('no symlink privilege here')
+  const linked = memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'r' }] })
+  assert.deepEqual((await withHomeAsync(home, () => linked.call())).body.stores, [])
+})
+
+test('memory GET: a pinned index lists its own directory alone; a relative pin cannot be listed', async () => {
+  const dir = realpathSync.native(scratch('mem-pinned'))
+  writeFileSync(join(dir, 'INDEX.md'), '- one\n', 'utf8')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const { home } = globalStore('mem-pinhome')
+  const m = memoryMount({ indexPath: join(dir, 'INDEX.md') }, { workspaces: [] })
+  const { body } = await withHomeAsync(home, () => m.call())
+  assert.deepEqual(body.stores.map((s) => [s.id, s.kind, s.index.name, s.notes.map((n) => n.name)]),
+    [['pinned', 'pinned', 'INDEX.md', ['a.md']]])
+  const relative = memoryMount({ indexPath: 'notes/MEMORY.md' }, { workspaces: [] })
+  const shown = (await withHomeAsync(home, () => relative.call())).body
+  assert.deepEqual([shown.stores, shown.pinned], [[], 'relative'])
+})
+
+test('memory GET: an index over the cap says so; past what recall reads, its lines are not counted', async () => {
+  const { home, dir } = globalStore('mem-over', `${big(250)}\n`)
+  let s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual([s.index.lines, s.index.over], [250, true])
+  writeFileSync(join(dir, INDEX), 'x'.repeat(30000), 'utf8')
+  s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(s.index, { name: INDEX, bytes: 30000, over: true })
+  // a store with no index yet is still a store
+  rmSync(join(dir, INDEX))
+  s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.equal(s.index, null)
+})
+
+test('memory GET: a directory past the entries looked at says there is more', async () => {
+  const { home, dir } = globalStore('mem-many')
+  for (let i = 0; i <= 2000; i++) writeFileSync(join(dir, `f${i}.txt`), '')
+  const { body } = await withHomeAsync(home, () => memoryMount().call())
+  assert.equal(body.stores[0].more, true)
+})
+
+test('memory GET: pages asking at once share one listing', async () => {
+  const home = scratch('mem-once')
+  const m = memoryMount({}, { workspaces: [] })
+  await withHomeAsync(home, () => Promise.all([m.call(), m.call()]))
+  assert.equal(m.lists(), 1)
+  await withHomeAsync(home, () => m.call())
+  assert.equal(m.lists(), 2) // a later page starts its own
+})
+
+test('memory POST opens a note, the index, an archived note by its real path; shows the folder', async () => {
+  const { home, dir } = globalStore('mem-open')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'archive', 'old.md'), noteOf('moment'), 'utf8')
+  const real = realpathSync.native(dir)
+  const m = memoryMount({}, { opener: true })
+  await withHomeAsync(home, async () => {
+    assert.equal((await m.call()).body.canOpen, true)
+    for (const [body, asked] of [
+      [{ store: 'user', file: 'a.md' }, { path: join(real, 'a.md') }],
+      [{ store: 'user', file: INDEX }, { path: join(real, INDEX) }],
+      [{ store: 'user', file: 'old.md', archive: true }, { path: join(real, 'archive', 'old.md') }],
+      // the folder is shown, never opened: the file manager, with the index selected
+      [{ store: 'user' }, { path: join(real, INDEX), action: 'reveal' }],
+    ]) {
+      const { status, body: reply } = await m.call('POST', body)
+      assert.deepEqual([status, reply], [200, { ok: true }], JSON.stringify(body))
+      assert.deepEqual(m.opened.at(-1), asked)
+    }
+    // a store with no index has nothing to show its folder by (Linux would show the one above)
+    rmSync(join(dir, INDEX))
+    assert.equal((await m.call('POST', { store: 'user' })).status, 404)
+    assert.equal(m.opened.length, 4)
+  })
+})
+
+test('memory GET: a store linked to its project\'s root is listed, as recall reads its index', async () => {
+  const home = scratch('mem-rootlink')
+  const repo = realpathSync.native(scratch('mem-rootrepo'))
+  mkdirSync(join(repo, '.git'))
+  writeFileSync(join(repo, INDEX), '- [a](a.md)\n', 'utf8')
+  writeFileSync(join(repo, 'a.md'), noteOf('user'), 'utf8')
+  symlinkSync(repo, join(repo, '.engramory-memory'), process.platform === 'win32' ? 'junction' : 'dir')
+  const m = memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'repo' }], opener: true })
+  const { body } = await withHomeAsync(home, () => m.call())
+  assert.deepEqual(body.stores.map((s) => [s.id, s.notes.map((n) => n.name)]), [['ws:w', ['a.md']]])
+  assert.equal((await withHomeAsync(home, () => m.call('POST', { store: 'ws:w', file: 'a.md' }))).status, 200)
+  assert.deepEqual(m.opened, [{ path: join(repo, 'a.md') }])
+})
+
+test('memory POST opens nothing that is not a listed note, and says why', async (t) => {
+  const { home, dir } = globalStore('mem-refuse')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'a.txt'), 'x', 'utf8')
+  writeFileSync(join(dir, '.hidden.md'), noteOf('user'), 'utf8')
+  mkdirSync(join(dir, 'folder.md'))
+  const outside = join(scratch('mem-out'), 'out.md')
+  writeFileSync(outside, noteOf('user'), 'utf8')
+  const link = fileLink(outside, join(dir, 'link.md'))
+  const m = memoryMount({}, { opener: true })
+  await withHomeAsync(home, async () => {
+    for (const body of [
+      { store: 'user', file: '../MEMORY.md' }, { store: 'user', file: 'archive/../a.md' },
+      { store: 'user', file: outside }, { store: 'user', file: 'a.txt' },
+      { store: 'user', file: '.hidden.md' }, { store: 'user', file: 'a.md:stream' },
+      { store: 'user', file: 'missing.md' }, { store: 'user', file: 'folder.md' },
+      { store: 'user', file: 'a.md', archive: true }, { store: 'ws:nope', file: 'a.md' },
+      { store: 'pinned' }, ...(link === null ? [] : [{ store: 'user', file: 'link.md' }]),
+    ]) {
+      assert.deepEqual(await m.call('POST', body).then((r) => [r.status, r.body]),
+        [404, { ok: false, error: 'missing' }], JSON.stringify(body))
+    }
+    for (const [body, field] of [
+      ['not json', 'body'], [{}, 'store'], [{ store: 'user', file: 3 }, 'file'],
+      [{ store: 'user', archive: 'yes' }, 'archive'],
+    ]) {
+      assert.deepEqual(await m.call('POST', body).then((r) => [r.status, r.body]),
+        [400, { ok: false, error: 'invalid', field }], JSON.stringify(body))
+    }
+  })
+  assert.deepEqual(m.opened, [])
+  if (link === null) t.diagnostic('no symlink privilege here: the link case was not run')
+})
+
+test('memory POST without a desktop to open on, or when it fails, says so', async () => {
+  const { home, dir } = globalStore('mem-desk')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const open = { store: 'user', file: 'a.md' }
+  await withHomeAsync(home, async () => {
+    for (const opener of [undefined, { canOpenWorkspacePath: () => false, openWorkspacePath: async () => {} },
+      { canOpenWorkspacePath: () => { throw new Error('x') }, openWorkspacePath: async () => {} }]) {
+      const m = memoryMount({}, { opener })
+      assert.equal((await m.call()).body.canOpen, false)
+      assert.deepEqual(await m.call('POST', open).then((r) => [r.status, r.body]),
+        [409, { ok: false, error: 'unavailable' }])
+    }
+    const failing = memoryMount({}, {
+      opener: { canOpenWorkspacePath: () => true, openWorkspacePath: async () => { throw new Error('no handler for .md') } },
+    })
+    assert.deepEqual(await failing.call('POST', open).then((r) => [r.status, r.body]),
+      [502, { ok: false, error: 'failed', message: 'no handler for .md' }])
+  })
+})
+
+test('memory GET: a frontmatter is read up to the head\'s last byte, with any line ending', async () => {
+  const { home, dir } = globalStore('mem-head')
+  // exactly the head, its closing fence the file's last three bytes
+  const open = '---\ntype: user\n'
+  const filler = `# ${'x'.repeat(4096 - open.length - '---'.length - 3)}\n`
+  writeFileSync(join(dir, 'edge.md'), `${open}${filler}---`, 'utf8')
+  assert.equal(Buffer.byteLength(`${open}${filler}---`), 4096)
+  // the same fence, its line ending right after the head, the body following
+  writeFileSync(join(dir, 'edge-body.md'), `${open}${filler}---\n\nthe fact\n`, 'utf8')
+  // a fence the head cuts in two is no fence
+  writeFileSync(join(dir, 'edge-cut.md'), `${open}${filler}--- not a fence\n`, 'utf8')
+  writeFileSync(join(dir, 'cr-end.md'), '---\ntype: feedback\n---\r', 'utf8')
+  writeFileSync(join(dir, 'cr-only.md'), '---\rtype: project\r---\rthe fact\r', 'utf8')
+  const { body } = await withHomeAsync(home, () => memoryMount().call())
+  assert.deepEqual(Object.fromEntries(body.stores[0].notes.map((n) => [n.name, n.type])), {
+    'edge.md': 'user', 'edge-body.md': 'user', 'edge-cut.md': 'other', 'cr-end.md': 'feedback',
+    'cr-only.md': 'project',
+  })
+})
+
+test('memory GET: an index past recall\'s read under a larger cap is not called over it', async () => {
+  // a cap above 16 MiB: recall reads 16 MiB of it, and the index is still under the cap
+  const { home, dir } = globalStore('mem-huge')
+  writeFileSync(join(dir, INDEX), 'x'.repeat(17 * 1024 * 1024), 'utf8')
+  const s = (await withHomeAsync(home, () => memoryMount({ maxBytes: 20000000 }).call())).body.stores[0]
+  assert.deepEqual(s.index, { name: INDEX, bytes: 17 * 1024 * 1024, over: false })
+})
+
+test('memory GET: past the workspaces looked into, the page says there is more', async () => {
+  const home = scratch('mem-wsmany')
+  const nowhere = join(scratch('mem-nowhere'), 'gone')
+  const workspaces = Array.from({ length: 205 }, (_, i) => ({ id: `w${i}`, path: join(nowhere, `w${i}`), title: `w${i}` }))
+  const { body } = await withHomeAsync(home, () => memoryMount({}, { workspaces }).call())
+  assert.deepEqual([body.stores, body.more], [[], true])
+  const few = await withHomeAsync(home, () => memoryMount({}, { workspaces: workspaces.slice(0, 200) }).call())
+  assert.equal(few.body.more, false)
+  // past the limit nothing more is looked at, not even whether an entry is usable
+  const tail = [...workspaces.slice(0, 200), ...Array.from({ length: 50 }, () => ({ title: 'no id' }))]
+  assert.equal((await withHomeAsync(home, () => memoryMount({}, { workspaces: tail }).call())).body.more, true)
+})
+
+test('memory POST: a click while a lookup runs is told to wait; the next one opens', async () => {
+  const { home, dir } = globalStore('mem-busy')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'b.md'), noteOf('user'), 'utf8')
+  const m = memoryMount({}, { opener: true })
+  await withHomeAsync(home, async () => {
+    const replies = await Promise.all(['a.md', 'b.md', 'b.md'].map((file) => m.call('POST', { store: 'user', file })))
+    assert.deepEqual(replies.map((r) => r.status).sort(), [200, 409, 409])
+    assert.deepEqual(replies.filter((r) => r.status === 409).map((r) => r.body),
+      [{ ok: false, error: 'busy' }, { ok: false, error: 'busy' }])
+    assert.equal(m.opened.length, 1)
+    assert.equal((await m.call('POST', { store: 'user', file: 'b.md' })).status, 200)
+    assert.equal(m.opened.length, 2)
+  })
+})
+
+test('memory POST: a pinned index of any name opens by that name, and only from the store itself', async () => {
+  const dir = realpathSync.native(scratch('mem-pinname'))
+  writeFileSync(join(dir, 'INDEX'), '- one\n', 'utf8')
+  mkdirSync(join(dir, 'archive'))
+  writeFileSync(join(dir, 'archive', 'INDEX'), '- old\n', 'utf8')
+  const m = memoryMount({ indexPath: join(dir, 'INDEX') }, { opener: true })
+  assert.deepEqual((await m.call('POST', { store: 'pinned', file: 'INDEX' })).body, { ok: true })
+  assert.deepEqual(m.opened, [{ path: join(dir, 'INDEX') }])
+  assert.equal((await m.call('POST', { store: 'pinned', file: 'INDEX', archive: true })).status, 404)
+  if (process.platform === 'win32') {
+    // a case-insensitive disk finds it under any case, and the opener gets its real name
+    assert.equal((await m.call('POST', { store: 'pinned', file: 'index' })).status, 200)
+    assert.deepEqual(m.opened.at(-1), { path: join(dir, 'INDEX') })
+  }
 })
