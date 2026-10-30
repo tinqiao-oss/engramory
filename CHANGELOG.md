@@ -12,9 +12,11 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   the index filename do not, so every host and tool reads the store whichever language
   wrote it, and a mixed store is valid. Naming rules for both languages: unique and
   specific (the store is one flat namespace), no characters a pointer or `[[link]]`
-  cannot carry, about 40 characters at most; a type keeps one heading. On dsh,
-  `language: zh` (or a regional form, `zh-CN`) puts the skill, its trigger text and the
-  injected index in Chinese, rule for rule.
+  cannot carry, about 40 characters at most; a type keeps one heading. On dsh, the
+  skill, its trigger text and the injected index follow dsh's language — the one chosen in
+  dsh's Settings → General, else that of the system dsh runs on — and are Chinese, rule for rule, when it is
+  Chinese; `language` (`zh`, a regional form like `zh-CN`, or `en`) pins one. A Chinese
+  system's existing English store gets its new notes in Chinese; a mixed store is valid.
 - **The doctor reads Chinese stores.** It accepts the Chinese labels — anchored like
   the English ones, so a sentence that opens with 为什么 is not a label — names them in
   its errors only for a note written in Chinese, and compares filenames, pointers,
@@ -32,10 +34,16 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   to forget. None needs Why/How. Tie-breaks with the four: a lasting fact about the
   user (a birthday) stays `user`, and what the user asks of the character stays
   `feedback`. §4, §5, §6 and the report contract name the exceptions.
-- **dsh companion mode (大肥鱼模式)**, for a dsh other people can talk to as well — a
-  character wired to QQ, WeChat or Douyin through a bridge plugin. `companion: true` turns
-  it on, and then only the user's own conversations get the memory: one the user has
-  written in, in dsh's own window, and nobody else has. dsh stamps every user message
+- **dsh companion mode (大肥鱼模式)**: `companion: true` adds the three types above to the
+  skill, and companion rules after the injected index: when the agent plays a character,
+  recall on any message, a greeting included; speak of memory in character; never claim
+  a save that did not happen; never write ID numbers, card numbers or passwords.
+- **dsh social mode**, a choice inside companion mode for a character other people can
+  talk to as well — one wired to QQ, WeChat or Douyin through a bridge plugin. With
+  companion mode on, `audience: social` turns it on (the default, `private`, gives every
+  conversation the memory), and then only the user's own
+  conversations get the memory: one the user has written in, in dsh's own window, and
+  nobody else has. dsh stamps every user message
   with its source, and its browser client sends each prompt with a request id and the
   browser's time zone; a host-only session projection (`engramory:speakers`) folds who has
   written in each session. Everything else is someone else's — any kind dsh's own
@@ -45,11 +53,8 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   names as not the owner — and once anyone else has written, the conversation stays
   theirs; dsh's own producers decide nothing. A bridge marks the owner's own messages
   with `speaker: { role: 'owner' }` on their source, and its own notices with
-  `role: 'none'` (the plugin README's standard for bridge authors). The user's own
-  conversations get the index plus companion rules: when the agent plays a character,
-  recall on any message, a greeting included; speak of memory in character; never claim
-  a save that did not happen; never write ID numbers, card numbers or passwords. Anyone
-  else's gets no index, a note saying so, and file tools that may name files only: a
+  `role: 'none'` (the plugin README's standard for bridge authors). Anyone else's
+  conversation gets no index, a note saying so, and file tools that may name files only: a
   directory is refused (grep, glob and directory views walk trees that may hold a
   store), and so is any path into a store, by path segment as written and as the OS
   resolves it — links, case, Unicode form, 8.3 short names, a store not created yet —
@@ -61,8 +66,7 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   64 segments, a network path — and it is best-effort, not access control: a shell tool
   reads any file, and a program can imitate dsh's page (SECURITY.md). Answers to the
   agent's questions, scheduled prompts and the message a slash command adds carry no
-  author and count as nobody's. With
-  companion mode on, the skill gains its companion section. A run on a real dsh
+  author and count as nobody's. A run on a real dsh
   (0.2.1-rc.5) found, before release, that dsh computes a step's runtime context before
   it commits the messages that step delivers: judged on commits, the user's first message
   got the note and an outsider's first message in the user's conversation got the memory.
@@ -75,30 +79,34 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
   a subagent taken for its task, a subagent with no parent named, and the owner's own
   `/plan <text>` closing their conversation, then overlapping commands, a command whose
   end was never logged, a fork-backed subagent's inherited task, and checkpoints taken
-  back without a coherence check. The mode was first built on
-  persona presets and a list of the user's session ids; that was dropped before release,
-  since a popular persona plugin applies its persona without a preset, and a list of ids
-  cannot follow a bridge that opens a new session for every message.
+  back without a coherence check. Who gets the memory was first a part of companion mode,
+  built on persona presets and a list of the user's session ids; before release it became
+  a setting of its own, since a companion the user alone talks to needs none of it (and
+  its scheduled messages would lose the memory), a popular persona plugin applies its
+  persona without a preset, and a list of ids cannot follow a bridge that opens a new
+  session for every message.
 - **A settings page on dsh** (the plugin's first browser half, `client.js`). On the
-  Plugins page, Engramory's row opens a page that sets the memory language, companion
-  mode and the index cap. It saves through dsh's own profile editor (validated, written
+  Plugins page, Engramory's own page sets companion mode (a switch) and, while it is on,
+  its memory access (private or social), and the index cap. It saves through dsh's own profile editor (validated, written
   to the profile's `cordis.patch.yml`, plugin reloaded, or the file left as it was),
   refuses a save made against settings changed elsewhere, and writes defaults as
-  absence. Its route is reached only by the owner's signed-in browser: dsh answers 401
-  without the login cookie and 403 to a cross-site request, so an agent cannot turn
-  companion mode off. Plain script, no build, React from the page, host theme tokens,
+  absence, and refuses a save when the profile it would rewrite holds a `!!js` value. Its
+  route is reached only by the owner — a signed-in browser, or a program holding the
+  owner's login: dsh answers 401 without it and 403 to a cross-site request, so an agent
+  cannot switch social mode off. Plain script, no build, React from the page, host theme tokens,
   Chinese and English. The package now also exports display metadata (`locale/*.json`)
   and an icon. Cross-review (GPT and DeepSeek) and runs on a real dsh found, before
   release: a second row of the package claiming the route (or having the page save its
   config), fetches without a deadline (body included), default caps pinned into the
   profile, a `!!js` value taken for a default, and the row id read from the tree-scoped
   `entry.id` (`include:engramory`) instead of `options.id`.
-- **Companion mode's context is required.** On a real dsh, a persona preset that turns
-  optional runtime context off (dsh-persona `includeRuntimeContext: false`, as the
-  shipped `minimal` preset does) left the owner with no memory at all. In companion mode
-  the owner's memory and rules, and anyone else's note, are a runtime context marked
-  `required`; with it off, the index stays optional.
-- **Defaults are unchanged.** With companion mode off and English, the skill, the
+- **Companion and social mode's context is required.** On a real dsh, a persona preset
+  that turns optional runtime context off (dsh-persona `includeRuntimeContext: false`, as
+  the shipped `minimal` preset does) left the owner with no memory at all. With either
+  mode on, the memory and its rules, and social mode's note, are a runtime context marked
+  `required`; with both off, the index stays optional.
+- **Defaults are unchanged in English.** With companion mode off, private, and English (an
+  English dsh or system, or `language: en`), the skill, the
   injected index and every guard verdict are byte-identical to 0.12.4 (34 outputs
   compared). Four rounds of cross-review (GPT and DeepSeek) found, before release, a
   stranger planting a store that did not exist yet, forks inheriting the owner's role,

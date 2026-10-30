@@ -1,7 +1,7 @@
 /**
- * dsh-engramory, browser half: the settings page behind the Configure control on the
- * Plugins page. It edits the language, companion mode (大肥鱼模式) and the index cap
- * through the route index.js registers.
+ * dsh-engramory, browser half: the settings on the package's own page in the Plugins page.
+ * It edits companion mode (大肥鱼模式), its memory access and the index cap through the
+ * route index.js registers; the memory's language follows dsh's.
  *
  * Plain script, no build step, like index.js: React comes from the page's module table,
  * no Harness client package is loaded as a module (dsh's guidance — they change without
@@ -16,29 +16,29 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useRef, useState } = React
 
     const NS = 'engramory'
-    /** The Plugins page keys a row's page by `<package>#<row id>`; the row id is the patch's. */
-    const ROW = 'dsh-engramory#engramory'
+    /** The Plugins page keys a package's own settings by its package name. */
+    const PACKAGE = 'dsh-engramory'
     /** Relative to the page, as dsh's own pages fetch, so a mounted deployment keeps its prefix. */
     const API = 'api/engramory/settings'
     const DEFAULT_LINES = 200
     const DEFAULT_BYTES = 25600
 
     const zh = {
-      summary: '记忆用哪种语言写、大肥鱼模式，以及索引上限。',
+      summary: '大肥鱼模式和记忆权限、索引上限。',
       loading: '正在读取设置…',
       loadFailed: '读不到设置。',
       retry: '重试',
       unavailable: '这个 dsh 不能在页面里保存这些设置（没有配置编辑服务）。请改配置文件 cordis.patch.yml，写法见插件说明。',
       expression: '配置文件里有设置是用 !!js 表达式写的，这里显示不了它的实际值，所以只读。请直接改 cordis.patch.yml。',
-      language: '记忆的语言',
-      languageHint: '笔记名、目录标题和给 AI 的说明都用这种语言写。已有的笔记不会被改写。',
-      languageEn: 'English',
-      languageZh: '中文',
       companion: '大肥鱼模式',
-      companionHint: '别人也能跟你的 AI 聊天时打开，比如接了 QQ、微信、抖音。打开后，只有你在 dsh 窗口里亲手发过消息、又没有别人说过话的对话，才用得上你的记忆；接入插件转进来的、外部程序和自动化任务开的对话都算别人的，一点记忆都拿不到。只有你自己用，就保持关闭。',
-      companionNote: '一段对话里只要出现过别人的消息，就一直算别人的。接入插件可以按 Engramory 的标准把你本人的消息标出来（比如你自己的 QQ 私聊），写法见插件说明。',
+      companionHint: '多记三类：经历、约定、我自己，用角色口吻回忆。',
+      audience: '记忆权限',
+      audiencePrivate: '专属',
+      audienceSocial: '社交',
+      audiencePrivateHint: '只有你用这个 dsh：每个对话都能用记忆。',
+      audienceSocialHint: '别人也能跟你的 AI 聊（接了 QQ、微信等）：只有你本人聊、没有别人插过话的对话能用记忆。',
       cap: '索引上限',
-      capHint: '记忆目录超过这个大小时，AI 的写入会被拒绝，要先压缩。默认 200 行 / 25600 字节。',
+      capHint: '默认 200 行 / 25600 字节，超过后 AI 要先压缩才能再写。',
       capLines: '行',
       capBytes: '字节',
       save: '保存',
@@ -53,21 +53,21 @@ window.__ModuleLoader__.load({
       failed: '保存失败：',
     }
     const en = {
-      summary: 'Which language the memory is written in, companion mode (大肥鱼模式), and the index cap.',
+      summary: 'Companion mode and memory access, and the index cap.',
       loading: 'Reading the settings…',
       loadFailed: 'Could not read the settings.',
       retry: 'Retry',
       unavailable: 'This dsh cannot save these settings from a page (it has no config editor). Edit cordis.patch.yml instead; the plugin README shows how.',
       expression: 'A setting in the config is written as a !!js expression, whose value this page cannot show, so it is read-only. Edit cordis.patch.yml directly.',
-      language: 'Memory language',
-      languageHint: 'Note names, index headings and the instructions to the AI are written in it. Existing notes are not rewritten.',
-      languageEn: 'English',
-      languageZh: '中文',
       companion: 'Companion mode (大肥鱼模式)',
-      companionHint: 'Turn it on when other people can talk to your AI too — through QQ, WeChat or Douyin, say. Then only a conversation you have written in, in dsh’s own window, and nobody else has, gets your memory; one a chat bridge, a program or an automation opened counts as someone else’s and gets none of it. If only you use this dsh, leave it off.',
-      companionNote: 'A conversation stays someone else’s once anyone else has written in it. A chat bridge can mark your own messages (your own QQ chat, say) by the Engramory standard the plugin README describes.',
+      companionHint: 'Keeps three more kinds of note — moments, plans, the character itself — and recalls in character.',
+      audience: 'Memory access',
+      audiencePrivate: 'Private',
+      audienceSocial: 'Social',
+      audiencePrivateHint: 'Only you use this dsh: every conversation gets the memory.',
+      audienceSocialHint: 'Others can talk to your AI too (through QQ, WeChat…): only conversations you alone have written in get the memory.',
       cap: 'Index cap',
-      capHint: 'Past this size the AI’s writes to the memory index are refused until it compacts. The default is 200 lines / 25600 bytes.',
+      capHint: 'Default 200 lines / 25600 bytes; past it the AI must compact before writing more.',
       capLines: 'lines',
       capBytes: 'bytes',
       save: 'Save',
@@ -116,8 +116,8 @@ window.__ModuleLoader__.load({
 
     /** The settings the page edits, in the order the host computes its revision from. */
     const settingsOf = (data) => ({
-      language: data.language === 'zh' ? 'zh' : 'en',
       companion: data.companion === true,
+      audience: data.audience === 'social' ? 'social' : 'private',
       maxLines: data.maxLines,
       maxBytes: data.maxBytes,
     })
@@ -158,16 +158,12 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function LanguageSection({ draft, t, disabled, update }) {
-      const option = (value, label) => h('button', {
-        type: 'button', 'aria-pressed': draft.language === value, disabled,
-        onClick: () => update({ language: value }),
-      }, label)
-      return h('section', { className: 'eng-section' },
-        h('h3', { className: 'eng-title' }, t('language')),
-        h('div', { className: 'eng-segment', role: 'group', 'aria-label': t('language') },
-          option('en', t('languageEn')), option('zh', t('languageZh'))),
-        h('p', { className: 'eng-hint' }, t('languageHint')))
+    /** A host-styled two-way choice: buttons with aria-pressed in one group. */
+    function Segment({ label, value, options, disabled, onChange }) {
+      return h('div', { className: 'eng-segment', role: 'group', 'aria-label': label },
+        options.map(([key, text]) => h('button', {
+          type: 'button', key, 'aria-pressed': value === key, disabled, onClick: () => onChange(key),
+        }, text)))
     }
 
     function CompanionSection({ draft, t, disabled, update }) {
@@ -176,8 +172,16 @@ window.__ModuleLoader__.load({
           h('h3', { className: 'eng-title' }, t('companion')),
           h(Switch, { checked: draft.companion, disabled, label: t('companion'),
             onChange: (on) => update({ companion: on }) })),
-        h('p', { className: 'eng-hint' }, t('companionHint')),
-        h('p', { className: 'eng-note' }, t('companionNote')))
+        h('p', { className: 'eng-hint' }, t('companionHint')))
+    }
+
+    function AudienceSection({ draft, t, disabled, update }) {
+      return h('section', { className: 'eng-section' },
+        h('h3', { className: 'eng-title' }, t('audience')),
+        h(Segment, { label: t('audience'), value: draft.audience, disabled,
+          options: [['private', t('audiencePrivate')], ['social', t('audienceSocial')]],
+          onChange: (audience) => update({ audience }) }),
+        h('p', { className: 'eng-hint' }, t(draft.audience === 'social' ? 'audienceSocialHint' : 'audiencePrivateHint')))
     }
 
     function CapSection({ caps, t, disabled, setCaps }) {
@@ -275,6 +279,10 @@ window.__ModuleLoader__.load({
           } else if (result.error === 'stale') {
             await load()
             if (alive.current) setBanner({ tone: 'error', text: t('stale') })
+          } else if (result.error === 'expression') {
+            // the profile changed under the page: read it again, which makes the page read-only
+            await load()
+            if (alive.current) setBanner({ tone: 'error', text: t('expression') })
           } else if (result.error === 'overridden') {
             setBanner({ tone: 'error', text: t('overridden') })
           } else if (result.error === 'invalid') {
@@ -297,8 +305,9 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'eng-page' },
         editable ? null : h('div', { className: 'eng-banner' },
           t(data.readOnly === 'expression' ? 'expression' : 'unavailable')),
-        h(LanguageSection, { draft, t, disabled, update }),
         h(CompanionSection, { draft, t, disabled, update }),
+        // memory access is a choice inside companion mode: off, it changes nothing
+        draft.companion ? h(AudienceSection, { draft, t, disabled, update }) : null,
         h(CapSection, { caps, t, disabled, setCaps }),
         banner ? h('div', { className: 'eng-banner', 'data-tone': banner.tone, role: 'status' }, banner.text) : null,
         editable ? h('div', { className: 'eng-actions' },
@@ -325,9 +334,9 @@ window.__ModuleLoader__.load({
           document.head.appendChild(tag)
           return () => tag.remove()
         }, 'dsh-engramory: styles')
-        ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
-          name: 'plugins.row.config',
-          key: ROW,
+        ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+          name: 'plugins.bundle.config',
+          key: PACKAGE,
           locale: NS,
         }, SettingsPage))
       },

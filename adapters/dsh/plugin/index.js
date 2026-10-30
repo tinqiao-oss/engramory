@@ -91,6 +91,9 @@ export function apply(ctx, config = {}) {
   const indexPath = typeof config.indexPath === 'string' && config.indexPath.trim()
     ? config.indexPath.trim()
     : undefined
+  // dsh's profile editor, where dsh keeps the language the user chose, may come up after
+  // this plugin: the language is settled again then (below), so the text is read per use.
+  const language = { current: memoryLanguage(ctx, config) }
   const settings = {
     indexName: indexNameOf(config.indexName),
     indexPath,
@@ -101,10 +104,16 @@ export function apply(ctx, config = {}) {
       : basename(indexPath)).toLowerCase(),
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
-    text: TEXT[languageOf(config.language)],
-    // Companion mode (大肥鱼模式, SKILL.md §2.2): for a profile where others can talk to
-    // the agent too, so only the user's own conversations get the memory.
+    get text() {
+      return TEXT[language.current]
+    },
+    // Companion mode (大肥鱼模式, SKILL.md §2.2): three more types for a companion
+    // character's own life, and recall in character.
     companion: config.companion === true,
+    // Social mode, a choice inside companion mode: others can talk to the character too, so
+    // only the user's own conversations get the memory (speakerOf). Private, the default:
+    // every conversation does.
+    social: config.companion === true && config.audience === 'social',
   }
   settings.readLimit = Math.min(MAX_READ_LIMIT, Math.max(MIN_READ_LIMIT, 4 * settings.maxBytes))
 
@@ -134,12 +143,12 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // Companion mode reads two more optional services, both possibly late: dsh's session
+  // Social mode reads two more optional services, both possibly late: dsh's session
   // projections, where the SPEAKERS unit registered here folds who has written in each
   // session, and the live agents, where a subagent's parent is found (dsh only continues
   // a subagent while its parent is live).
   const live = {}
-  if (settings.companion) {
+  if (settings.social) {
     ctx.inject(['agents'], (inner) => {
       inner.effect(() => {
         const service = inner.agents
@@ -169,14 +178,14 @@ export function apply(ctx, config = {}) {
       })
     })
   }
-  const roleOf = settings.companion ? companionRoles(live) : () => 'normal'
+  const roleOf = settings.social ? companionRoles(live) : () => 'owner'
 
   // A guard that throws breaks the host's tool call; only an UNEXPECTED exception can
   // get here (an edit whose simulated result exceeds V8's string limit, say), and like
   // the Python guard it fails open — the host could not perform such an edit either.
   // The stranger filter is the exception: it fails closed on its own (refuseStranger).
   ctx.tools.guard((exec) => {
-    const stranger = settings.companion
+    const stranger = settings.social
       ? refuseStranger(exec, settings, sessionCwd, roleOf)
       : undefined
     if (stranger !== undefined) return stranger
@@ -194,22 +203,45 @@ export function apply(ctx, config = {}) {
   // registry reloads, and never makes the cap wait. A bare `ctx.skills` read at THIS
   // level would throw (undeclared service — issue #8's second crash); inside the
   // callback the service is declared, so the read is legal.
+  let refreshSkill = () => {}
   if (config.registerSkill !== false) {
     ctx.inject(['skills'], (inner) => {
-      const skill = config.skill ?? settings.text.skill(settings.companion)
+      let dispose
+      const register = () => {
+        if (typeof dispose === 'function') dispose()
+        dispose = inner.skills.register({
+          name: 'engramory',
+          description: settings.text.description +
+            (settings.companion ? settings.text.descriptionCompanion : ''),
+          whenToUse: settings.text.whenToUse +
+            (settings.companion ? settings.text.whenToUseCompanion : ''),
+          source: 'runtime',
+          content: config.skill ?? settings.text.skill(settings.companion),
+        })
+      }
       // effect() ties the registration to the child fiber: it is disposed when the
       // registry unloads, so a reload cannot accumulate duplicate registrations.
-      inner.effect(() => inner.skills.register({
-        name: 'engramory',
-        description: settings.text.description +
-          (settings.companion ? settings.text.descriptionCompanion : ''),
-        whenToUse: settings.text.whenToUse +
-          (settings.companion ? settings.text.whenToUseCompanion : ''),
-        source: 'runtime',
-        content: skill,
-      }))
+      inner.effect(() => {
+        register()
+        refreshSkill = register
+        return () => {
+          if (refreshSkill === register) refreshSkill = () => {}
+          if (typeof dispose === 'function') dispose()
+          dispose = undefined
+        }
+      })
     })
   }
+
+  // The language dsh's profile editor knows, once it is up (it activates in no fixed
+  // order with this plugin): the skill is registered again in it; the injected index and
+  // the notes read the text per use.
+  ctx.inject(['configEditor'], (inner) => {
+    const next = memoryLanguage(inner, config)
+    if (next === language.current) return
+    language.current = next
+    refreshSkill()
+  })
 
   // Recall without a read: the index goes into dsh's runtime context, and dsh carries a
   // changed snapshot to the model on the next request. It is cut at the cap, as a host
@@ -217,20 +249,22 @@ export function apply(ctx, config = {}) {
   // late, like the services above; a host whose prompt registry has no runtime context
   // keeps the cap and the skill and simply goes without.
   //
-  // In companion mode a context of its own carries who is on the other end: the user's
-  // own conversation gets the index and the companion rules; any other conversation gets
-  // no store at all, only a note saying so. Those two still go in with
-  // `injectIndex: false`, which only turns the index off.
+  // With companion mode or social mode on, a context of its own carries more: companion
+  // mode adds the companion rules after the index; social mode tells who is on the other
+  // end — the user's own conversation gets the memory, any other gets no store at all,
+  // only a note saying so. The rules and the note still go in with `injectIndex: false`,
+  // which only turns the index off.
   //
   // That context is REQUIRED: a persona preset may turn optional runtime context off
   // (dsh-persona's `includeRuntimeContext: false`, as the shipped `minimal` preset does),
-  // which would leave the owner without the memory and a stranger without the note that
+  // which would leave a companion without the memory and a stranger without the note that
   // the store is closed — seen on a real dsh.
   const injectIndex = config.injectIndex !== false
-  if (injectIndex || settings.companion) {
+  const guarded = settings.companion || settings.social
+  if (injectIndex || guarded) {
     const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
-    const contexts = settings.companion ? [{
-      name: 'engramory:companion',
+    const contexts = guarded ? [{
+      name: 'engramory:memory',
       required: true,
       text: (context) => {
         if (roleOf(context?.agent) !== 'owner') return settings.text.strangerNotice
@@ -240,7 +274,8 @@ export function apply(ctx, config = {}) {
         } catch {
           // an index that cannot be read must not take the companion rules with it
         }
-        return shown ? `${shown}\n\n${settings.text.companion}` : settings.text.companion
+        const rules = settings.companion ? settings.text.companion : ''
+        return [shown, rules].filter(Boolean).join('\n\n')
       },
     }] : [{ name: 'engramory:memory-index', text: index }]
     ctx.inject(['systemPrompt'], (inner) => {
@@ -266,13 +301,13 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  // The settings page (client.js, the Configure control on the Plugins page) reads and
-  // saves the language, companion mode and the cap through these routes. The web server
-  // is optional (a headless dsh has none) and may mount late.
-  // The page is keyed to the bundle's own row, so only that row serves it: a second row
-  // of this package would otherwise claim the same path (dsh refuses a second claim) or,
-  // claiming it first, have the page save ITS config. A row whose id cannot be told
-  // serves it as before.
+  // The settings page (client.js, on the package's page in the Plugins page) reads and
+  // saves companion mode, its memory access and the cap through these routes (the language
+  // follows dsh's, memoryLanguage). The web server is optional (a headless dsh has none)
+  // and may mount late. Only the bundle's own row serves them: a second row of this
+  // package would otherwise claim the same path (dsh refuses a second claim) or, claiming
+  // it first, have the page save ITS config. A row whose id cannot be told serves them as
+  // before.
   const fiber = ctx.fiber
   // `entry.id` is scoped by the tree that holds the row (`include:engramory`); the row's
   // own id, the one the patch names, is `options.id`.
@@ -296,7 +331,7 @@ export function apply(ctx, config = {}) {
 
 /** The settings page's route; client.js fetches it relative to the page, as dsh's own pages do. */
 const SETTINGS_ROUTE = '/api/engramory/settings'
-/** The bundle patch's row id, which the Plugins page keys the page by (client.js). */
+/** The bundle patch's row id: the one row that serves the settings page's route. */
 const SETTINGS_ROW = 'engramory'
 // apply() takes any positive cap, so a save must not refuse one a profile already has.
 const MAX_CAP_LINES = Number.MAX_SAFE_INTEGER
@@ -310,9 +345,9 @@ const MAX_CAP_BYTES = Number.MAX_SAFE_INTEGER
  * the page loaded, so an edit made elsewhere in between (by hand, in another window) is
  * not overwritten.
  *
- * Only the owner's signed-in browser reaches these: dsh answers 403 to any other caller of
- * an exact route, so an agent, a stranger's conversation included, cannot call them to
- * turn companion mode off.
+ * Only the owner reaches these — a signed-in browser, or a program holding the owner's
+ * login: dsh answers an exact route for owner peers alone, so an agent, a stranger's
+ * conversation included, cannot call them to switch social mode off.
  */
 function settingsRoutes(ctx, config, fiber) {
   const json = (status, body) => new Response(JSON.stringify(body), {
@@ -342,17 +377,21 @@ function settingsRoutes(ctx, config, fiber) {
     if (typeof next === 'string') return json(400, { ok: false, error: 'invalid', field: next })
     const editor = ctx.get('configEditor')
     const entry = ownEntry(editor, fiber)
-    if (entry === undefined || !plainSettings(entry.options?.config)) {
-      return json(409, { ok: false, error: 'unavailable' })
-    }
+    if (entry === undefined) return json(409, { ok: false, error: 'unavailable' })
+    if (!plainSettings(entry.options?.config)) return json(409, { ok: false, error: 'expression' })
     const stale = new Error('stale')
+    const expression = new Error('expression')
     try {
       await editor.edit(entry, (current, inherited) => {
+        // The editor reads the profile afresh: a `!!js` value written there since the
+        // check above reads as a default, and the revision alone would not notice.
+        if (!plainSettings(current)) throw expression
         if (revisionOf(editableSettings(current)) !== body.revision) throw stale
         return withSettings(current, next, inherited)
       })
     } catch (error) {
       if (error === stale) return json(409, { ok: false, error: 'stale' })
+      if (error === expression) return json(409, { ok: false, error: 'expression' })
       const message = String(error?.message ?? error)
       // dsh refuses a value a home patch or a command-line overlay would override anyway.
       const overridden = /overridden/i.test(message)
@@ -389,8 +428,8 @@ function ownEntry(editor, fiber) {
 function editableSettings(raw) {
   const config = raw !== null && typeof raw === 'object' ? raw : {}
   return {
-    language: languageOf(config.language),
     companion: config.companion === true,
+    audience: config.audience === 'social' ? 'social' : 'private',
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
@@ -399,15 +438,17 @@ function editableSettings(raw) {
 const revisionOf = (shown) => JSON.stringify(shown)
 
 /**
- * Whether the settings the page edits are plain values in `raw`: absent, or the string,
- * boolean and numbers apply() reads. A `!!js` expression arrives as an object and is
+ * Whether the settings the page edits are plain values in `raw`: absent, or the boolean,
+ * string and numbers apply() reads. A `!!js` expression arrives as an object and is
  * evaluated by dsh, so the page can neither show it nor treat it as a default.
  */
 function plainSettings(raw) {
   const config = raw !== null && typeof raw === 'object' ? raw : {}
+  // The whole row written as one `!!js` expression: dsh hands it over as `{ __jsExpr }`.
+  if (Object.hasOwn(config, '__jsExpr')) return false
   const plain = {
-    language: (v) => typeof v === 'string',
     companion: (v) => typeof v === 'boolean',
+    audience: (v) => typeof v === 'string',
     maxLines: (v) => typeof v === 'number',
     maxBytes: (v) => typeof v === 'number',
   }
@@ -418,12 +459,12 @@ function plainSettings(raw) {
 function parseSettings(body) {
   if (body === null || typeof body !== 'object') return 'body'
   if (typeof body.revision !== 'string') return 'revision'
-  if (body.language !== 'en' && body.language !== 'zh') return 'language'
   if (typeof body.companion !== 'boolean') return 'companion'
+  if (body.audience !== 'private' && body.audience !== 'social') return 'audience'
   for (const [key, max] of [['maxLines', MAX_CAP_LINES], ['maxBytes', MAX_CAP_BYTES]]) {
     if (!Number.isInteger(body[key]) || body[key] < 1 || body[key] > max) return key
   }
-  return { language: body.language, companion: body.companion, maxLines: body.maxLines, maxBytes: body.maxBytes }
+  return { companion: body.companion, audience: body.audience, maxLines: body.maxLines, maxBytes: body.maxBytes }
 }
 
 /**
@@ -439,11 +480,11 @@ function withSettings(current, next, inherited) {
     if (isDefault) delete out[key]
     else out[key] = value
   }
-  set('language', next.language, next.language === 'en')
   set('companion', true, !next.companion)
+  set('audience', 'social', next.audience === 'private')
   set('maxLines', next.maxLines, next.maxLines === DEFAULT_MAX_LINES)
   set('maxBytes', next.maxBytes, next.maxBytes === DEFAULT_MAX_BYTES)
-  const managed = ['language', 'companion', 'maxLines', 'maxBytes']
+  const managed = ['companion', 'audience', 'maxLines', 'maxBytes']
   const others = (config) => Object.fromEntries(Object.entries(config ?? {})
     .filter(([key]) => !managed.includes(key)))
   const base = inherited !== null && typeof inherited === 'object' ? inherited : {}
@@ -630,7 +671,7 @@ const SPEAKERS = {
 }
 
 /**
- * Who a session is talking to, in companion mode (大肥鱼模式):
+ * Who a session is talking to, in social mode:
  *   'owner'    the user's own conversation: the user has written in it (speakerOf) and
  *              nobody else ever has;
  *   'stranger' any other: one a chat bridge, a script or a schedule opened, and one an
@@ -680,7 +721,7 @@ const PATH_ARGS = ['file_path', 'path', 'filePath', 'filename', 'file', 'target_
 const TREE_SEARCHES = new Set(['grep', 'glob'])
 
 /**
- * In companion mode, a stranger's conversation may not point a file tool at a memory
+ * In social mode, a stranger's conversation may not point a file tool at a memory
  * store — not to read it, list it, search it, or write it — and may name files only,
  * never a directory. Refused:
  *   - a path that is a directory: grep and glob walk it, a directory view lists two
@@ -928,7 +969,8 @@ function indexRecall(settings, sessionCwd) {
  */
 function projectStore(cwd, indexName, cache, label) {
   const hit = cache.get(cwd)
-  if (hit !== undefined && Date.now() - hit.at < RECHECK_MS) return hit.store
+  // The label is the current language's: it may have changed since (memoryLanguage).
+  if (hit !== undefined && Date.now() - hit.at < RECHECK_MS) return hit.store && { ...hit.store, label }
   let root = cwd
   for (let dir = cwd; ; dir = dirname(dir)) {
     if (exists(join(dir, '.git'))) {
@@ -1441,8 +1483,32 @@ function indexNameOf(value) {
 }
 
 /**
- * `language: zh` writes the store in Chinese (SKILL.md §1.1); anything else, like the
- * other fields' nonsense values, falls back to the default.
+ * The language the memory is written in (SKILL.md §1.1): `language` where the config names
+ * one (a non-empty string); else dsh's own, as the user chose it in dsh's Settings →
+ * General (the `locale` row's `preference`; a change applies once dsh restarts); else the
+ * language of the system dsh runs on. (dsh's page, with no choice made, follows the
+ * browser's instead: on a remote `dsh web` the two can differ.)
+ */
+function memoryLanguage(ctx, config) {
+  if (typeof config.language === 'string' && config.language.trim()) return languageOf(config.language)
+  try {
+    const row = ctx.get('configEditor')?.entries?.()
+      .find((entry) => entry?.options?.name === '@deepseek-ai/dsh-client-locale')
+    const preference = row?.options?.config?.preference
+    if (typeof preference === 'string' && preference.trim()) return languageOf(preference)
+  } catch {
+    // no profile editor, or a shape this port predates: the system's language decides
+  }
+  try {
+    return languageOf(Intl.DateTimeFormat().resolvedOptions().locale)
+  } catch {
+    return 'en'
+  }
+}
+
+/**
+ * `zh` and its regional forms write the store in Chinese (SKILL.md §1.1); anything else,
+ * like the other fields' nonsense values, falls back to English.
  */
 function languageOf(value) {
   return typeof value === 'string' && /^zh\b/i.test(value.trim()) ? 'zh' : 'en'
@@ -1479,11 +1545,10 @@ const TEXT = {
       ' In a companion conversation: anything worth remembering about the user, or ' +
       'about the life you share — a moment, something coming up, a change in yourself.',
     companion:
-      'Companion mode (大肥鱼模式) is on, and this conversation is the user\'s own: they ' +
-      'have written in it in dsh\'s own window, and nobody else has. When you play a ' +
-      'character for the user here — a companion persona, not a coding task — any message ' +
-      'from the user, a greeting included, may call for recall: a date coming up, something ' +
-      'to ask about, an agreement. ' +
+      'Companion mode (大肥鱼模式) is on. When you play a character for the user here — a ' +
+      'companion persona, not a coding task — any message from the user, a greeting ' +
+      'included, may call for recall: a date coming up, something to ask about, an ' +
+      'agreement. ' +
       'Bring it up in character; do not name files, the index, tools or a memory system ' +
       'unless asked. Save what is worth keeping as the Engramory skill describes: who ' +
       'the user is as `user`, how to address them and what never to say as `feedback`, ' +
@@ -1502,7 +1567,7 @@ const TEXT = {
       'memory store is closed to file tools. Do not recall or save anything about the user ' +
       'in it.',
     strangerRefusal:
-      'This conversation is not the user\'s own (Engramory companion mode: someone else has ' +
+      'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
       'written in it, or the user never has in dsh\'s own window), so the memory store is ' +
       'closed to it.',
     head: (label, path) =>
@@ -1540,9 +1605,8 @@ const TEXT = {
       '在陪伴对话里：关于用户、关于你们共同生活的任何值得记住的事——一个时刻、将要发生' +
       '的事、你自己的变化。',
     companion:
-      '大肥鱼模式已打开，这个会话是用户本人的：用户在 dsh 窗口里亲手发过消息，也没有别人在' +
-      '里面说过话。你在这里为用户扮演角色时——陪伴人设，不是编程任务——用户的每句话，包括' +
-      '打招呼，都可能该想起点什么：临近的日子、该问起的事、约定。用你的角色口吻自然带出；除非用户' +
+      '大肥鱼模式已打开。你在这里为用户扮演角色时——陪伴人设，不是编程任务——用户的每句话，' +
+      '包括打招呼，都可能该想起点什么：临近的日子、该问起的事、约定。用你的角色口吻自然带出；除非用户' +
       '问起，不念文件名，不提索引、工具或记忆系统。值得记的照 Engramory skill 的格式写：' +
       '用户是谁记成 `user`，怎么称呼、哪些话别说记成 `feedback`；你们共同的人生分三类记：' +
       '一起经历的、带日期的事记成 `moment`（索引标题 `## 经历`）；用户生活里将要发生的事记成 ' +
@@ -1556,7 +1620,7 @@ const TEXT = {
       '亲手发过消息——所以这里不加载记忆，文件工具也碰不到记忆库。不要在这里回忆或保存关于' +
       '用户的任何事。',
     strangerRefusal:
-      '这个会话不是用户本人的（Engramory 大肥鱼模式：有别人在里面说过话，或者用户从没在 dsh ' +
+      '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
       '窗口里亲手发过消息），记忆库对它关闭。',
     head: (label, path) =>
       `${label}（\`${path}\`），由 dsh-engramory 为你加载：这是你长期记忆的索引，一行` +

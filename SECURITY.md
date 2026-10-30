@@ -27,7 +27,7 @@ formal SLA, but we take memory-content and hook-safety issues seriously.
   matched direct-edit tools (`Edit | Write | MultiEdit`) — not shell tools (Bash,
   PowerShell, a background Monitor command), MCP file tools, external editors, or
   sync clients. It is not a global write guard.
-- The dsh plugin's **companion mode** keeps the user's memory out of conversations
+- The dsh plugin's **social mode** keeps the user's memory out of conversations
   that are not theirs — any that a chat bridge, a program or anyone else has written in
   — by not injecting it there and refusing dsh's own file tools pointed at a store. It
   tells the user's own messages by what dsh's browser client sends with them, which a

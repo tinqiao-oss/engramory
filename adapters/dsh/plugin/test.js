@@ -20,16 +20,30 @@ import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
 
-function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId, projections = projectionRegistry() } = {}) {
+// Where neither the config nor dsh names a language, the memory follows the system's:
+// pinned here, so the tests read the same on every machine.
+let systemLocale = 'en-US'
+const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions
+Intl.DateTimeFormat.prototype.resolvedOptions = function (...args) {
+  return { ...resolvedOptions.apply(this, args), locale: systemLocale }
+}
+
+function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId, projections = projectionRegistry(), services: extra = {} } = {}) {
   let guard
   const skills = []
-  const skillRegistry = { register: (skill) => { skills.push(skill); return () => {} } }
+  const skillRegistry = {
+    register: (skill) => {
+      skills.push(skill)
+      return () => { if (skills.includes(skill)) skills.splice(skills.indexOf(skill), 1) }
+    },
+  }
   const services = {
     tools: { guard: (fn) => { guard = fn; return () => {} } },
     ...(withSkills ? { skills: skillRegistry } : {}),
     ...(workingDirectory ? { workingDirectory } : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
     ...(projections ? { sessionProjections: projections } : {}),
+    ...extra,
   }
   // Mirrors Cordis' reflective context (issue #8): only services named in the
   // caller's inject are readable as properties — anything else throws and must go
@@ -1132,7 +1146,7 @@ const TYPED = said({ kind: 'user', rpcId: 'r-1', clientTimeZone: 'Asia/Shanghai'
 const QQ = said({ kind: 'plugin:dsh-onebot' })
 const own = (id, cwd, ...more) => sessionOf(id, cwd, {}, [TYPED, ...more])
 const theirs = (id, cwd) => sessionOf(id, cwd, {}, [QQ])
-const COMPANION = { companion: true }
+const COMPANION = { companion: true, audience: 'social' }
 
 test('companion mode: the user\'s own conversation gets the index and the rules', () => {
   const project = scratch('companion')
@@ -1587,9 +1601,56 @@ test('companion mode keeps its notes with injectIndex: false, which only drops t
     { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
   const mine = see(own('own-1', project))
-  assert.match(mine, /^大肥鱼模式已打开，这个会话是用户本人的/)
+  assert.match(mine, /^大肥鱼模式已打开。你在这里为用户扮演角色时/)
   assert.doesNotMatch(mine, /first/)
   assert.match(see(theirs('douyin-3', project)), /不是用户本人的/)
+})
+
+test('the memory language follows dsh: the config first, then dsh\'s own choice, then the system\'s', () => {
+  const chinese = (skill) => skill.content.startsWith('# Engramory — 策展式文件记忆')
+  const locale = (preference) => ({ configEditor: { entries: () => [
+    { options: { id: 'locale', name: '@deepseek-ai/dsh-client-locale', config: preference === undefined ? {} : { preference } } },
+  ] } })
+  systemLocale = 'zh-CN'
+  try {
+    assert.equal(chinese(mount({}).skills[0]), true, 'nothing chosen: the system\'s')
+    assert.equal(chinese(mount({}, { services: locale(undefined) }).skills[0]), true, 'dsh left to the system')
+    assert.equal(chinese(mount({}, { services: locale('en') }).skills[0]), false, 'dsh set to English')
+    assert.equal(chinese(mount({ language: 'en' }, { services: locale('zh') }).skills[0]), false, 'the config wins')
+    // an editor that fails, or none: the system's
+    assert.equal(chinese(mount({}, { services: { configEditor: { entries: () => { throw new Error('x') } } } }).skills[0]), true)
+  } finally {
+    systemLocale = 'en-US'
+  }
+  assert.equal(chinese(mount({}).skills[0]), false)
+  assert.equal(chinese(mount({}, { services: locale('zh-CN') }).skills[0]), true, 'dsh set to Chinese')
+  assert.equal(chinese(mount({ language: 'zh' }).skills[0]), true)
+})
+
+test('a profile editor that comes up after the plugin still sets the language, skill and index alike', () => {
+  // dsh activates services in no fixed order: the editor that holds dsh's language may
+  // arrive after this plugin has registered its skill in the system's language
+  const project = scratch('lang')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  systemLocale = 'zh-CN'
+  try {
+    const m = mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    assert.equal(m.skills.length, 1)
+    assert.ok(m.skills[0].content.startsWith('# Engramory — 策展式文件记忆'))
+    // the index already shown, and its project store remembered, before the editor arrives
+    const home = scratch('home')
+    assert.match(withDshHome(home, () => prompt.render(at(project))), /^项目记忆索引/)
+    m.mountLate('configEditor', { entries: () => [
+      { options: { id: 'locale', name: '@deepseek-ai/dsh-client-locale', config: { preference: 'en' } } },
+    ] })
+    assert.equal(m.skills.length, 1, 'registered again, not twice')
+    assert.ok(m.skills[0].content.startsWith('# Engramory — curated file-based memory'))
+    const text = withDshHome(home, () => prompt.render(at(project)))
+    assert.match(text, /^Project memory index/)
+  } finally {
+    systemLocale = 'en-US'
+  }
 })
 
 test('an unknown language falls back to English', () => {
@@ -1635,12 +1696,57 @@ test('companion context is required, so a persona preset with optional context o
   assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
   assert.match(owner, /Companion mode \(大肥鱼模式\)/)
   assert.match(off(theirs('douyin-1', project)), /not the user's own/)
-  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]), [['engramory:companion', true]])
+  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]), [['engramory:memory', true]])
 
-  // companion mode off: the index stays optional, as every preset expects
-  const plain = promptRegistry()
-  mount({}, { workingDirectory: sessionDirs(), systemPrompt: plain })
-  assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]), [['engramory:memory-index', false]])
+  // companion mode, private, makes it required too; without companion mode the index stays
+  // optional, as every preset expects — `audience: social` alone changes nothing
+  const one = promptRegistry()
+  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: one })
+  assert.deepEqual(one.contexts.map((c) => [c.name, c.required === true]), [['engramory:memory', true]])
+  for (const config of [{}, { audience: 'social' }]) {
+    const plain = promptRegistry()
+    mount(config, { workingDirectory: sessionDirs(), systemPrompt: plain })
+    assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]), [['engramory:memory-index', false]])
+  }
+})
+
+test('memory access is a choice inside companion mode: private by default, social only with companion mode on', () => {
+  const project = scratch('companion')
+  store(project, '- [a](a.md) - first\n')
+  const home = scratch('home')
+  const userIndex = store(home, '- [u](u.md) - user\n')
+  const view = (config) => {
+    const prompt = promptRegistry()
+    const { guard, projections } = mount(config, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    return {
+      text: (session) => withDshHome(home, () => prompt.render(as(session))),
+      read: (session) => withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) })),
+      units: projections.units.size,
+    }
+  }
+  // companion mode, private: every conversation is the user's — a bridge's too
+  const solo = view({ companion: true })
+  for (const session of [own('own-1', project), theirs('qq-1', project), sessionOf('sched', project, {}, [said({ kind: 'schedule' })])]) {
+    assert.match(solo.text(session), /- first[\s\S]*Companion mode \(大肥鱼模式\) is on/)
+    assert.equal(solo.read(session), undefined)
+  }
+  assert.equal(solo.units, 0, 'private: nothing folds who wrote what')
+  // social without companion mode changes nothing: the plain index, for everyone
+  const alone = view({ audience: 'social' })
+  assert.match(alone.text(theirs('qq-1', project)), /- first/)
+  assert.doesNotMatch(alone.text(own('own-1', project)), /Companion mode|not the user's own/)
+  assert.equal(alone.read(theirs('qq-1', project)), undefined)
+  assert.equal(alone.units, 0)
+  // social inside companion mode: the user's own get the memory and the rules, others the note
+  const social = view({ companion: true, audience: 'social' })
+  assert.match(social.text(own('own-1', project)), /- first[\s\S]*Companion mode/)
+  assert.match(social.text(theirs('qq-1', project)), /not the user's own/)
+  assert.match(social.read(theirs('qq-1', project)), /closed to it/)
+  assert.equal(social.units, 1)
+  // only 'social' is social; anything else is the private default
+  for (const audience of ['Social', 'public', true, 1]) {
+    assert.equal(view({ companion: true, audience }).read(theirs('qq-1', project)), undefined, String(audience))
+  }
 })
 
 // --- the settings page's routes (client.js) ---
@@ -1694,7 +1800,7 @@ function webMount(config = {}, { rowConfig = config, extra = {}, editor: makeEdi
 }
 
 const saveBody = (revision, patch = {}) => ({
-  revision, language: 'zh', companion: true, maxLines: 200, maxBytes: 25600, ...patch,
+  revision, companion: true, audience: 'social', maxLines: 200, maxBytes: 25600, ...patch,
 })
 
 test('settings routes: none without a web server, one exact route for both methods with it', () => {
@@ -1707,20 +1813,20 @@ test('settings routes: none without a web server, one exact route for both metho
 
 test('settings GET: the row settings as the plugin reads them, and whether a save can land', async () => {
   const { call } = webMount({}, {
-    rowConfig: { indexName: 'MEMORY.md', language: 'zh-CN', companion: true, maxLines: 0 },
+    rowConfig: { indexName: 'MEMORY.md', language: 'zh-CN', companion: true, audience: 'social', maxLines: 0 },
+    // the language follows dsh: the page neither shows nor writes it
   })
   const { status, body } = await call('GET')
   assert.equal(status, 200)
-  assert.deepEqual(body, {
-    language: 'zh', companion: true, maxLines: 200, maxBytes: 25600,
-    revision: JSON.stringify({ language: 'zh', companion: true, maxLines: 200, maxBytes: 25600 }),
-    editable: true,
-  })
-  // only `true` is companion mode on, as apply() reads it
-  assert.equal((await webMount({}, { rowConfig: { companion: false } }).call('GET')).body.companion, false)
+  const shown = { companion: true, audience: 'social', maxLines: 200, maxBytes: 25600 }
+  assert.deepEqual(body, { ...shown, revision: JSON.stringify(shown), editable: true })
+  // only `true` is companion mode on, and only 'social' is social, as apply() reads them
+  const other = (await webMount({}, { rowConfig: { companion: 'yes', audience: 'public' } }).call('GET')).body
+  assert.equal(other.companion, false)
+  assert.equal(other.audience, 'private')
 })
 
-test('settings route: served by the row the page is keyed to, never by a second row of the package', () => {
+test('settings route: served by the bundle\'s own row, never by a second row of the package', () => {
   assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 1)
   // a second row would claim the same path, or claim it first and have the page save it
   assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
@@ -1741,13 +1847,21 @@ test('settings route: a row of the same id in a nested include does not fail to 
 
 test('settings: a setting written as a !!js expression makes the page read-only, and is never taken for a default', async () => {
   const expression = { __jsExpr: 'true' } // how dsh hands an unevaluated `!!js` value to the editor
-  for (const key of ['companion', 'language', 'maxLines']) {
+  // the whole row's config as one expression: none of the fields is there to check
+  const whole = webMount({}, { rowConfig: { __jsExpr: "({ companion: true, audience: 'social' })" } })
+  const { body: wholeShown } = await whole.call('GET')
+  assert.equal(wholeShown.editable, false)
+  assert.equal(wholeShown.readOnly, 'expression')
+  assert.deepEqual(await whole.call('POST', saveBody(wholeShown.revision)),
+    { status: 409, body: { ok: false, error: 'expression' } })
+  assert.equal(whole.edits.length, 0)
+  for (const key of ['companion', 'audience', 'maxLines']) {
     const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, [key]: expression } })
     const { body } = await w.call('GET')
     assert.equal(body.editable, false, key)
     assert.equal(body.readOnly, 'expression', key)
     assert.deepEqual(await w.call('POST', saveBody(body.revision)),
-      { status: 409, body: { ok: false, error: 'unavailable' } })
+      { status: 409, body: { ok: false, error: 'expression' } })
     assert.equal(w.edits.length, 0)
   }
 
@@ -1762,8 +1876,26 @@ test('settings: a setting written as a !!js expression makes the page read-only,
     }),
   })
   const { body: shown } = await inheritedExpr.call('GET')
-  await inheritedExpr.call('POST', saveBody(shown.revision, { language: 'en', companion: false }))
+  await inheritedExpr.call('POST', saveBody(shown.revision, { companion: false, audience: 'private' }))
   assert.deepEqual(inheritedExpr.edits.at(-1), { indexName: 'MEMORY.md' }) // an override, so the expression no longer applies
+})
+
+test('settings POST refuses a save when the profile it would rewrite now holds an expression', async () => {
+  // the editor reads the profile afresh: a `!!js` value written in between reads as a
+  // default, and the revision alone would not tell
+  const w = webMount({}, {
+    rowConfig: { ...BUNDLE_ROW },
+    editor: (entry, edits) => ({
+      entries: () => [entry],
+      edit: async (target, change) => {
+        edits.push(change({ ...BUNDLE_ROW, audience: { __jsExpr: "'social'" } }, structuredClone(BUNDLE_ROW)))
+      },
+    }),
+  })
+  const { body: shown } = await w.call('GET')
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision, { companion: false, audience: 'private' })),
+    { status: 409, body: { ok: false, error: 'expression' } })
+  assert.equal(w.edits.length, 0)
 })
 
 test('settings GET without the editor: read-only, from the plugin config', async () => {
@@ -1786,11 +1918,11 @@ test('settings POST saves through the profile editor, keeping other fields and w
   // not masked; a key this page does not know is carried over as it is
   assert.deepEqual(w.edits.at(-1), {
     indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false, maxLines: 150,
-    language: 'zh', companion: true,
+    companion: true, audience: 'social',
   })
   // back to the defaults: a field the page does not edit (indexPath) keeps the override
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { language: 'en', companion: false }))
+  await w.call('POST', saveBody(again.revision, { companion: false, audience: 'private' }))
   assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false })
 })
 
@@ -1798,9 +1930,9 @@ test('settings POST back to the defaults on a bundle-only row hands back the inh
   const w = webMount({}, { rowConfig: { ...BUNDLE_ROW } })
   const { body: shown } = await w.call('GET')
   await w.call('POST', saveBody(shown.revision))
-  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', language: 'zh', companion: true })
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', companion: true, audience: 'social' })
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { language: 'en', companion: false }))
+  await w.call('POST', saveBody(again.revision, { companion: false, audience: 'private' }))
   assert.equal(w.edits.at(-1), null) // equal to the inherited config: the editor drops the override
 })
 
@@ -1825,9 +1957,10 @@ test('settings POST rejects malformed values, naming the field, and writes nothi
   const w = webMount({})
   const { body: shown } = await w.call('GET')
   for (const [patch, field] of [
-    [{ language: 'fr' }, 'language'],
     [{ companion: 'true' }, 'companion'],
     [{ companion: undefined }, 'companion'],
+    [{ audience: 'public' }, 'audience'],
+    [{ audience: undefined }, 'audience'],
     [{ maxLines: 0 }, 'maxLines'],
     [{ maxBytes: 1.5 }, 'maxBytes'],
     [{ revision: undefined }, 'revision'],

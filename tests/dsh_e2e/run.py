@@ -61,11 +61,13 @@ from fake_llm import FakeLLM  # noqa: E402
 PROFILE = "headless"
 TASK = "Update my memory index."
 DENIAL = "over the Engramory index cap"  # index.js verdict(): change both together
-SKILL_MARK = "Curated file-based long-term memory"  # the registered skill's description
+# The registered skill's description and the injected index's head, in either language: the
+# plugin writes in dsh's language, else the system's (index.js memoryLanguage()).
+SKILL_MARKS = ("Curated file-based long-term memory", "策展式文件长期记忆")
 # A note line only the seeded project store holds: seen by the model only if the plugin
 # injected the index into its runtime context (index.js renderIndex()).
 RECALL_MARK = "- [e2e-recall-marker](e2e.md) - injected, never read"
-INDEX_HEAD = "Project memory index ("  # index.js renderIndex(): change both together
+INDEX_HEADS = ("Project memory index (", "项目记忆索引（")  # index.js renderIndex(): change both together
 
 # Every tool dsh has offered in a passing run, and why it cannot put the index past the
 # cap behind the guard's back. A tool missing from this table fails the run until
@@ -356,13 +358,13 @@ def check_release(version, plugin, work, node, npm):
 
     first = json.dumps(fake.main[0], ensure_ascii=False)
     check("the task reached the model", TASK in first)
-    check("skill advertised to the model", "engramory" in first and SKILL_MARK in first)
+    check("skill advertised to the model", "engramory" in first and any(m in first for m in SKILL_MARKS))
     # Every release checked so far, 0.1.5 on, carries runtime context; one that stops
     # doing so must fail here rather than quietly stop recalling.
     check("index injected into the runtime context",
-          INDEX_HEAD in first and RECALL_MARK in first,
+          any(h in first for h in INDEX_HEADS) and RECALL_MARK in first,
           "runtime context %s, head %s, marker %s" % (
-              "Current runtime context" in first, INDEX_HEAD in first, RECALL_MARK in first))
+              "Current runtime context" in first, any(h in first for h in INDEX_HEADS), RECALL_MARK in first))
     # Every turn's tool list, not just the first: a host may offer more tools mid-task.
     rosters = [tool_roster(body) for body in fake.main]
     roster = {}

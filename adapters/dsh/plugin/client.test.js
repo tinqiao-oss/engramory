@@ -136,7 +136,7 @@ async function applied() {
     get: () => undefined,
     locale: { register: (ns, dicts) => { dictionaries[ns] = dicts; return () => {} } },
     slots: {
-      inject: (owner, fn) => { assert.equal(owner, 'plugins.row.config'); fn() },
+      inject: (owner, fn) => { assert.equal(owner, 'plugins.bundle.config'); fn() },
       register: (options, component) => { slots.push({ options, component }); return () => {} },
     },
   }
@@ -145,7 +145,7 @@ async function applied() {
 }
 
 const settingsData = (patch = {}) => ({
-  language: 'en', companion: false, maxLines: 200, maxBytes: 25600, editable: true,
+  companion: false, audience: 'private', maxLines: 200, maxBytes: 25600, editable: true,
   ...patch,
   revision: 'r1',
 })
@@ -162,17 +162,15 @@ function fakeFetch(responses) {
   return sent
 }
 
-test('client: registers as the package, on the Plugins page row, with matching dictionaries', async () => {
+test('client: registers as the package, on the package\'s own page, with matching dictionaries', async () => {
   const { registered, mod, dictionaries, slots, styles } = await applied()
   assert.equal(registered.id, 'dsh-engramory')
   assert.deepEqual(mod.inject, ['slots', 'locale'])
   assert.equal(slots.length, 1)
-  assert.equal(slots[0].options.name, 'plugins.row.config')
-  // the Plugins page keys a row's page by `<package>#<row id>`; the row id is the patch's
-  const patch = readFileSync(join(HERE, 'cordis.patch.yml'), 'utf8')
+  // the Plugins page shows a package's own settings above its rows, keyed by package name
+  assert.equal(slots[0].options.name, 'plugins.bundle.config')
   const pkg = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'))
-  assert.match(patch, /- id: engramory\b/)
-  assert.equal(slots[0].options.key, `${pkg.name}#engramory`)
+  assert.equal(slots[0].options.key, pkg.name)
   assert.equal(slots[0].options.locale, 'engramory')
   assert.equal(styles.length, 1)
   const { zh, en } = dictionaries.engramory
@@ -194,11 +192,11 @@ test('client: the summary view is one line, and the page reads the settings rout
   assert.equal(sent[0].url, 'api/engramory/settings')
 })
 
-test('client: switches companion mode on and saves exactly the settings the host edits', async () => {
+test('client: switches companion mode on, chooses social, and saves exactly the settings the host edits', async () => {
   const { slots, react } = await applied()
   const sent = fakeFetch({
     GET: (log) => (log.some((s) => s.method === 'POST')
-      ? settingsData({ companion: true, language: 'zh' })
+      ? settingsData({ companion: true, audience: 'social' })
       : settingsData()),
     POST: { ok: true },
   })
@@ -207,20 +205,30 @@ test('client: switches companion mode on and saves exactly the settings the host
   try {
     const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     await page.settle()
-    assert.match(textOf(page.tree), /companionHint[\s\S]*companionNote/)
+    // memory access is a choice inside companion mode, shown only while it is on
+    assert.match(textOf(page.tree), /companionHint/)
+    assert.equal(button(page.tree, 'audiencePrivate'), undefined)
     const companion = switchFor(page.tree, 'companion')
     assert.equal(companion.props['aria-checked'], false)
     assert.equal(button(page.tree, 'save').props.disabled, true) // nothing changed yet
     companion.props.onClick()
     await page.settle()
     assert.equal(switchFor(page.tree, 'companion').props['aria-checked'], true)
-    button(page.tree, 'languageZh').props.onClick()
+    assert.match(textOf(page.tree), /audiencePrivateHint/)
+    // private or social: one choice of two, its line says what it means
+    assert.equal(button(page.tree, 'audiencePrivate').props['aria-pressed'], true)
+    button(page.tree, 'audienceSocial').props.onClick()
     await page.settle()
+    assert.equal(button(page.tree, 'audienceSocial').props['aria-pressed'], true)
+    assert.equal(button(page.tree, 'audiencePrivate').props['aria-pressed'], false)
+    assert.match(textOf(page.tree), /audienceSocialHint/)
+    assert.doesNotMatch(textOf(page.tree), /audiencePrivateHint/)
     button(page.tree, 'save').props.onClick()
     // the page polls until the reloaded plugin answers with the saved settings
     for (let i = 0; i < 20 && !/\bsaved\b/.test(textOf(page.tree)); i++) await page.settle()
     const post = sent.find((s) => s.method === 'POST')
-    assert.deepEqual(post.body, { revision: 'r1', language: 'zh', companion: true, maxLines: 200, maxBytes: 25600 })
+    assert.deepEqual(post.body,
+      { revision: 'r1', companion: true, audience: 'social', maxLines: 200, maxBytes: 25600 })
     assert.match(textOf(page.tree), /saved/)
   } finally {
     globalThis.setTimeout = realTimeout
@@ -232,7 +240,7 @@ test('client: a stale save reloads the settings and says so; a read-only dsh off
   fakeFetch({ GET: settingsData(), POST: { status: 409, body: { ok: false, error: 'stale' } } })
   const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
-  button(page.tree, 'languageZh').props.onClick()
+  switchFor(page.tree, 'companion').props.onClick()
   await page.settle()
   button(page.tree, 'save').props.onClick()
   await page.settle()
@@ -256,7 +264,7 @@ test('client: a save whose settings never read back says so, and the form is usa
   try {
     const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     await page.settle()
-    button(page.tree, 'languageZh').props.onClick()
+    switchFor(page.tree, 'companion').props.onClick()
     await page.settle()
     button(page.tree, 'save').props.onClick()
     for (let i = 0; i < 300 && !/savedUnconfirmed/.test(textOf(page.tree)); i++) {
@@ -278,7 +286,7 @@ test('client: a save that fails on the network leaves the form usable', async ()
   }
   const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
   await page.settle()
-  button(page.tree, 'languageZh').props.onClick()
+  switchFor(page.tree, 'companion').props.onClick()
   await page.settle()
   button(page.tree, 'save').props.onClick()
   await page.settle()
@@ -316,6 +324,24 @@ test('client: a read-only page names why', async () => {
   await page.settle()
   assert.match(textOf(page.tree), /expression/)
   assert.equal(button(page.tree, 'save'), undefined)
+
+  // an expression written while the page was open: the save is refused, the page reads
+  // the profile again and becomes read-only
+  const second = await applied()
+  fakeFetch({
+    GET: (log) => (log.some((s) => s.method === 'POST')
+      ? settingsData({ editable: false, readOnly: 'expression' })
+      : settingsData()),
+    POST: { status: 409, body: { ok: false, error: 'expression' } },
+  })
+  const open = second.react.mount(second.react.React.createElement(second.slots[0].component, { view: 'page', t: (k) => k }))
+  await open.settle()
+  switchFor(open.tree, 'companion').props.onClick()
+  await open.settle()
+  button(open.tree, 'save').props.onClick()
+  await open.settle()
+  assert.match(textOf(open.tree), /expression/)
+  assert.equal(button(open.tree, 'save'), undefined)
 })
 
 test('client: an index cap that is not a positive whole number blocks the save', async () => {

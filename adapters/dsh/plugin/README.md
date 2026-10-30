@@ -81,10 +81,37 @@ dsh plugin --profile <name> remove dsh-engramory
 
 ## Companion mode (大肥鱼模式)
 
-For a dsh that other people can talk to as well — a character such as the community's
-大肥鱼, wired to QQ, WeChat, Douyin or Bilibili through a bridge plugin. Turn it on with
-`companion: true`, or the switch on the settings page (below). If you are the only one
-who talks to this dsh, leave it off: nothing in this section is needed.
+For a character the user chats with — the community's 大肥鱼, or any persona. Turn it on
+with `companion: true`, or the 大肥鱼模式 switch on the settings page (below).
+
+- **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
+  `moment` — something the character and the user shared, with its date; kept, and
+  folded into a monthly archive when the index fills. `upcoming` — something coming up
+  in the user's life; asked about once its date passes, and rewritten as a `moment`
+  once the user has said how it went. `self` —
+  a change in the character itself, such as a nickname; updated in place, never folded.
+  A `moment` or `self` note is deleted only when the user asks to forget. In a Chinese
+  store their headings are `## 经历`, `## 约定` and `## 我自己`. The other four types
+  keep their meaning.
+- **Recall in character.** The agent is told that, when it plays a character for you,
+  any message, a greeting included, may call for recall, and to speak of what it
+  remembered — or failed to save — in character, without naming files or tools.
+- **The persona preset decides what it can do with memory.** With companion mode or
+  social mode on, what a conversation is given — the memory and its rules, or social
+  mode's note — is a *required* runtime context, so it arrives even under a preset that
+  turns optional context off (dsh-persona's `includeRuntimeContext: false`, as dsh's
+  `minimal` preset does). Saving is another matter: the preset needs dsh's file tools and
+  the skill tool for the character to write notes the way the skill describes. A preset
+  with only a shell can read the memory it is given, and its writes go past the guard.
+
+## Social mode
+
+A choice inside companion mode, for a character other people can talk to as well — one
+wired to QQ, WeChat, Douyin or Bilibili through a bridge plugin. With companion mode on,
+choose *Social* (社交) under *Memory access* (记忆权限) on the settings page, or set
+`audience: social`. The default, *Private* (专属), gives every conversation the memory:
+if only you talk to this dsh, keep it. Without companion mode, `audience` changes
+nothing.
 
 - **Only your own conversations get the memory.** A conversation is yours when you have
   written in it in dsh's own window — the desktop app or `dsh web` — and nobody else has.
@@ -110,26 +137,6 @@ who talks to this dsh, leave it off: nothing in this section is needed.
   and nobody else has written to it directly; a forked conversation is judged by its own
   history, the part it inherited included. A call with no session, a
   dsh without session projections, or a network path counts as someone else's.
-- **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
-  `moment` — something the character and the user shared, with its date; kept, and
-  folded into a monthly archive when the index fills. `upcoming` — something coming up
-  in the user's life; asked about once its date passes, and rewritten as a `moment`
-  once the user has said how it went. `self` —
-  a change in the character itself, such as a nickname; updated in place, never folded.
-  A `moment` or `self` note is deleted only when the user asks to forget. In a Chinese
-  store their headings are `## 经历`, `## 约定` and `## 我自己`. The other four types
-  keep their meaning.
-- **Recall in character.** Your conversations are told that, when the agent plays a
-  character for you, any message, a greeting included, may call for recall, and to speak
-  of what it remembered — or failed to save — in character, without naming files or
-  tools.
-- **The persona preset decides what it can do with memory.** What a conversation is
-  given in companion mode — the memory and its rules, or the note — is a *required*
-  runtime context, so it arrives even under a preset that turns optional context off
-  (dsh-persona's `includeRuntimeContext: false`, as dsh's `minimal` preset does). Saving
-  is another matter: the preset needs dsh's file tools and the skill tool for the
-  character to write notes the way the skill describes. A preset with only a shell can
-  read the memory it is given, and its writes go past the guard.
 
 This keeps the user's memory out of others' context by the routes dsh's own file tools
 take. It is **not** a security boundary: a shell tool reads any file, and a different
@@ -138,7 +145,7 @@ the store needs filesystem permissions or a sandbox.
 
 ### For bridge authors: marking who wrote a message
 
-With companion mode on, every message a bridge submits counts as someone else's. For the
+With social mode on, every message a bridge submits counts as someone else's. For the
 owner's own chat to get the memory — their private QQ chat with the character, say —
 put a `speaker` on the message's source:
 
@@ -166,8 +173,9 @@ program forwarding other people's messages must leave `clientTimeZone` out.
 
 ## Settings page
 
-On dsh's **Plugins** page, open *Engramory memory* and then its row: the page sets the
-memory language, companion mode — one switch — and the index cap.
+On dsh's **Plugins** page, open *Engramory memory*: its page sets companion mode (a
+switch) and, while it is on, its memory access (private or social), and the index cap.
+The memory's language follows dsh's own (see `language` below).
 
 Saving goes through dsh's own profile editor: it validates the whole config, writes it
 to your profile's `cordis.patch.yml`, and reloads the plugin with it — or leaves the
@@ -176,9 +184,9 @@ refused, and the page reads them again. Settings put back to their defaults remo
 their override instead of pinning it. Other fields (`indexName`, `indexPath`, …) stay
 in the file.
 
-Only your signed-in browser reaches the page's route: dsh answers 401 to a request
-without its login cookie and 403 to a cross-site one, so an agent cannot call it to turn
-companion mode off. A dsh without the profile editor shows the page read-only.
+Only you reach the page's route — your signed-in browser, or a program holding your
+login: dsh answers 401 to a request without it and 403 to a cross-site one, so an agent
+cannot call it to switch social mode off. A dsh without the profile editor shows the page read-only.
 
 ## Configuration
 
@@ -190,8 +198,9 @@ companion mode off. A dsh without the profile editor shows the page read-only.
 | `indexPath` | unset | Absolute path of the ONE index to guard. Without it the guard matches on basename alone, so an unrelated `MEMORY.md` in another project is gated too; set this and only that exact file is. Compared by identity — the file the write lands on, whatever it is called (symlinks and `..` resolved; case-folded on Windows only) — and a path that does not exist yet still has its first write guarded. |
 | `registerSkill` | `true` | Set `false` to keep the cap but skip the runtime skill. |
 | `injectIndex` | `true` | Put the memory index into dsh's runtime context on every step (see above). Set `false` to recall by reading the file instead. |
-| `language` | `en` | `zh` writes the store in Chinese (SKILL.md §1.1): Chinese note names, `## 用户` / `## 反馈` / `## 项目` / `## 参考` headings, `**为什么：**` / `**怎么用：**` labels, and the skill and the injected index in Chinese. Frontmatter keys and `type:` values stay English, so every host still reads the store. The cap's refusals stay English. `zh` and its regional forms (`zh-CN`, `zh-TW`, …) select Chinese; any other value falls back to `en`. |
-| `companion` | `false` | `true` turns companion mode on (above): only your own conversations get the memory. Only the boolean `true` counts. |
+| `language` | dsh's | Unset (or empty), the memory follows dsh's language — the one chosen in dsh's Settings → General, else the language of the system dsh runs on (dsh's page, with no choice made, follows the browser's, so on a remote `dsh web` the two can differ); a change applies once dsh restarts. Set it to pin one: `zh` writes the store in Chinese (SKILL.md §1.1): Chinese note names, `## 用户` / `## 反馈` / `## 项目` / `## 参考` headings, `**为什么：**` / `**怎么用：**` labels, and the skill and the injected index in Chinese. Frontmatter keys and `type:` values stay English, so every host still reads the store. The cap's refusals stay English. `zh` and its regional forms (`zh-CN`, `zh-TW`, …) select Chinese; any other string selects `en`. |
+| `companion` | `false` | `true` turns companion mode on (above): three more types for the character's own life, and recall in character. Only the boolean `true` counts. |
+| `audience` | `private` | With companion mode on, `social` turns social mode on (above): only your own conversations get the memory. Any other value is `private`, where every conversation does. Without companion mode it changes nothing. |
 | `skill` | built-in | Replace the skill body with your own markdown. |
 
 ## What the guard actually does
@@ -239,10 +248,10 @@ file's line endings when sizing the result, including CRLF bytes.
   from `$DSH_HOME`, resolved the way dsh resolves it. What is injected is framed as notes,
   not instructions, that may be stale; a host without runtime context
   (no `ctx.systemPrompt.context`) goes without it.
-- **Companion mode knows your typing by what dsh's browser client sends.** A program that
+- **Social mode knows your typing by what dsh's browser client sends.** A program that
   sends the same request id and time zone as dsh's own page is taken for you, and a
   browser whose time zone cannot be read leaves your messages unmarked. dsh's terminal,
-  editor (ACP) and SDK clients do not mark them either: with companion mode on, only
+  editor (ACP) and SDK clients do not mark them either: with social mode on, only
   dsh's own window counts.
 - **Some of dsh's messages carry no author.** An answer to the agent's question, a
   scheduled prompt and a message a slash command adds (`/plan <text>`, `/goal`'s
@@ -255,10 +264,10 @@ file's line endings when sizing the result, including CRLF bytes.
   it: a conversation of yours may lose the memory, never the other way round.
 - dsh's plugin API can change. The plugin uses `ctx.tools.guard()` and reactive
   `ctx.inject()` children for the skill registry, the session working directory, the
-  prompt registry, and — in companion mode — dsh's session projections, where it folds
+  prompt registry, and — in social mode — dsh's session projections, where it folds
   who has written in each session; a compatible-release declaration needs recorded host
   evidence, not just unit tests. The recorded end-to-end runs cover the cap, the skill
-  and the injected index; companion mode and the settings page were checked by hand on
+  and the injected index; companion mode, social mode and the settings page were checked by hand on
   a real dsh (0.2.1-rc.5) — messages typed in dsh's window, sent by `dsh headless` and by
   a program through dsh web's API, and a save through the page — but are not part of that
   record yet.
