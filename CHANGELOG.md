@@ -6,6 +6,17 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.5 — 2026-10-31
+
+dsh's sidebar entry and the memory page's title catch up with the new logo. How memory
+is stored, recalled and guarded does not change.
+
+- **dsh: the sidebar's Memory entry has the logo as its icon** — `[[ ]]` around a cursor
+  in place of the book, drawn in the sidebar's own colour like dsh's own entries, so it
+  follows the light and dark themes. The entry is still called 记忆 / *Memory*.
+- **dsh: the memory page is titled with the plugin's name** — 「Engramory 记忆」 /
+  *Engramory memory*, as on its card in the Plugins page.
+
 ## 1.0.4 — 2026-10-31
 
 A logo and a new first line. How memory is stored, recalled and guarded does not change.

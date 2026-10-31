@@ -60,6 +60,7 @@ window.__ModuleLoader__.load({
       invalid: '有一项填得不对：',
       failed: '保存失败：',
       panel: '记忆',
+      panelTitle: 'Engramory 记忆',
       memoryIntro: 'AI 自己记下的东西，这里只看不改。点名字用电脑上的默认程序打开。',
       memoryIntroNoOpen: 'AI 自己记下的东西，这里只看不改。',
       refresh: '刷新',
@@ -127,6 +128,7 @@ window.__ModuleLoader__.load({
       invalid: 'One field is not acceptable: ',
       failed: 'Saving failed: ',
       panel: 'Memory',
+      panelTitle: 'Engramory memory',
       memoryIntro: 'What the AI has noted down for itself — to look at, not to edit. Click a name to open it in your computer\'s default app.',
       memoryIntroNoOpen: 'What the AI has noted down for itself — to look at, not to edit.',
       refresh: 'Refresh',
@@ -597,7 +599,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       return h('div', { className: 'eng-memory' },
         h('header', { className: 'eng-memory-head' },
           h('div', null,
-            h('h1', { className: 'eng-memory-title' }, t('panel')),
+            h('h1', { className: 'eng-memory-title' }, t('panelTitle')),
             h('p', { className: 'eng-memory-intro' }, t(data !== undefined && !canOpen ? 'memoryIntroNoOpen' : 'memoryIntro'))),
           h('button', { type: 'button', className: 'eng-btn', onClick: () => { setStatus(undefined); load() } }, t('refresh'))),
         h(SettingsStrip, { t }),
@@ -606,13 +608,14 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         body)
     }
 
-    /** The sidebar entry's icon: a book, drawn in the row's own colour at the size it asks for. */
+    /** The sidebar entry's icon: the logo, [[ ]] around a cursor, drawn in the row's own colour
+     * (so it follows dsh's light and dark themes) at the size it asks for. */
     function MemoryIcon({ size }) {
       return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
-        strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      h('path', { d: 'M6 3.5h11.5v14H7.25A1.75 1.75 0 0 0 5.5 19.25V5A1.5 1.5 0 0 1 6 3.5z' }),
-      h('path', { d: 'M5.5 19.25A1.75 1.75 0 0 0 7.25 21h10.25v-3.5' }),
-      h('path', { d: 'M9 8h5.5M9 11h3.5' }))
+        strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+      h('path', { d: 'M5.1 3.5H2.5v17h2.6M9.2 3.5H6.6v17h2.6' }),
+      h('path', { d: 'M18.9 3.5h2.6v17h-2.6M14.8 3.5h2.6v17h-2.6' }),
+      h('rect', { x: 10.4, y: 7, width: 3.2, height: 10, rx: 1, fill: 'currentColor', stroke: 'none' }))
     }
 
     return {
