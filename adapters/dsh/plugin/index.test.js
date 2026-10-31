@@ -289,6 +289,9 @@ test("another plugin's write taking `path` is still judged on it", () => {
   const path = join(dir, INDEX)
   writeFileSync(path, big(10), 'utf8')
   assert.match(mount().guard({ name: 'write', arguments: { path, content: big(300) } }), /300 lines/)
+  // and a decoy file_path beside it does not hide it
+  assert.match(mount().guard({ name: 'write',
+    arguments: { file_path: join(dir, 'CHANGELOG.md'), path, content: big(300) } }), /300 lines/)
 })
 
 test('an index name with replacement patterns is named as written', () => {

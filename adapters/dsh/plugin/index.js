@@ -1658,17 +1658,12 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
         || args.command === 'insert'))
   if (!gated) return undefined
 
-  // The path the tool writes, in the name its schema gives it: dsh's `write` / `edit`
-  // take `file_path`, `str_replace_editor` takes `path`, and dsh ignores a field a tool
-  // does not declare — so a decoy `file_path` beside the editor's real `path` let a
-  // write to the index pass as one to README.md. The other name is read only when the
-  // tool's own is missing (another plugin's `write` may take `path`). A tool not known
-  // here is judged under both names.
-  const own = (first, second) => [typeof first === 'string' ? first : second]
-  const paths = (tool === 'write' || tool === 'edit') ? own(args.file_path, args.path)
-    : tool === 'str_replace_editor' ? own(args.path, args.file_path)
-      : [args.file_path, args.path]
-  for (const filePath of new Set(paths.filter((p) => typeof p === 'string'))) {
+  // Every path the call names is judged: dsh's `write` / `edit` take `file_path`,
+  // `str_replace_editor` takes `path`, another plugin's `write` may take `path`, and dsh
+  // ignores a field a tool does not declare — so reading one name only let a decoy in
+  // the other hide a write to the index (it passed as one to README.md). A call naming
+  // the index in a field its tool ignores may be refused; that costs nothing.
+  for (const filePath of new Set([args.file_path, args.path].filter((p) => typeof p === 'string'))) {
     const reason = judgeWrite(exec, args, tool, filePath, settings, sessionCwd)
     if (reason !== undefined) return reason
   }

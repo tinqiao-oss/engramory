@@ -17,8 +17,9 @@ finding checked against the code), most costly first.
   predicted to change nothing and passed, while dsh wrote the real edit. dsh's `edit` is
   now judged on its own arguments alone, `str_replace_editor` on its own, and a tool
   whose schema is not known here on every reading (any one that grows past the cap
-  refuses). The same holds for the path: `str_replace_editor` writes `path`, and a
-  decoy `file_path` beside it passed a write to the index as one to another file. And
+  refuses). The same held for the path: `str_replace_editor` writes `path`, and a
+  decoy `file_path` beside it passed a write to the index as one to another file; every
+  path a call names (`file_path`, `path`) is now judged. And
   `str_replace_editor` is now simulated as it matches, on the text as read: normalising
   line endings for it saw two matches in a file mixing CRLF and LF where it sees one.
 - **Uninstall and `--install-skill --force` no longer delete a store kept inside the

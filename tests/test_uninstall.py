@@ -693,3 +693,19 @@ def test_a_skill_file_name_that_is_a_directory_is_never_rmtreed(tmp_path):
     assert (skill / "LICENSE" / "MEMORY.md").is_file(), "UNINSTALL DELETED A STORE"
     code, out = _run("codex", tmp_path, "--install-skill", "--force")
     assert code != 0 and "did not put there" in out, out
+
+
+def test_a_template_that_is_not_a_regular_file_is_not_read(tmp_path):
+    """A FIFO in templates/ blocked the template hash read, dry-run included."""
+    import os
+    if not hasattr(os, "mkfifo"):
+        return
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    example = tmp_path / ".agents" / "skills" / "engramory" / "templates" / "example-feedback.md"
+    example.unlink()
+    os.mkfifo(example)
+    proc = subprocess.run([sys.executable, str(INIT), "codex", "--project-root", str(tmp_path),
+                           "--uninstall", "--dry-run"], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "example-feedback.md" in proc.stdout + proc.stderr

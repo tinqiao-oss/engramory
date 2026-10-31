@@ -385,7 +385,8 @@ def _not_ours(skill_root, name):
                         not f.is_file() or f.is_symlink() or f.suffix != ".pyc"
                         for f in entry.iterdir()):
                     others.append(entry.name + "/")
-            elif entry.name not in _PAYLOAD_FILES[name]:
+            elif entry.name not in _PAYLOAD_FILES[name] or not entry.is_file():
+                # not a regular file (a FIFO would block the read below): not ours
                 others.append(entry.name)
             elif name == "templates":
                 if entry.stat().st_size > _TEMPLATE_MAX_BYTES:
