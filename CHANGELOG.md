@@ -6,6 +6,37 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.1 — 2026-10-31
+
+Documentation and packaging. The plugin's runtime is unchanged; the one other code
+change is the dsh guidance `engramory_init.py` writes (below).
+
+- **The READMEs default to Chinese and start with dsh.** At the repo root and in
+  `adapters/dsh/plugin/`, `README.md` is now Chinese and `README.en.md` English;
+  `README.zh-CN.md` is gone, so links to it break, and a link to an English section
+  (`README.md#versioning`) now needs `README.en.md`. The root README opens with the
+  dsh plugin (what it does, a screenshot, the install command) and puts the other hosts
+  after. The npm page and both manifests' descriptions are Chinese too, and both
+  manifests' homepage is now `adapters/dsh/plugin`.
+- **Shorter docs.** The four READMEs are about half their size; PORTING, hooks/INSTALL,
+  the Codex, Kiro, OpenClaw and reader adapters, SECURITY, CONTRIBUTING and
+  tests/dsh_e2e lose about 30%. The rules, limits and security caveats stay;
+  implementation detail is left to the code and tests.
+- **One dsh page.** `adapters/dsh/README.md` is removed; the plugin README covers the
+  plugin and, under *Install*, Engramory on dsh without it. The block
+  `engramory_init.py dsh` writes into `AGENTS.md` points there, and no longer says dsh
+  cannot mount third-party plugins; re-run the installer to refresh it.
+- **Storefront details.** The plugin README shows the settings page, the memory page
+  and companion mode; `screenshots.json` points plugin directories at the same images,
+  which stay out of the npm package. Both manifests name the author (`tinqiao-oss`).
+- The plugin's test file is `index.test.js` (was `test.js`), which dsh-xray reads as
+  test code: it had rated the plugin C3, "executes system commands", for the test's
+  `child_process` import, though npm never shipped it. A test keeps every unshipped
+  script in the plugin directory test-named.
+- `index.js` changes only in a comment; recorded again end to end on the 12 dsh
+  releases it declares.
+- dsh-engramory **1.0.1**.
+
 ## 1.0.0 — 2026-10-30
 
 - **One version number for the repo and the dsh plugin.** This release is Engramory

@@ -12,7 +12,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.0.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
+> **状态:1.0.1。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 

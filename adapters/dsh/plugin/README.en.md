@@ -194,6 +194,9 @@ writable. This table is pinned by `node --test` in CI.
   time zone cannot be read. A kind of
   message a later dsh adds counts as someone else's until this plugin knows it: your
   conversation may lose the memory, never the other way round.
+- **What the memory page opens is checked by path.** dsh's opener resolves the path once
+  more before the desktop opens it, so a process changing the store's files at that
+  moment could redirect what opens (as with dsh's own opener for any workspace file).
 - **Experimental:** companion mode, social mode, and the settings and memory pages may
   change in a minor version.
 

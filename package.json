@@ -8,7 +8,7 @@
     "with the plugin's own package.json — bump both together."
   ],
   "name": "dsh-engramory",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "DeepSeek Harness 的长期记忆插件（仓库根的发现清单，可安装的包在 adapters/dsh/plugin/）",
   "author": "tinqiao-oss",

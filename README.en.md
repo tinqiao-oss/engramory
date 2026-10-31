@@ -20,7 +20,7 @@ approach works with Claude Code, Codex and other AI tools.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.0.0.** The store format, the tools and the index caps now change
+> **Status: 1.0.1.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ![The memory page in dsh](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)

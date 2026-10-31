@@ -2090,7 +2090,7 @@ function languageOf(value) {
 
 /**
  * Everything this plugin says to the model, per language. The two must state the same
- * rules — adapters/dsh/plugin/test.js asserts each rule in both — and the store
+ * rules — adapters/dsh/plugin/index.test.js asserts each rule in both — and the store
  * labels in `labels` must be the ones the skill tells the model to look for.
  */
 const TEXT = {
