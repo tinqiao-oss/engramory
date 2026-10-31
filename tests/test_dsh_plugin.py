@@ -43,7 +43,12 @@ def test_dsh_plugin_guard_suite_passes():
         encoding="utf-8",
         errors="replace",
     )
-    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-4000:]
+    out = proc.stdout + proc.stderr
+    # the failing tests themselves, which the output's tail alone leaves out
+    lines = out.splitlines()
+    failed = [i for i, line in enumerate(lines) if line.lstrip().startswith("not ok")]
+    detail = "\n\n".join("\n".join(lines[i:i + 40]) for i in failed[:3])
+    assert proc.returncode == 0, detail or out[-4000:]
 
 
 def test_dsh_plugin_declares_the_discovery_keyword():

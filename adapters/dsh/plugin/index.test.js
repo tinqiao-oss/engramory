@@ -2664,8 +2664,10 @@ test('memory GET: the check-up never looks through a link — a note\'s, or the 
     Object.assign(promises, natives)
     syncBuiltinESMExports()
   }
-  // a link is not judged; with no link made, x.md is simply not there
-  assert.deepEqual([health.checked, health.broken], [true, linkedNote === null ? ['x.md'] : []])
+  // a link is not judged; with no link made, x.md is simply not there; and Archive is the
+  // linked archive only on a disk that takes it for archive — elsewhere it is not there
+  assert.deepEqual([health.checked, health.broken], [true,
+    [...(linkedNote === null ? ['x.md'] : []), ...(caselessAt(dir) ? [] : ['Archive/z.md'])]])
   // (the store's own folder is stat'ed when it is found, before any check-up)
   const real = realpathSync.native(dir)
   assert.deepEqual(seen.filter(([name, p]) => (name === 'stat' && p !== dir && p !== real) || p.startsWith(outside)), [])
