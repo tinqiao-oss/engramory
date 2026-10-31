@@ -3017,10 +3017,12 @@ test('memory GET: a store that cannot be read is left out and counted; one not t
   // the page reads node:fs/promises through its ES namespace: patch the module, then sync it
   const { syncBuiltinESMExports } = await import('node:module')
   const promises = (await import('node:fs/promises')).default
-  // refused past resolving it (Node's walk would get round a refused realpath, as recall does)
+  // refused past resolving it (Node's walk would get round a refused realpath, as recall does):
+  // the folder as resolved, which a runner's temp path is not (an 8.3 name, macOS's /private)
+  const real = realpathSync.native(dir).toLowerCase()
   const native = promises.stat
   promises.stat = async (p, ...rest) => {
-    if (String(p).toLowerCase() === dir.toLowerCase()) throw Object.assign(new Error('EACCES: refused'), { code: 'EACCES' })
+    if (String(p).toLowerCase() === real) throw Object.assign(new Error('EACCES: refused'), { code: 'EACCES' })
     return native(p, ...rest)
   }
   syncBuiltinESMExports()
