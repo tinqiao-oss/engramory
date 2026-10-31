@@ -215,7 +215,7 @@ export function apply(ctx, config = {}) {
         dispose = inner.skills.register({
           name: 'engramory',
           // the description names the index the user configured, not always MEMORY.md
-          description: settings.text.description.replace('MEMORY.md', storesOf(settings).indexName) +
+          description: settings.text.description.replace('MEMORY.md', () => storesOf(settings).indexName) +
             (settings.companion ? settings.text.descriptionCompanion : ''),
           whenToUse: settings.text.whenToUse +
             (settings.companion ? settings.text.whenToUseCompanion : ''),
@@ -1646,14 +1646,6 @@ function withinCap(text, settings, used = 0) {
 function refuseOversizedIndex(exec, settings, sessionCwd) {
   const args = exec?.arguments
   if (!args || typeof args !== 'object') return undefined
-
-  // dsh's file tools carry the target as `file_path`; `str_replace_editor` calls it
-  // `path`.
-  const filePath = typeof args.file_path === 'string' ? args.file_path
-    : typeof args.path === 'string' ? args.path
-      : undefined
-  if (filePath === undefined) return undefined
-
   const tool = typeof exec.name === 'string' ? exec.name : ''
 
   // Nothing below can refuse a read, a view, or an unknown tool, so leave before
@@ -1665,6 +1657,24 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
       && (args.command === 'create' || args.command === 'str_replace'
         || args.command === 'insert'))
   if (!gated) return undefined
+
+  // The path the tool writes, in the name its schema gives it: dsh's `write` / `edit`
+  // take `file_path`, `str_replace_editor` takes `path`, and dsh ignores a field a tool
+  // does not declare — so a decoy `file_path` beside the editor's real `path` let a
+  // write to the index pass as one to README.md. A tool not known here is judged
+  // under both names.
+  const paths = (tool === 'write' || tool === 'edit') ? [args.file_path]
+    : tool === 'str_replace_editor' ? [args.path]
+      : [args.file_path, args.path]
+  for (const filePath of new Set(paths.filter((p) => typeof p === 'string'))) {
+    const reason = judgeWrite(exec, args, tool, filePath, settings, sessionCwd)
+    if (reason !== undefined) return reason
+  }
+  return undefined
+}
+
+/** refuseOversizedIndex() for one path a gated call may write. */
+function judgeWrite(exec, args, tool, filePath, settings, sessionCwd) {
   // Every read and identity check below uses the file the host will actually touch.
   let target
   try {
@@ -1851,15 +1861,19 @@ function bounded(simulated, current, currentBuf, filePath, settings) {
  * is dropped (the real tool errors on it); none left means the call is unsimulable.
  */
 function editsOf(tool, args) {
+  // `lf`: dsh's edit matches on LF-normalised text and writes back the file's own line
+  // endings. `exact`: dsh's str_replace_editor matches the text as read (BOM dropped) and
+  // writes the result as is — normalising for it saw two matches in a file mixing CRLF
+  // and LF where the editor saw one, predicted "ambiguous, no change", and passed.
   const claude = { old: args.old_string, neu: args.new_string, all: args.replace_all === true }
   const anthropic = { old: args.old_str, neu: args.new_str, all: false }
-  const readings = tool === 'edit' ? [claude]
-    : tool === 'str_replace_editor' ? [anthropic]
-      : [{ ...claude, all: claude.all || args.replaceAll === true },
-          { ...anthropic, all: args.replace_all === true || args.replaceAll === true }]
+  const any = args.replace_all === true || args.replaceAll === true
+  const readings = tool === 'edit' ? [{ ...claude, mode: 'lf' }]
+    : tool === 'str_replace_editor' ? [{ ...anthropic, mode: 'exact' }]
+      : [claude, anthropic].flatMap((r) => ['lf', 'exact'].map((mode) => ({ ...r, all: any, mode })))
   return readings
     .filter((r) => typeof r.old === 'string' && r.old !== '')
-    .map((r) => ({ old: r.old, neu: typeof r.neu === 'string' ? r.neu : '', all: r.all }))
+    .map((r) => ({ old: r.old, neu: typeof r.neu === 'string' ? r.neu : '', all: r.all, mode: r.mode }))
 }
 
 /**
@@ -1881,15 +1895,17 @@ function insertOf(tool, args) {
  * error in the real tool, so nothing changes. `{ bytes, newlines }` when too long to build.
  */
 function simulateInsert(current, { line, text }, limit) {
-  const segments = occurrences(current, '\n') + 1
+  // the editor reads through TextDecoder, which drops a leading BOM, and writes without it
+  const decoded = current.startsWith('﻿') ? current.slice(1) : current
+  const segments = occurrences(decoded, '\n') + 1
   if (line < 0 || line > segments) return current
-  if (current.length + text.length + 1 > limit) {
+  if (decoded.length + text.length + 1 > limit) {
     return {
-      bytes: Buffer.byteLength(current) + Buffer.byteLength(text) + 1,
-      newlines: occurrences(current, '\n') + occurrences(text, '\n') + 1,
+      bytes: Buffer.byteLength(decoded) + Buffer.byteLength(text) + 1,
+      newlines: occurrences(decoded, '\n') + occurrences(text, '\n') + 1,
     }
   }
-  const lines = current.split('\n')
+  const lines = decoded.split('\n')
   return [...lines.slice(0, line), text, ...lines.slice(line)].join('\n')
 }
 
@@ -1907,10 +1923,11 @@ function simulateInsert(current, { line, text }, limit) {
  * index — common on Windows — read every LF `old_string` as "not found", predict no
  * change, and pass an edit dsh then applied.
  */
-function simulateEdit(current, { old: oldRaw, neu: newRaw, all }, limit) {
+function simulateEdit(current, { old: oldRaw, neu: newRaw, all, mode }, limit) {
   // dsh decodes with TextDecoder, which drops a leading BOM — from the text it
   // matches, from the sample it detects line endings on, and from what it writes back.
   const decoded = current.startsWith('\uFEFF') ? current.slice(1) : current
+  if (mode === 'exact') return simulateExact(current, decoded, oldRaw, newRaw, all, limit)
   // Normalising CRLF at most halves a string, so an old_string over twice the text's
   // length cannot be in it: the real tool errors, nothing changes. Checked before it
   // is normalised, so an argument the size of the heap is never copied (#21).
@@ -1954,6 +1971,32 @@ function simulateEdit(current, { old: oldRaw, neu: newRaw, all }, limit) {
   // Normalised once more before expanding, as dsh's restoreLineEndings does: a lone
   // `\r` meeting an inserted `\n` at the seam is one CRLF, not `\r\r\n`.
   return crlfDominates(decoded) ? lf(edited).replaceAll('\n', '\r\n') : edited
+}
+
+/**
+ * simulateEdit() for a tool that matches the text as read (BOM dropped) and writes the
+ * result as is, as dsh's str_replace_editor does: no line endings normalised or restored.
+ */
+function simulateExact(current, decoded, oldStr, newStr, all, limit) {
+  if (oldStr.length > decoded.length) return current // cannot be in it: nothing changes
+  const first = decoded.indexOf(oldStr)
+  if (first === -1) return current
+  if (!all && decoded.indexOf(oldStr, first + oldStr.length) !== -1) return current
+  const matches = all ? occurrences(decoded, oldStr) : 1
+  const length = decoded.length + matches * (newStr.length - oldStr.length)
+  if (length > limit) {
+    const wellFormed = !LONE_SURROGATE.test(decoded) && !LONE_SURROGATE.test(newStr)
+      && !LONE_SURROGATE.test(oldStr)
+    return {
+      bytes: wellFormed
+        ? Buffer.byteLength(decoded) + matches * (Buffer.byteLength(newStr) - Buffer.byteLength(oldStr))
+        : length,
+      newlines: occurrences(decoded, '\n') + matches * (occurrences(newStr, '\n') - occurrences(oldStr, '\n')),
+    }
+  }
+  return all
+    ? decoded.replaceAll(oldStr, () => newStr)
+    : decoded.slice(0, first) + newStr + decoded.slice(first + oldStr.length)
 }
 
 /** A high surrogate with no low after it, or a low with no high before it. */

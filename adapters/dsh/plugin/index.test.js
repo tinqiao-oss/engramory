@@ -263,6 +263,31 @@ test("an edit is judged on the arguments dsh's edit applies, whatever else the c
   /lines > 200/)
 })
 
+test("str_replace_editor is judged as it edits: by its own path, matching the text as read", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-editor-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  // a decoy file_path beside the editor's real `path` read as a write to another file
+  writeFileSync(path, big(29), 'utf8')
+  assert.match(guard({ name: 'str_replace_editor', arguments: {
+    command: 'insert', path, file_path: join(dir, 'README.md'), insert_line: 0, new_str: big(300) } }),
+  /lines > 200/)
+  // the editor matches raw text: in a file mixing CRLF and LF, `HEAD\r\nX` is one match,
+  // though normalising makes it two (ambiguous, no change) and let the growth through
+  writeFileSync(path, `HEAD\r\nX\n${big(150)}\nHEAD\nX\n`, 'utf8')
+  assert.match(guard({ name: 'str_replace_editor', arguments: {
+    command: 'str_replace', path, old_str: 'HEAD\r\nX', new_str: `HEAD\nX\n${big(100)}` } }),
+  /lines > 200/)
+  // and writes without the BOM it read through, so a BOM does not count against an insert
+  writeFileSync(path, `﻿${'a'.repeat(99)}`, 'utf8')
+  assert.equal(mount({ maxBytes: 101 }).guard({ name: 'str_replace_editor',
+    arguments: { command: 'insert', path, insert_line: 1, new_str: 'b' } }), undefined)
+})
+
+test('an index name with replacement patterns is named as written', () => {
+  assert.match(mount({ indexName: '$&.md', language: 'en' }).skills[0].description, /through \$&\.md /)
+})
+
 test('an insert is simulated: one large insert cannot carry the index past the cap', () => {
   const dir = mkdtempSync(join(tmpdir(), 'engramory-insert-'))
   const path = join(dir, INDEX)

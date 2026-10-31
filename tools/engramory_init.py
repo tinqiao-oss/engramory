@@ -325,32 +325,56 @@ _SKILL_FILES = ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md", 
 _SKILL_DIRS = ("templates", "tools")
 
 
-def _store_in_payload(skill_root, name):
-    """The directory of a memory store kept inside payload dir `name`, else None.
+# What `_copy_skill` puts in each payload directory, by name. A test pins this to the
+# repo. Anything else found there is not ours: the store check of a run knows only the
+# store THIS run names, and a store another run made inside `tools/` went whole with
+# an rmtree of it. Deciding by what we shipped, not by what a store looks like, also
+# holds when this script runs from the installed copy itself.
+_PAYLOAD_FILES = {
+    "templates": ("MEMORY.md", "example-feedback.md", "example-project.md",
+                  "knowledge-README.md"),
+    "tools": ("engramory_check.py", "engramory_doctor.py", "engramory_init.py",
+              "engramory_sync.py", "engramory_trace.py"),
+}
+# Every templates/MEMORY.md a release has shipped (sha256, line endings as LF). One that
+# matches none has been edited and may be a store's index (`--memory-root
+# .agents/skills/engramory/templates`). A test checks the current one is listed.
+_TEMPLATE_INDEX_SHA256 = frozenset((
+    "dab0b0de71ad4ab1817bd42435b5c3e687914580cac257291c060a3f985cc38a",
+    "e3b67068dcd79adb9426f2ef634e4a297f7030ef76dd60e1377b699db6c4b616",
+    "c4e2436b5f432cd26d2e56c82175a4ec39be5091e04f9e8039fd9a86fc1e72fa",
+    "71e772b5094c228109ca1585dd39a1711093d12b7c8e0d136a3590c6a865941c",
+))
 
-    The overlap check knows only the store THIS run names. One made by another run
-    (`--memory-root .agents/skills/engramory/tools/store`) sat inside `tools/`, which
-    went whole with its rmtree. Our payload holds no index but the shipped
-    `templates/MEMORY.md`, and `templates/` nothing beyond the shipped files.
+
+def _not_ours(skill_root, name):
+    """Entries of payload dir `name` that this installer did not put there, by name.
+
+    Ours: the files in _PAYLOAD_FILES (templates/MEMORY.md only as shipped) and a
+    `__pycache__` holding nothing but `.pyc` files. A directory with anything else in
+    it is kept whole: deleting around a user's files gains nothing.
     """
+    import hashlib
+
     path = skill_root / name
     if not path.is_dir() or path.is_symlink():
-        return None
-    try:
-        shipped = {e.name for e in (_repo_root() / name).iterdir()}
-    except OSError:
-        shipped = set()
-    for dirpath, dirnames, filenames in os.walk(path):
-        dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".pytest_cache")]
-        here = Path(dirpath)
-        top = here == path
-        index = [f for f in filenames if f.lower() == "memory.md"]
-        if index and not (top and name == "templates"):
-            return here
-        if top and index and any(f.lower().endswith(".md") and f not in shipped
-                                 for f in filenames):
-            return here  # notes beside the template: a store at templates/ itself
-    return None
+        return []
+    others = []
+    for entry in sorted(path.iterdir()):
+        if entry.is_symlink():
+            others.append(entry.name)
+        elif entry.is_dir():
+            if entry.name != "__pycache__" or any(
+                    not f.is_file() or f.is_symlink() or f.suffix != ".pyc"
+                    for f in entry.iterdir()):
+                others.append(entry.name + "/")
+        elif entry.name not in _PAYLOAD_FILES[name]:
+            others.append(entry.name)
+        elif name == "templates" and entry.name == "MEMORY.md":
+            digest = hashlib.sha256(entry.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            if digest not in _TEMPLATE_INDEX_SHA256:
+                others.append("MEMORY.md (edited)")
+    return others
 
 
 def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
@@ -365,14 +389,15 @@ def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
         if not force:
             return f"kept existing {rel} (use --force to replace)"
         # Replace our own files only, as uninstall removes them: a store kept at this
-        # path (`--memory-root .agents/skills/engramory`) or inside a payload dir
-        # survives, which an rmtree of the whole directory did not.
+        # path (`--memory-root .agents/skills/engramory`) survives, which an rmtree of
+        # the whole directory did not; anything not ours inside a payload dir refuses.
         for name in _SKILL_DIRS:
-            held = _store_in_payload(skill_root, name)
-            if held is not None:
+            others = _not_ours(skill_root, name)
+            if others:
                 raise SystemExit(
-                    "refusing to replace %s: %s holds a memory store. Move the store "
-                    "out of the skill directory first." % (rel, held))
+                    "refusing to replace %s: %s/ holds files this installer did not put "
+                    "there (%s) - a memory store, perhaps. Move them out of the skill "
+                    "directory first." % (rel, name, ", ".join(others[:3])))
         for name in _SKILL_FILES + _SKILL_DIRS:
             _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
             target = skill_root / name
@@ -1157,15 +1182,12 @@ def _uninstall_skill(project_root, cfg, memory_root, dry_run):
     # contains a MEMORY.md of its own, so "holds an index" is not a usable signal for
     # the payload directories; the store that matters sits at the root.)
     payload = [n for n in (_SKILL_FILES + _SKILL_DIRS) if n in entries]
-    held = {}
-    for name in _SKILL_DIRS:
-        store = _store_in_payload(skill_root, name) if name in payload else None
-        if store is not None:
-            held[name] = store
+    held = {n: _not_ours(skill_root, n) for n in _SKILL_DIRS if n in payload}
+    held = {n: o for n, o in held.items() if o}
     payload = [n for n in payload if n not in held]
     others = [n for n in entries if n not in payload]
-    kept = "".join("; KEPT %s/: it holds a memory store at %s" % (n, _display_path(s, project_root))
-                   for n, s in held.items())
+    kept = "".join("; KEPT %s/ whole: it holds files this installer did not put there (%s)"
+                   % (n, ", ".join(o[:3])) for n, o in held.items())
     if dry_run:
         if payload and not others:
             return "would remove %s" % display

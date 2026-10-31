@@ -571,7 +571,7 @@ def test_uninstall_keeps_a_store_nested_in_a_payload_dir(tmp_path):
     assert code == 0, out
     assert (store / "MEMORY.md").is_file(), "UNINSTALL DELETED THE MEMORY INDEX"
     assert (store / "precious.md").is_file(), "UNINSTALL DELETED THE USER'S NOTES"
-    assert "holds a memory store" in out
+    assert "did not put there" in out
     assert not (skill / "SKILL.md").exists(), "the rest of the payload still goes"
 
 
@@ -599,7 +599,7 @@ def test_force_reinstall_refuses_a_store_inside_a_payload_dir(tmp_path):
     assert code == 0, out
 
     code, out = _run("codex", tmp_path, "--install-skill", "--force")
-    assert code != 0 and "holds a memory store" in out, out
+    assert code != 0 and "did not put there" in out, out
     assert (store / "MEMORY.md").is_file(), "FORCE REINSTALL DELETED THE MEMORY INDEX"
 
 
@@ -612,3 +612,54 @@ def test_reinstall_keeps_the_indentation_after_the_end_marker(tmp_path):
     code, out = _run("codex", tmp_path)
     assert code == 0, out
     assert "\n    indented code the user keeps" in rules.read_text(encoding="utf-8")
+
+
+def test_a_store_at_templates_with_notes_in_a_subfolder_survives(tmp_path):
+    """A store at templates/ itself: its index is the template's path, its notes deeper."""
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    templates = tmp_path / ".agents" / "skills" / "engramory" / "templates"
+    code, out = _run("codex", tmp_path, "--memory-root", ".agents/skills/engramory/templates")
+    assert code == 0, out
+    (templates / "MEMORY.md").write_text("# Memory\n- [U](notes/user.md) - me\n", encoding="utf-8")
+    (templates / "notes").mkdir()
+    (templates / "notes" / "user.md").write_text("half a year\n", encoding="utf-8")
+
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert (templates / "notes" / "user.md").is_file(), "UNINSTALL DELETED THE USER'S NOTES"
+    assert "- [U](notes/user.md)" in (templates / "MEMORY.md").read_text(encoding="utf-8")
+
+
+def test_uninstall_run_from_the_installed_copy_still_keeps_a_store(tmp_path):
+    """The installed copy is its own repo root: what it ships must not be read off itself."""
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+    store = skill / "templates"
+    code, out = _run("codex", tmp_path, "--memory-root", ".agents/skills/engramory/templates")
+    assert code == 0, out
+    (store / "precious.md").write_text("notes\n", encoding="utf-8")
+    proc = subprocess.run([sys.executable, str(skill / "tools" / "engramory_init.py"), "codex",
+                           "--project-root", str(tmp_path), "--uninstall"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (store / "precious.md").is_file(), "UNINSTALL DELETED THE USER'S NOTES"
+
+
+def test_the_payload_manifest_matches_what_the_installer_copies():
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import importlib
+        init = importlib.import_module("engramory_init")
+    finally:
+        sys.path.pop(0)
+    import hashlib
+    for name, files in init._PAYLOAD_FILES.items():
+        shipped = sorted(p.name for p in (REPO / name).iterdir()
+                         if p.is_file() and p.suffix in (".md", ".py"))
+        assert sorted(files) == shipped, name
+    current = hashlib.sha256((REPO / "templates" / "MEMORY.md").read_bytes()
+                             .replace(b"\r\n", b"\n")).hexdigest()
+    assert current in init._TEMPLATE_INDEX_SHA256, \
+        "templates/MEMORY.md changed: add its sha256 to _TEMPLATE_INDEX_SHA256"

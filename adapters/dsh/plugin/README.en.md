@@ -174,7 +174,7 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 | The index ends within the caps | allow |
 | The write grows the index past a cap | **deny**, with the numbers and what to compact |
 | The index is over a cap and the write shrinks it or keeps its size | allow, so compaction can go step by step (210 → 205 → 198) |
-| A partial edit whose result can be worked out: `edit` (`old_string`/`new_string`), `str_replace_editor`'s replace (`old_str`/`new_str`) and `insert` | its result is worked out first, then judged as above; dsh's `edit` is worked out from the arguments it uses alone |
+| A partial edit whose result can be worked out: `edit` (`old_string`/`new_string`), `str_replace_editor`'s replace (`old_str`/`new_str`) and `insert` | its result is worked out first, then judged as above; each tool from the arguments it uses and the way it matches |
 | A partial edit whose result cannot be worked out (arguments missing or not recognised) | deny on an over-cap index, else allow |
 | The index is missing, unreadable, or not a regular file | a whole-file write is judged as if it were empty; a partial edit passes |
 | The index is past the read limit (`min(16 MiB, max(1 MiB, 4 × maxBytes))`) | not read whole: a whole-file write is judged on bytes alone; a partial edit passes |
@@ -187,8 +187,9 @@ writable. This table is pinned by `node --test` in CI.
 
 ## Known limits
 
-- **Only file tools are capped:** dsh's own `write` and `edit`, and the same kind of
-  tool from other plugins (`str_replace_editor` and the like). Shell tools, MCP file tools and external editors go past it: run
+- **Only dsh's file tools are capped:** `write`, `edit`, and the `str_replace_editor`
+  some versions and presets carry; a tool of the same name from another plugin is
+  judged the same way. Shell tools, MCP file tools and external editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
 - **Stores are found only where the installer puts them.** Elsewhere, or for a project
   store that links out of the project, set `indexPath`. A project's root is found by

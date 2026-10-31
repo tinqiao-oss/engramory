@@ -17,14 +17,19 @@ finding checked against the code), most costly first.
   predicted to change nothing and passed, while dsh wrote the real edit. dsh's `edit` is
   now judged on its own arguments alone, `str_replace_editor` on its own, and a tool
   whose schema is not known here on every reading (any one that grows past the cap
-  refuses).
+  refuses). The same holds for the path: `str_replace_editor` writes `path`, and a
+  decoy `file_path` beside it passed a write to the index as one to another file. And
+  `str_replace_editor` is now simulated as it matches, on the text as read: normalising
+  line endings for it saw two matches in a file mixing CRLF and LF where it sees one.
 - **Uninstall and `--install-skill --force` no longer delete a store kept inside the
   skill directory.** The overlap check knew only the store the current run names: a
   store another run had put inside the installed skill's `tools/` went with that
   directory on uninstall, and a `--force` reinstall removed the whole skill directory,
-  a store kept at its root included. Both now remove the skill's own files and
-  directories only, keep a payload directory that holds a memory store (and say so),
-  and `--force` refuses while one does.
+  a store kept at its root included. Both now remove only what the installer ships,
+  decided from a fixed list of its files (and of every template index it has
+  shipped), so it holds when the installed copy itself runs the uninstall. A payload
+  directory with anything else in it is kept whole and named, and `--force` refuses
+  while one is.
 - **AGENT-SETUP's guard check could replace a real index.** With
   `ENGRAMORY_INDEX_PATH` set it sent the agent to test on the real index, and a
   250-line whole-file write on an index already longer is a shrink, which the guard
@@ -32,8 +37,8 @@ finding checked against the code), most costly first.
   rewrite it; hooks/INSTALL.md says the same.
 - **dsh: `insert` is simulated.** `str_replace_editor`'s `insert` (and a tool named
   `insert` taking the same arguments) counted as unmeasurable, so one large insert could
-  carry an index from under the cap to far past it. dsh's own file tools are `write`
-  and `edit`; this matters for tools other plugins add.
+  carry an index from under the cap to far past it. `str_replace_editor` is dsh's own
+  in some versions and presets.
 - **dsh: the built-in skill states the caps and the index name you configured**, not
   always 200 lines / 25 KB and `MEMORY.md`, and asks for the added / updated /
   archived / skipped report after every memory write, as SKILL.md does.
