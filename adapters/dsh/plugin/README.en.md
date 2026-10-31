@@ -152,7 +152,10 @@ owner, so a program forwarding other people's messages must leave it out.
   Read-only, never a note's text; a name, *Open the index* and
   *Open the folder* open on the machine dsh runs on; a machine with no desktop (a
   headless server, a session over SSH) shows none of them. The switches at the top
-  (companion mode, and memory access once it is on) save as you flip them.
+  (companion mode, and memory access once it is on) save as you flip them. Below them
+  is a short *How to use it*, open while there is no memory yet; at the foot, where to
+  send feedback: a new GitHub issue (its body pre-filled with the plugin's version and the
+  OS family, no path and no note), or an email, with a button that copies the address.
 
 ## Configuration
 
@@ -219,6 +222,12 @@ writable. This table is pinned by `node --test` in CI.
   moment could redirect what opens (as with dsh's own opener for any workspace file).
 - **Experimental:** companion mode, social mode, and the settings and memory pages may
   change in a minor version.
+
+## Feedback
+
+For a problem or an idea, [open an issue on GitHub](https://github.com/tinqiao-oss/engramory/issues/new)
+or email engramory@agent.qq.com. Emails are sorted with the help of an AI assistant, and issues
+are public: do not paste your memory notes into either.
 
 ## Versions
 

@@ -176,6 +176,9 @@ def test_one_version_number_for_the_repo_and_the_plugin():
         "CHANGELOG.md": first(r"^## (\S+)", read("CHANGELOG.md")),
         "README.md": first(r"\*\*状态[:：]\s*(\S+?)。\*\*", read("README.md")),
         "README.en.md": first(r"\*\*Status: (\S+?)\.\*\*", read("README.en.md")),
+        # the memory page's feedback footer names it, in the issue it starts too
+        "client.js": first(r"^\s*const VERSION = '([^']+)'",
+                           open(os.path.join(PLUGIN, "client.js"), encoding="utf-8").read()),
     }
     wrong = {k: v for k, v in found.items() if v != version}
     assert not wrong, "not %s, the plugin's version: %s" % (version, wrong)

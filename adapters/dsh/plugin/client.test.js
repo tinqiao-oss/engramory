@@ -665,3 +665,113 @@ test('client: settings that could not be read are offered again, not hidden', as
   assert.ok(switchFor(view.tree, 'companion'))
   assert.match(textOf(view.tree), /storeUser/) // the listing was there all along
 })
+
+/** Run `fn` with `navigator` standing in for the page's (Node has one of its own, read-only). */
+async function withNavigator(value, fn) {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { value, configurable: true, writable: true })
+  try {
+    return await fn()
+  } finally {
+    if (saved) Object.defineProperty(globalThis, 'navigator', saved)
+    else delete globalThis.navigator
+  }
+}
+
+test('client: the memory page\'s how-to is open only while there is no memory', async () => {
+  const { view, zh } = await memoryPage({}, { zh: true })
+  const howTo = () => findAll(view.tree, (n) => n.type === 'details' && n.props.className === 'eng-howto')[0]
+  assert.equal(howTo().props.open, false) // still listing: nothing to say yet
+  await view.settle()
+  assert.equal(howTo().props.open, false)
+  assert.equal(textOf(findAll(howTo(), (n) => n.type === 'summary')[0]), zh.howTo)
+  assert.deepEqual(findAll(howTo(), (n) => n.type === 'li').map(textOf),
+    [zh.howToSay, zh.howToRecall, zh.howToEdit, zh.howToMove, zh.howToSocial])
+  const openFor = async (stores) => {
+    const page = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) }, { zh: true })
+    await page.view.settle()
+    return findAll(page.view.tree, (n) => n.type === 'details' && n.props.className === 'eng-howto')[0].props.open
+  }
+  const bare = { id: 'user', kind: 'user', dir: 'C:\\m', titles: [], index: null, notes: [], archive: [], more: false }
+  assert.equal(await openFor([]), true) // no store yet
+  // a pinned index on a relative path is not listed, nor are stores past the listing's cap:
+  // there may well be memory, so no unfolding
+  for (const patch of [{ stores: [], pinned: 'relative' }, { stores: [], more: true }]) {
+    const page = await memoryPage({ [`GET ${MEMORY}`]: memoryData(patch) }, { zh: true })
+    await page.view.settle()
+    assert.equal(findAll(page.view.tree, (n) => n.type === 'details' && n.props.className === 'eng-howto')[0].props.open,
+      false, JSON.stringify(patch))
+  }
+  assert.equal(await openFor([bare]), true) // a folder alone: nothing in it yet
+  assert.equal(await openFor([{ ...bare, index: { name: 'MEMORY.md', bytes: 0, lines: 0, over: false } }]), true) // an empty index
+  assert.equal(await openFor([{ ...bare, index: { name: 'MEMORY.md', bytes: 40, lines: 1, over: false } }]), false)
+  assert.equal(await openFor([{ ...bare, notes: [{ name: 'a.md', type: 'user' }] }]), false)
+  assert.equal(await openFor([{ ...bare, archive: ['old.md'] }]), false)
+})
+
+test('client: the memory page ends with where to send feedback: an issue that names the version, or the mailbox', async () => {
+  const version = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+  const copied = []
+  await withNavigator({ platform: 'Win32', clipboard: { writeText: async (text) => { copied.push(text) } } }, async () => {
+    const { view, zh } = await memoryPage({}, { zh: true })
+    await view.settle()
+    const [link] = findAll(view.tree, (n) => n.type === 'a')
+    assert.equal(textOf(link), zh.feedbackIssue)
+    // a web link the browser opens — the desktop app hands it to the system's — in a new tab
+    assert.equal(link.props.target, '_blank')
+    assert.equal(link.props.rel, 'noopener noreferrer')
+    const url = new URL(link.props.href)
+    assert.equal(`${url.origin}${url.pathname}`, 'https://github.com/tinqiao-oss/engramory/issues/new')
+    assert.deepEqual([...url.searchParams.keys()], ['body'])
+    // an issue is public: its body is the template, the version and the OS family, exactly —
+    // none of the page's folders or notes
+    assert.equal(url.searchParams.get('body'),
+      zh.issueBody.replace('{version}', version).replace('{os}', 'Windows'))
+    const text = textOf(view.tree)
+    assert.ok(text.includes('engramory@agent.qq.com'))
+    assert.ok(text.includes(zh.feedbackNote.replace('{version}', version)))
+    button(view.tree, zh.copy).props.onClick()
+    await view.settle()
+    assert.deepEqual(copied, ['engramory@agent.qq.com'])
+    assert.ok(button(view.tree, zh.copied))
+    assert.ok(!textOf(view.tree).includes(zh.copyFailed))
+  })
+  // no clipboard (a page over plain http), or the copy refused: say to select it by hand
+  for (const navigator of [{ platform: 'MacIntel' }, { platform: 'MacIntel', clipboard: { writeText: async () => { throw new Error('denied') } } }]) {
+    await withNavigator(navigator, async () => {
+      const { view, zh } = await memoryPage({}, { zh: true })
+      await view.settle()
+      button(view.tree, zh.copy).props.onClick()
+      await view.settle()
+      assert.ok(textOf(view.tree).includes(zh.copyFailed))
+      assert.ok(button(view.tree, zh.copy), 'the button still offers to copy')
+    })
+  }
+})
+
+test('client: the feedback issue names only the version and the OS family, whatever the browser reports', async () => {
+  const version = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+  for (const [navigator, os] of [
+    [{ userAgentData: { platform: 'Windows' }, platform: 'Linux x86_64' }, 'Windows'], // the newer field first
+    [{ platform: 'MacIntel' }, 'macOS'],
+    [{ platform: 'Linux x86_64' }, 'Linux'],
+    [{ platform: String.raw`C:\Users\alice\notes.md` }, 'unknown'],
+    [{ userAgentData: { platform: '/home/alice/private-note.md' } }, 'unknown'],
+    [{}, 'unknown'],
+  ]) {
+    await withNavigator(navigator, async () => {
+      // the parameters the template gets, read back exactly: nothing else goes in
+      const { view } = await memoryPage({})
+      await view.settle()
+      const body = new URL(findAll(view.tree, (n) => n.type === 'a')[0].props.href).searchParams.get('body')
+      assert.equal(body, `issueBody${JSON.stringify({ version, os })}`, JSON.stringify(navigator))
+    })
+  }
+  // and both templates are this fixed text around those two, word for word: anything added
+  // to what a public issue starts with has to be added here too
+  const { dictionaries } = await applied()
+  assert.equal(dictionaries.engramory.zh.issueBody,
+    '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：')
+  assert.equal(dictionaries.engramory.en.issueBody,
+    '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ')
+})

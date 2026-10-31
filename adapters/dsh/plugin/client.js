@@ -26,6 +26,15 @@ window.__ModuleLoader__.load({
     /** Relative to the page, as dsh's own pages fetch, so a mounted deployment keeps its prefix. */
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
+    /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
+    const VERSION = '1.0.8'
+    /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
+     * the link is the browser's (the desktop app hands it to the system's); the footer submits
+     * nothing by itself. */
+    const ISSUES = 'https://github.com/tinqiao-oss/engramory/issues/new'
+    const EMAIL = 'engramory@agent.qq.com'
+    /** The how-to's lines, in order. */
+    const HOW_TO = ['howToSay', 'howToRecall', 'howToEdit', 'howToMove', 'howToSocial']
     const DEFAULT_LINES = 200
     const DEFAULT_BYTES = 25600
     /** The order the memory page shows note types in (SKILL.md §2, §2.2). */
@@ -109,6 +118,20 @@ window.__ModuleLoader__.load({
       healthLarge: '要核对的太多，没做体检。',
       healthUnreadable: '有文件读不了，没做体检。',
       healthPartial: '文件太多没列全，没做体检。',
+      howTo: '怎么用',
+      howToSay: '想让 AI 记住什么，直接跟它说，比如「记住：我习惯用 pnpm」「把这个决定记下来」。平时它也会尽量自己挑值得长期记住的记下来，比如你纠正过它的做法。',
+      howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
+      howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
+      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。换电脑时把那个文件夹拷到新电脑的同一位置；在配置里指定过位置的，配置也一起带过去。',
+      howToSocial: '接了 QQ、微信等、别人也能跟你的 AI 聊的话，在上面打开「大肥鱼模式」，再把「记忆权限」改成「社交」：只有认得出是你本人的对话才拿得到记忆。这不是安全隔离，详见插件说明。',
+      feedbackLead: '遇到问题或有建议：',
+      feedbackIssue: '到 GitHub 提 issue',
+      feedbackMail: '，或发邮件到',
+      copy: '复制',
+      copied: '已复制',
+      copyFailed: '复制不了，请手动选中上面的地址。',
+      feedbackNote: '邮件会由 AI 助手协助整理，issue 是公开的，两处都别把记忆内容原样贴上去。插件版本 {version}。',
+      issueBody: '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：',
     }
     const en = {
       summary: 'Companion mode and memory access, and the index cap.',
@@ -188,6 +211,20 @@ window.__ModuleLoader__.load({
       healthLarge: 'Too much to check here, so no check-up.',
       healthUnreadable: 'Some files could not be read, so no check-up.',
       healthPartial: 'Too many files to list them all, so no check-up here.',
+      howTo: 'How to use it',
+      howToSay: 'To have the AI remember something, just tell it: "remember that I use pnpm", "note this decision down". It also tries to keep what is worth keeping on its own, such as a way of working you corrected.',
+      howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
+      howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
+      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. On a new computer, copy that folder to the same place, and if your configuration names where the store is, bring that setting along.',
+      howToSocial: 'If others can talk to your AI too (through QQ, WeChat and the like), turn on Companion mode above and set Memory access to Social: only conversations it can tell are yours get the memory. This is not a security boundary; see the plugin\'s README.',
+      feedbackLead: 'Found a problem or have an idea? ',
+      feedbackIssue: 'Open an issue on GitHub',
+      feedbackMail: ', or email ',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Could not copy; select the address above by hand.',
+      feedbackNote: 'Emails are sorted with the help of an AI assistant, and issues are public: do not paste your memory notes into either. Plugin version {version}.',
+      issueBody: '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ',
     }
 
     const CSS = `
@@ -249,6 +286,17 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
 .eng-archive[open]>summary{margin-bottom:2px;}
 .eng-health{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,10px);background:var(--dsw-alias-bg-layer-1);}
 .eng-health-item{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-howto{box-sizing:border-box;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg,10px);}
+.eng-howto>summary{cursor:pointer;font-size:13px;font-weight:500;line-height:20px;}
+.eng-howto ul{display:flex;flex-direction:column;gap:4px;margin:8px 0 2px;padding-left:18px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-feedback{display:flex;flex-direction:column;gap:2px;padding-top:16px;border-top:.5px solid var(--dsw-alias-border-l2);font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary);}
+.eng-feedback p{margin:0;}
+.eng-link{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:2px;}
+.eng-link:hover{opacity:.8;}
+.eng-email{margin:0 8px 0 2px;font-family:var(--ds-font-family-code,ui-monospace,monospace);user-select:all;color:var(--dsw-alias-label-primary);}
+.eng-btn-small{padding:1px 8px;font-size:11.5px;}
+.eng-feedback-note{color:var(--dsw-alias-label-tertiary);}
+.eng-link:focus-visible,.eng-howto>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
 `
 
     /** The settings the page edits, in the order the host computes its revision from. */
@@ -615,6 +663,57 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         store.more ? h('p', { className: 'eng-note' }, t('more')) : null)
     }
 
+    /** A store with anything in it: an index with text, a note, an archived note. A folder or an
+     * empty index alone is not memory yet. */
+    const hasMemory = (store) => (store.index !== null && store.index.bytes > 0) ||
+      store.notes.length > 0 || store.archive.length > 0
+
+    /** How to use it, in a few lines: open while there is no memory yet, folded once there is. */
+    function HowTo({ open, t }) {
+      return h('details', { className: 'eng-howto', open },
+        h('summary', null, t('howTo')),
+        h('ul', null, HOW_TO.map((key) => h('li', { key }, t(key)))))
+    }
+
+    /** The OS family for a bug report, and nothing that tells one machine from another. */
+    function osName() {
+      const platform = String(globalThis.navigator?.userAgentData?.platform ?? globalThis.navigator?.platform ?? '')
+      return /^win/i.test(platform) ? 'Windows' : /^mac/i.test(platform) ? 'macOS'
+        : /linux/i.test(platform) ? 'Linux' : 'unknown'
+    }
+
+    /**
+     * Where to report a problem or send an idea: a new issue, its body started with the
+     * plugin's version and the OS (no path, no note), or the mailbox, whose address the
+     * button copies — the desktop app opens only web links, not `mailto:`.
+     */
+    function Feedback({ t }) {
+      const [copy, setCopy] = useState('copy')
+      const alive = useRef(true)
+      useEffect(() => () => { alive.current = false }, [])
+      const copyAddress = async () => {
+        let done = false
+        try {
+          await globalThis.navigator.clipboard.writeText(EMAIL)
+          done = true
+        } catch {
+          // no clipboard here (a page served over plain http) or permission refused
+        }
+        if (alive.current) setCopy(done ? 'copied' : 'copyFailed')
+      }
+      const href = `${ISSUES}?body=${encodeURIComponent(t('issueBody', { version: VERSION, os: osName() }))}`
+      return h('footer', { className: 'eng-feedback' },
+        h('p', null,
+          t('feedbackLead'),
+          h('a', { className: 'eng-link', href, target: '_blank', rel: 'noopener noreferrer' }, t('feedbackIssue')),
+          t('feedbackMail'),
+          h('span', { className: 'eng-email' }, EMAIL),
+          h('button', { type: 'button', className: 'eng-btn eng-btn-small', onClick: copyAddress },
+            t(copy === 'copied' ? 'copied' : 'copy'))),
+        copy === 'copyFailed' ? h('p', { className: 'eng-feedback-note', role: 'status' }, t('copyFailed')) : null,
+        h('p', { className: 'eng-feedback-note' }, t('feedbackNote', { version: VERSION })))
+    }
+
     /** The sidebar's Memory page: the stores recall can use, by name, and two settings. */
     function MemoryPage({ t }) {
       const { state, load } = useMemory()
@@ -663,7 +762,10 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         h(SettingsStrip, { t }),
         status ? h('div', { className: 'eng-banner', 'data-tone': status.tone, role: 'status' }, status.text) : null,
         data !== undefined && !canOpen && data.stores.length > 0 ? h('p', { className: 'eng-note' }, t('openUnavailable')) : null,
-        body)
+        h(HowTo, { open: data !== undefined && data.pinned !== 'relative' && data.more !== true &&
+          !data.stores.some(hasMemory), t }),
+        body,
+        h(Feedback, { t }))
     }
 
     /** The sidebar entry's icon: the logo, [[ ]] around a cursor, drawn in the row's own colour

@@ -6,6 +6,23 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.8 — 2026-11-01
+
+dsh's memory page says how to use it and where to send feedback. How memory is stored,
+recalled and guarded does not change.
+
+- **dsh: the memory page has a how-to** — a few lines: telling the AI what to remember,
+  how it recalls, editing a note and having one forgotten, where the files are, and when
+  to choose social mode (and that it is not a security boundary). It is open while the
+  page finds no memory at all, folded once it does or cannot tell.
+- **dsh: the memory page ends with where to send feedback** — a link to a new GitHub
+  issue, its body pre-filled with the plugin's version and the OS family of the computer
+  the page is open on (no path, no note), or the mailbox `engramory@agent.qq.com`, whose
+  mail an AI assistant helps sort; a button copies the address (the desktop app opens
+  web links in the system's browser, but not `mailto:`). The footer submits nothing by
+  itself. By default the desktop app installs a version only once it has been published
+  for 24 hours, unless you ask for `dsh-engramory@1.0.8`.
+
 ## 1.0.7 — 2026-10-31
 
 dsh reminds the AI to save before it compacts a conversation. How memory is stored,
