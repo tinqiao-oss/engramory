@@ -6,6 +6,24 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.7 — 2026-10-31
+
+dsh reminds the AI to save before it compacts a conversation. How memory is stored,
+recalled and guarded does not change.
+
+- **dsh: a reminder to save before compaction** — the plugin works out where dsh will
+  compact a conversation into a summary, as dsh-compaction-basic does: its threshold
+  ratio and headroom, the window, and the output the request reserves (on dsh 0.2 with
+  DeepSeek's defaults, about 69% of the window rather than 80%; on dsh 0.1.5, the window
+  times the ratio). At 85% of that point, by dsh's own measure of the conversation, the
+  model is told to save what is worth keeping beyond it first; it goes below 70%, as
+  after a compaction. The model is reminded, not the user; in social mode only the
+  user's own conversations are. Where dsh would not compact — no compaction engine,
+  automatic compaction off, no model routed yet — there is no reminder; a conversation
+  that grows past the gap in one step goes unreminded. `compactionReminder: false`
+  turns it off. By default the desktop app installs a version only once it has been published
+  for 24 hours, unless you ask for `dsh-engramory@1.0.7`.
+
 ## 1.0.6 — 2026-10-31
 
 dsh's memory page checks each store, and Claude Code joins Codex and dsh as a reader

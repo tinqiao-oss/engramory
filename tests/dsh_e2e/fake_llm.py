@@ -36,11 +36,15 @@ class FakeLLM:
     POST path (which tells you the wire format), and `observe(i, body)` — if given —
     runs as agent-loop request `i` arrives, before it is answered: by then dsh has
     finished acting on step `i - 1`, which is the moment to look at the disk.
+    `prompt_tokens` is the prompt size each agent-loop reply reports as its usage — what
+    dsh then takes for the conversation's size against its context window — unless the
+    step carries its own as `"usage"`.
     """
 
-    def __init__(self, plan, observe=None):
+    def __init__(self, plan, observe=None, prompt_tokens=1):
         self.plan = list(plan)
         self.observe = observe
+        self.prompt_tokens = prompt_tokens
         self.main = []
         self.other = []
         self.paths = []
@@ -59,6 +63,10 @@ class FakeLLM:
     def __exit__(self, *exc):
         self._server.shutdown()
         self._server.server_close()
+
+    def reported(self, i, step):
+        """The prompt size a reply reports: 1 for a request outside the agent loop."""
+        return 1 if i is None else step.get("usage", self.prompt_tokens)
 
     def _step_for(self, body):
         """Return (step index or None, step) for one model request."""
@@ -135,7 +143,7 @@ def _handler(fake):
                 "id": "msg_fake", "type": "message", "role": "assistant",
                 "model": body.get("model", "deepseek-flash"), "content": [],
                 "stop_reason": None, "stop_sequence": None,
-                "usage": {"input_tokens": 1, "output_tokens": 1}}})
+                "usage": {"input_tokens": fake.reported(i, step), "output_tokens": 1}}})
             if "tool" in step:
                 ev({"type": "content_block_start", "index": 0, "content_block": {
                     "type": "tool_use", "id": "step%d" % i, "name": step["tool"], "input": {}}})
@@ -164,7 +172,9 @@ def _handler(fake):
                      "model": model,
                      "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
                 if usage:
-                    c["usage"] = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                    prompt = fake.reported(i, step)
+                    c["usage"] = {"prompt_tokens": prompt, "completion_tokens": 1,
+                                  "total_tokens": prompt + 1}
                 self._send(c)
 
             chunk({"role": "assistant", "content": ""})

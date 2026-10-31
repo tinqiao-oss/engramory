@@ -24,6 +24,10 @@ which is general-purpose agent memory: Claude Code, Codex and others can use the
   compact; compaction still passes. Details in [How the cap decides](#how-the-cap-decides).
 - **The rules come with it.** What to save, how, and when to clean up: the rules
   (a skill) are registered by the plugin, with no files to install.
+- **A reminder to save before dsh compacts.** When a conversation grows long, dsh
+  compacts what came before into a summary, which need not keep what is worth
+  remembering later. As a conversation nears that point, the plugin reminds the AI to
+  save that first; the AI is reminded, not you.
 - **A Memory page in the sidebar.** Read-only; it lists the notes by name and opens
   one in your computer's default app, with a check-up that flags broken links in the
   index and notes left out of it.
@@ -172,6 +176,7 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 | `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |
 | `registerSkill` | `true` | `false` skips the built-in rules; the cap and the index in context stay. |
 | `injectIndex` | `true` | `false` stops putting the index into context; the AI reads it instead. |
+| `compactionReminder` | `true` | `false` stops the reminder to save before dsh compacts. The plugin works out where dsh will compact from dsh's own compaction settings (on dsh 0.2 with DeepSeek's defaults, about 69% of the window, not 80%) and reminds at 85% of that. A best effort: a conversation that grows past the gap in one step goes unreminded; with no compaction, or automatic compaction off, there is no reminder. |
 | `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other string is English; a value that is not a string, or is empty, counts as unset. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
 | `companion` | `false` | `true` turns companion mode on. |
 | `audience` | `private` | With companion mode on, `social` turns social mode on. |

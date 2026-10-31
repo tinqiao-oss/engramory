@@ -68,6 +68,12 @@ SKILL_MARKS = ("Curated file-based long-term memory", "策展式文件长期记�
 # injected the index into its runtime context (index.js renderIndex()).
 RECALL_MARK = "- [e2e-recall-marker](e2e.md) - injected, never read"
 INDEX_HEADS = ("Project memory index (", "项目记忆索引（")  # index.js renderIndex(): change both together
+# The reminder to save before dsh compacts, in either language (index.js TEXT.compactionSoon),
+# and the shares of the window a conversation is made to report: well short of where the
+# plugin reminds (0.85 of the point dsh compacts at, itself at most 0.8 of the window), and
+# past it whatever output the model reserves.
+REMINDER_MARKS = ("close to its context limit", "快到上下文上限了")
+QUIET_SHARE, REMIND_SHARE = 0.3, 0.7
 
 # Every tool dsh has offered in a passing run, and why it cannot put the index past the
 # cap behind the guard's back. A tool missing from this table fails the run until
@@ -215,6 +221,21 @@ def read_bytes(path):
             return f.read()
     except OSError:
         return None
+
+
+def recorded_window(home):
+    """The context window dsh recorded for a session under `home`, or None.
+
+    dsh folds each request's window into its `contextPressure` session projection, which
+    it caches as JSON under `storages/` — the figure the plugin's reminder reads.
+    """
+    for root, dirs, files in os.walk(os.path.join(home, "storages")):
+        for name in files:
+            text = read_bytes(os.path.join(root, name)) or b""
+            m = re.search(rb'"contextWindow"\s*:\s*(\d+)', text)
+            if m:
+                return int(m.group(1))
+    return None
 
 
 def tool_roster(body):
@@ -420,6 +441,24 @@ def check_release(version, plugin, work, node, npm):
         check("refused relative edit left the file unchanged", disk(7, 0) == small, shown(7, 0))
     check("nothing else wrote the index afterwards",
           read_bytes(index) == small and read_bytes(crlf_index) == small_crlf)
+
+    # The reminder to save before dsh compacts (index.js compactionReminder), read through
+    # dsh's own token meter, projections and compaction engine: one conversation whose model
+    # reports QUIET_SHARE, then REMIND_SHARE, of the window dsh recorded is reminded on the
+    # request after the second report only. (Too short to compact, it stays whole.)
+    window = recorded_window(home)
+    if check("dsh recorded a context window", window, "no contextWindow under %s" % home):
+        plan = [{"tool": "read", "args": {"file_path": seeded}, "usage": int(window * QUIET_SHARE)},
+                {"tool": "read", "args": {"file_path": seeded}, "usage": int(window * REMIND_SHARE)},
+                {"text": "done"}]
+        with FakeLLM(plan) as fake:
+            code, out, err = run(dsh + ["--profile", PROFILE, "Read the memory index."], cwd=ws,
+                                 env=dsh_env(home, fake.base_url), timeout=300)
+        bodies = [json.dumps(b, ensure_ascii=False) for b in fake.main]
+        reminded = [any(m in b for m in REMINDER_MARKS) for b in bodies]
+        check("reminded to save as the conversation nears compaction, not before",
+              code == 0 and reminded[:3] == [False, False, True],
+              "exit %s, reminder in requests: %s, window %s: %s" % (code, reminded, window, tail(err or out)))
 
     code, out, err = run(dsh + ["plugin", "--profile", PROFILE, "remove", "dsh-engramory"],
                          cwd=work, env=quiet, timeout=600)

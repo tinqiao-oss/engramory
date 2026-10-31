@@ -265,9 +265,10 @@ export function apply(ctx, config = {}) {
   // the store is closed — seen on a real dsh.
   const injectIndex = settings.injectIndex
   const guarded = settings.companion || settings.social
+  const contexts = []
   if (injectIndex || guarded) {
     const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
-    const contexts = guarded ? [{
+    contexts.push(...guarded ? [{
       name: 'engramory:memory',
       required: true,
       text: (context) => {
@@ -293,14 +294,47 @@ export function apply(ctx, config = {}) {
         const rules = settings.companion ? settings.text.companion : ''
         return [shown, rules].filter(Boolean).join('\n\n')
       },
-    }] : [{ name: 'engramory:memory-index', text: index }]
+    }] : [{ name: 'engramory:memory-index', text: index }])
+  }
+
+  // Before dsh compacts a conversation into a summary (dsh-compaction-basic, before the step's
+  // request goes out; where, compactionReminder() works out), the model is told to save what
+  // is worth keeping beyond it — the summary keeps what the conversation needs, not what
+  // memory would. The model, not the user, is told: saving is its part. A section of its
+  // own, so the index's text does not change with it; required where the memory context is
+  // (a persona preset may drop optional context), and in social mode only for the user's
+  // own conversations, the only ones that may save.
+  if (config.compactionReminder !== false) {
+    const pressure = {}
+    for (const [service, key] of [['tokenMeter', 'meter'], ['sessionProjections', 'projections'],
+      ['compaction', 'compaction'], ['llm', 'llm']]) {
+      ctx.inject([service], (inner) => {
+        inner.effect(() => {
+          const current = inner[service]
+          pressure[key] = current
+          return () => {
+            if (pressure[key] === current) pressure[key] = undefined
+          }
+        })
+      })
+    }
+    const reminder = compactionReminder(settings, pressure)
+    contexts.push({
+      name: 'engramory:compaction',
+      order: INDEX_CONTEXT_ORDER + 1,
+      ...(guarded ? { required: true } : {}),
+      text: (context) => (roleOf(context?.agent) === 'owner' ? reminder(context) : ''),
+    })
+  }
+
+  if (contexts.length > 0) {
     ctx.inject(['systemPrompt'], (inner) => {
       const prompt = inner.systemPrompt
       if (typeof prompt?.context !== 'function') return
-      for (const { name, required, text } of contexts) {
+      for (const { name, order, required, text } of contexts) {
         inner.effect(() => prompt.context({
           name,
-          order: INDEX_CONTEXT_ORDER,
+          order: order ?? INDEX_CONTEXT_ORDER,
           // The index is quoted, not templated: dsh interpolates `{{name}}` groups and
           // throws on a malformed one, which would fail the whole request.
           interpolate: false,
@@ -1623,6 +1657,129 @@ function realpathOr(p) {
   }
 }
 
+/**
+ * dsh-compaction-basic's default ratio, for an engine whose config cannot be read. From
+ * dsh 0.1.7 the engine compacts a conversation past `min(window × ratio, window − the
+ * output the request reserves − headroom)` — on dsh 0.2 with DeepSeek's defaults (1M
+ * window, 256K reserved, 64K headroom) about 0.69 of the window, not 0.8; dsh 0.1.5's
+ * past `window × ratio`, its config having no headroom.
+ */
+const COMPACT_RATIO = 0.8
+/** dsh-compaction-basic's default share of the budget a compaction keeps whole at the end. */
+const COMPACT_RETAIN = 0.16
+/**
+ * Where the reminder comes on, as a share of the point dsh will compact at — early enough
+ * that a few large steps still leave the model a turn to save — and below which it goes:
+ * the gap keeps a conversation hovering near one figure from switching it on and off, each
+ * switch sending the runtime context, index and all, once more. After a compaction the
+ * conversation is far below either.
+ */
+const REMIND_AT = 0.85
+const REMIND_UNTIL = 0.7
+/** How long a model's default output cap is waited for, and how soon a failed ask is retried. */
+const MODEL_INFO_MS = 30000
+const MODEL_INFO_RETRY_MS = 60000
+
+/**
+ * A conversation's reminder to save before dsh compacts it, or '' — per step, synchronously,
+ * as dsh asks for runtime context. It works out where dsh-compaction-basic will compact the
+ * conversation as that engine does (resolveCompactSpec): its own threshold ratio and
+ * headroom (from the engine's config, a model's own policy first), the window the latest
+ * request recorded (the `contextPressure` projection), and the output that request
+ * reserves — its own cap, else the model's default, else none; the default is asked of dsh
+ * once per model in the background (llm.resolveModelInfo, as the engine asks), so until
+ * dsh has said there is no reminder. The conversation's size is the engine's own measure
+ * (`tokenMeter.measure()`).
+ *
+ * Where dsh would not compact there is no reminder — the model is never told of a
+ * compaction that will not come: no engine, one that does not compact on its own
+ * (`auto: false`), a conversation with no routed model yet, no measure or window, a window
+ * too small to leave room. The text is one fixed sentence, never a figure: dsh sends the
+ * runtime context again whenever it changes. On dsh 0.1 the context is taken once per step,
+ * before compaction runs, so the step that compacts still carries the reminder it began with.
+ */
+function compactionReminder(settings, pressure) {
+  const reminded = new WeakMap()
+  // `provider/model` -> { reserve } once dsh has said, { asked } while it is asked or failed;
+  // kept for one model registry only, so a reloaded one is asked again
+  let reserves = new Map()
+  let askedOf
+  const defaultReserve = (provider, model) => {
+    const llm = pressure.llm
+    if (typeof llm?.resolveModelInfo !== 'function') return undefined
+    if (askedOf !== llm) {
+      askedOf = llm
+      reserves = new Map()
+    }
+    const key = JSON.stringify([provider, model]) // a provider may have a `/` in its name
+    const known = reserves.get(key)
+    if (known?.reserve !== undefined) return known.reserve
+    if (known !== undefined && Date.now() - known.asked < MODEL_INFO_RETRY_MS) return undefined
+    const entry = { asked: Date.now() }
+    const cache = reserves
+    cache.set(key, entry)
+    Promise.resolve()
+      .then(() => llm.resolveModelInfo(provider, model, AbortSignal.timeout(MODEL_INFO_MS)))
+      .then((info) => {
+        // as the engine has it: the model's default, else nothing reserved
+        if (cache.get(key) === entry) entry.reserve = count(info?.defaultMaxTokens) ? info.defaultMaxTokens : 0
+      })
+      .catch(() => {})
+    return undefined
+  }
+  return (context) => {
+    const session = context?.agent?.session
+    if (session === null || typeof session !== 'object') return ''
+    const engine = pressure.compaction
+    let config
+    let route
+    let tokens
+    let window
+    try {
+      config = engine?.config
+      if (engine === undefined || config?.auto === false) return ''
+      route = session.requestHeader?.()?.config
+      // the engine compacts only a conversation routed to a model
+      if (typeof route?.provider !== 'string' || !route.provider ||
+        typeof route.model !== 'string' || !route.model) return ''
+      tokens = pressure.meter?.measure(session)?.totalTokens
+      window = pressure.projections?.stateOf(session, 'contextPressure')?.contextWindow
+    } catch {
+      return ''
+    }
+    if (!Number.isFinite(tokens) || !count(window) || window === 0) return ''
+    const own = Array.isArray(config?.modelPolicies)
+      ? config.modelPolicies.find((p) => p?.provider === route.provider && p?.model === route.model)
+      : undefined
+    const ratio = [own?.thresholdRatio, config?.thresholdRatio]
+      .find((r) => Number.isFinite(r) && r > 0 && r <= 1) ?? COMPACT_RATIO
+    // dsh 0.1.7 on: the window less the output reserved and the headroom caps it too
+    const headroom = [own?.headroomTokens, config?.headroomTokens].find(count)
+    let at = window * ratio
+    let budget = window // what the kept tail is a share of: the window, less the output reserved from 0.1.7
+    if (headroom !== undefined) {
+      const reserve = count(route.maxTokens) ? route.maxTokens : defaultReserve(route.provider, route.model)
+      if (reserve === undefined) return ''
+      budget = window - reserve
+      at = Math.min(at, budget - headroom)
+    }
+    at = Math.floor(at)
+    if (!(at > 0)) return ''
+    // the tail a compaction keeps whole (resolveRetention: a model's own first, either kind);
+    // one no smaller than the point to compact at is a budget the engine refuses to work with
+    const retention = [own, config].find((p) => p?.retainTokens !== undefined || p?.retainRatio !== undefined)
+    const retain = count(retention?.retainTokens) ? retention.retainTokens
+      : Math.floor(budget * (Number.isFinite(retention?.retainRatio) ? retention.retainRatio : COMPACT_RETAIN))
+    if (retain >= at) return ''
+    const on = tokens >= at * (reminded.get(session) === true ? REMIND_UNTIL : REMIND_AT)
+    reminded.set(session, on)
+    return on ? settings.text.compactionSoon : ''
+  }
+}
+
+/** A whole number of tokens: an integer, not negative. */
+const count = (n) => Number.isInteger(n) && n >= 0
+
 /** How long a directory's walk up to its project root, or a shown index, is trusted. */
 const RECHECK_MS = 10000
 
@@ -2506,6 +2663,11 @@ const TEXT = {
       'it, or the user never has in dsh\'s own window — so no memory is loaded here and the ' +
       'memory store is closed to file tools. Do not recall or save anything about the user ' +
       'in it.',
+    compactionSoon:
+      'Engramory: this conversation is close to its context limit, and dsh will soon compact ' +
+      'it into a summary. If anything in it is worth keeping beyond this conversation and is ' +
+      'not in memory yet, save it now, as the Engramory skill describes. No need to tell the ' +
+      'user.',
     strangerRefusal:
       'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
       'written in it, or the user never has in dsh\'s own window), so the memory store is ' +
@@ -2562,6 +2724,9 @@ const TEXT = {
       'Engramory：这个会话不是用户本人的——有别人在里面说过话，或者用户从没在 dsh 窗口里' +
       '亲手发过消息——所以这里不加载记忆，文件工具也碰不到记忆库。不要在这里回忆或保存关于' +
       '用户的任何事。',
+    compactionSoon:
+      'Engramory：这段对话快到上下文上限了，dsh 很快会把它压缩成摘要。里面如果有值得长期' +
+      '记住、还没存进记忆的东西，现在照 Engramory skill 存好。不用特意告诉用户。',
     strangerRefusal:
       '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
       '窗口里亲手发过消息），记忆库对它关闭。',

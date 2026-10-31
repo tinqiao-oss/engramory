@@ -1004,7 +1004,8 @@ test('the index is injected as literal runtime context, from the session\'s proj
   store(project, '- [a](a.md) - first {{not-a-variable\n- [b](b.md) - second\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  assert.equal(prompt.contexts.length, 1)
+  // the index, then the reminder before compaction (empty here: no pressure to read)
+  assert.deepEqual(prompt.contexts.map((c) => c.name), ['engramory:memory-index', 'engramory:compaction'])
   const [spec] = prompt.contexts
   assert.equal(spec.name, 'engramory:memory-index')
   assert.equal(spec.interpolate, false, 'a {{ in a note title must never reach dsh interpolation')
@@ -1291,7 +1292,12 @@ test('$DSH_HOME padded with spaces is taken as dsh takes it, not trimmed', () =>
 test('injection can be turned off, and a host without runtime context keeps the cap', () => {
   const prompt = promptRegistry()
   mount({ injectIndex: false }, { systemPrompt: prompt })
-  assert.equal(prompt.contexts.length, 0)
+  // only the reminder before compaction is left, and it says nothing without pressure
+  assert.deepEqual(prompt.contexts.map((c) => c.name), ['engramory:compaction'])
+  assert.equal(prompt.render(at(scratch('off'))), '')
+  const none = promptRegistry()
+  mount({ injectIndex: false, compactionReminder: false }, { systemPrompt: none })
+  assert.equal(none.contexts.length, 0)
   const { guard } = mount({}, { systemPrompt: {} }) // a registry with no context()
   assert.match(guard(write(`/s/${INDEX}`, big(300))), /300 lines/)
 })
@@ -1300,7 +1306,7 @@ test('a prompt registry that mounts after the plugin still gets the index', () =
   const late = mount({}, { workingDirectory: sessionDirs() })
   const prompt = promptRegistry()
   late.mountLate('systemPrompt', prompt)
-  assert.equal(prompt.contexts.length, 1)
+  assert.equal(prompt.contexts[0].name, 'engramory:memory-index')
 })
 
 test('recall never fails a request', () => {
@@ -2098,18 +2104,197 @@ test('companion context is required, so a persona preset with optional context o
   assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
   assert.match(owner, /Companion mode \(大肥鱼模式\)/)
   assert.match(off(theirs('douyin-1', project)), /not the user's own/)
-  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]), [['engramory:memory', true]])
+  assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]),
+    [['engramory:memory', true], ['engramory:compaction', true]])
 
   // companion mode, private, makes it required too; without companion mode the index stays
   // optional, as every preset expects — `audience: social` alone changes nothing
   const one = promptRegistry()
   mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: one })
-  assert.deepEqual(one.contexts.map((c) => [c.name, c.required === true]), [['engramory:memory', true]])
+  assert.deepEqual(one.contexts.map((c) => [c.name, c.required === true]),
+    [['engramory:memory', true], ['engramory:compaction', true]])
   for (const config of [{}, { audience: 'social' }]) {
     const plain = promptRegistry()
     mount(config, { workingDirectory: sessionDirs(), systemPrompt: plain })
-    assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]), [['engramory:memory-index', false]])
+    assert.deepEqual(plain.contexts.map((c) => [c.name, 'required' in c]),
+      [['engramory:memory-index', false], ['engramory:compaction', false]])
   }
+})
+
+/**
+ * dsh's services as the reminder before compaction reads them: the token meter, the session
+ * projections with the `contextPressure` unit, the compaction engine (its `config`; by
+ * default as dsh 0.1.7 on resolves it, headroom and all) and the model registry — each
+ * session's `tokens` and `window` from `now`. `compaction: null` is a dsh with none.
+ */
+function pressureOf(now, { projections = projectionRegistry(), compaction = { config: { headroomTokens: 65536 } }, llm } = {}) {
+  const fold = projections.stateOf
+  projections.stateOf = (session, key) => {
+    if (key !== 'contextPressure') return fold(session, key)
+    const { window } = now(session)
+    return window === undefined ? { surfaceTokens: 0 } : { surfaceTokens: 0, contextWindow: window }
+  }
+  return {
+    projections,
+    services: {
+      tokenMeter: { measure: (session) => ({ totalTokens: now(session).tokens }) },
+      ...(compaction === null ? {} : { compaction }),
+      ...(llm === undefined ? {} : { llm }),
+    },
+  }
+}
+
+/** A session routed to a model, as dsh's request header has it, with `config` over it. */
+const routed = (config = {}) => ({
+  id: 's', requestHeader: () => ({ config: { provider: 'deepseek', model: 'flash', ...config } }),
+})
+
+/**
+ * A mount's reminder before compaction, and `said(tokens, session?)` for what it says then;
+ * the session by default reserves 250000 output tokens of its request.
+ */
+function reminderOf(now, config = {}, options = {}) {
+  const prompt = promptRegistry()
+  mount(config, { systemPrompt: prompt, ...pressureOf(() => now, options) })
+  const reminder = prompt.contexts.find((c) => c.name === 'engramory:compaction')
+  const fallback = routed({ maxTokens: 250000 })
+  const said = (tokens, session = fallback) => {
+    now.tokens = tokens
+    return reminder?.text({ agent: { session } })
+  }
+  return { prompt, reminder, said }
+}
+
+test('before dsh compacts a conversation, its model is told to save what is worth keeping', () => {
+  // a 1M window, 250000 reserved: dsh compacts past min(800000, 1000000 - 250000 - 65536) = 684464
+  const now = { tokens: 0, window: 1000000 }
+  const { prompt, reminder, said } = reminderOf(now)
+  assert.equal(reminder.order > prompt.contexts[0].order, true) // after the index
+  assert.equal(said(580000), '')
+  assert.match(said(582000), /close to its context limit[\s\S]*save it now[\s\S]*No need to tell the user/)
+  // on until the conversation is well below where it came on, so it does not flicker
+  assert.notEqual(said(480000), '')
+  assert.equal(said(479000), '')
+  assert.equal(said(580000), '')
+  // one fixed sentence: dsh sends the runtime context again whenever it changes
+  assert.equal(said(600000), said(680000))
+  // a compaction leaves the conversation small, and the reminder goes
+  assert.equal(said(100000), '')
+  // each conversation by itself
+  said(600000)
+  assert.equal(said(500000, routed({ maxTokens: 250000 })), '')
+})
+
+test('the reminder comes before dsh compacts as dsh is set up: the output reserved, its ratio, a model\'s own policy', async () => {
+  const tick = () => new Promise((resolve) => setImmediate(resolve))
+  // the request's own output cap: min(800000, 1000000 - 100000 - 65536) = 800000, on at 680000
+  let { said } = reminderOf({ window: 1000000 })
+  assert.equal(said(679000, routed({ maxTokens: 100000 })), '')
+  assert.notEqual(said(681000, routed({ maxTokens: 100000 })), '')
+  // else the model's default, asked of dsh once, in the background: nothing until it answers
+  const asked = []
+  const answer = { defaultMaxTokens: 400000 }
+  const llm = { resolveModelInfo: async (provider, model, signal) => {
+    asked.push([provider, model, signal instanceof AbortSignal])
+    return answer
+  } }
+  ;({ said } = reminderOf({ window: 1000000 }, {}, { llm }))
+  const s = routed()
+  assert.equal(said(900000, s), '')
+  await tick()
+  // min(800000, 1000000 - 400000 - 65536) = 534464, on at 454294
+  assert.equal(said(454000, s), '')
+  assert.notEqual(said(455000, s), '')
+  assert.deepEqual(asked, [['deepseek', 'flash', true]])
+  // a model with no default reserves nothing, as the engine has it: 800000, on at 680000
+  delete answer.defaultMaxTokens
+  const other = routed({ model: 'plain' })
+  said(0, other)
+  await tick()
+  assert.equal(said(679000, other), '')
+  assert.notEqual(said(681000, other), '')
+  // a lookup that fails gives no reminder, and is not asked again at once
+  let failures = 0
+  const failing = { resolveModelInfo: () => { failures++; throw new Error('no such model') } }
+  ;({ said } = reminderOf({ window: 1000000 }, {}, { llm: failing }))
+  assert.equal(said(900000, routed()), '')
+  await tick()
+  assert.equal(said(900000, routed()), '')
+  assert.equal(failures, 1)
+  // the engine's own ratio and headroom, a model's own policy over them
+  const compaction = { config: { thresholdRatio: 0.5, headroomTokens: 0,
+    modelPolicies: [{ provider: 'deepseek', model: 'pro', thresholdRatio: 0.6 }] } }
+  ;({ said } = reminderOf({ window: 1000000 }, {}, { compaction }))
+  assert.equal(said(424000), '') // min(500000, 750000) = 500000, on at 425000
+  assert.notEqual(said(426000), '')
+  const pro = routed({ model: 'pro', maxTokens: 250000 })
+  assert.equal(said(509000, pro), '') // 600000, on at 510000
+  assert.notEqual(said(511000, pro), '')
+  // dsh 0.1.5's engine, whose config has no headroom: the window times the ratio, nothing else
+  ;({ said } = reminderOf({ window: 64000 }, {}, { compaction: { config: { thresholdRatio: 0.8 } } }))
+  assert.equal(said(43000, routed({ maxTokens: 8192 })), '') // 51200, on at 43520
+  assert.notEqual(said(44800, routed({ maxTokens: 8192 })), '')
+  // two routes that would read alike joined by a slash are asked about apart
+  const defaults = { 'a/b|c': 100000, 'a|b/c': 400000 }
+  const routes = { resolveModelInfo: async (provider, model) => ({ defaultMaxTokens: defaults[`${provider}|${model}`] }) }
+  ;({ said } = reminderOf({ window: 1000000 }, {}, { llm: routes }))
+  const first = routed({ provider: 'a/b', model: 'c' })
+  const second = routed({ provider: 'a', model: 'b/c' })
+  said(0, first)
+  said(0, second)
+  await tick()
+  assert.equal(said(460000, first), '') // 800000, on at 680000
+  assert.notEqual(said(460000, second), '') // 534464, on at 454294
+})
+
+test('no reminder where the engine would refuse to compact: a kept tail no smaller than the point', () => {
+  // 0.1.7 on: min(800000, 1000000 - 250000 - 640000) = 110000, the tail 0.16 of 750000 = 120000
+  const big = { compaction: { config: { headroomTokens: 640000 } } }
+  assert.equal(reminderOf({ window: 1000000 }, {}, big).said(100000), '')
+  // a model's own tail over the engine's: 50000 kept of 110000, so it compacts, on at 93500
+  const own = { compaction: { config: { headroomTokens: 640000,
+    modelPolicies: [{ provider: 'deepseek', model: 'flash', retainTokens: 50000 }] } } }
+  assert.notEqual(reminderOf({ window: 1000000 }, {}, own).said(100000), '')
+  // 0.1.5: 80000 to compact at, 90000 to keep
+  const old = { compaction: { config: { thresholdRatio: 0.8, retainTokens: 90000 } } }
+  assert.equal(reminderOf({ window: 100000 }, {}, old).said(85000), '')
+})
+
+test('no reminder of a compaction that will not come, or without a measure and a window; it can be turned off', () => {
+  const at = (now, config = {}, options = {}) => reminderOf(now, config, options).said(now.tokens)
+  const full = { tokens: 900000, window: 1000000 }
+  assert.notEqual(at(full), '')
+  assert.equal(at(full, {}, { compaction: null }), '') // no compaction engine
+  assert.equal(at(full, {}, { compaction: { config: { auto: false } } }), '') // none on its own
+  // a conversation not yet routed to a model, which the engine does not compact
+  assert.equal(reminderOf(full).said(900000, { id: 's' }), '')
+  assert.equal(at({ tokens: 900000 }), '') // no request has recorded a window yet
+  assert.equal(at({ tokens: 900000, window: 0 }), '')
+  assert.equal(at({ tokens: Number.NaN, window: 1000000 }), '')
+  // 300000 - 250000 - 65536 < 0: no room to compact in, which dsh itself refuses to work with
+  assert.equal(at({ tokens: 290000, window: 300000 }), '')
+  assert.equal(at(full, { compactionReminder: false }), undefined)
+  assert.match(at(full, { language: 'zh' }), /快到上下文上限了[\s\S]*现在照 Engramory skill 存好/)
+  // no meter or no projections on this host, or a meter that throws: nothing, and the request goes on
+  const bare = promptRegistry()
+  mount({}, { systemPrompt: bare, projections: null, services: { compaction: { config: {} } } })
+  assert.equal(bare.contexts.find((c) => c.name === 'engramory:compaction').text({ agent: { session: routed() } }), '')
+  const failing = promptRegistry()
+  mount({}, { systemPrompt: failing, services: { compaction: { config: {} },
+    tokenMeter: { measure: () => { throw new Error('replay') } } } })
+  assert.equal(failing.contexts.find((c) => c.name === 'engramory:compaction').text({ agent: { session: routed() } }), '')
+})
+
+test('in social mode only the user\'s own conversations are reminded to save', () => {
+  const project = scratch('remind-social')
+  const prompt = promptRegistry()
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt,
+    ...pressureOf(() => ({ tokens: 900000, window: 1000000 })) })
+  const reminder = prompt.contexts.find((c) => c.name === 'engramory:compaction')
+  assert.equal(reminder.required, true) // a persona preset with optional context off keeps it
+  const header = () => ({ config: { provider: 'deepseek', model: 'flash', maxTokens: 250000 } })
+  assert.match(reminder.text(as({ ...own('own-r', project), requestHeader: header })), /close to its context limit/)
+  assert.equal(reminder.text(as({ ...theirs('qq-r', project), requestHeader: header })), '')
 })
 
 test('memory access is a choice inside companion mode: private by default, social only with companion mode on', () => {
