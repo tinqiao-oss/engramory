@@ -659,7 +659,37 @@ def test_the_payload_manifest_matches_what_the_installer_copies():
         shipped = sorted(p.name for p in (REPO / name).iterdir()
                          if p.is_file() and p.suffix in (".md", ".py"))
         assert sorted(files) == shipped, name
-    current = hashlib.sha256((REPO / "templates" / "MEMORY.md").read_bytes()
-                             .replace(b"\r\n", b"\n")).hexdigest()
-    assert current in init._TEMPLATE_INDEX_SHA256, \
-        "templates/MEMORY.md changed: add its sha256 to _TEMPLATE_INDEX_SHA256"
+    for path in (REPO / "templates").iterdir():
+        current = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+        assert current in init._TEMPLATE_SHA256, \
+            "templates/%s changed: add its sha256 to _TEMPLATE_SHA256" % path.name
+
+
+def test_a_shipped_template_edited_into_a_note_keeps_templates(tmp_path):
+    """A template is ours only as some release shipped it, not by its name alone."""
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    example = tmp_path / ".agents" / "skills" / "engramory" / "templates" / "example-feedback.md"
+    example.write_text("a real note the user wrote over the example\n", encoding="utf-8")
+
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert example.is_file(), "UNINSTALL DELETED AN EDITED TEMPLATE"
+    assert "example-feedback.md (edited)" in out
+    code, out = _run("codex", tmp_path, "--install-skill", "--force")
+    assert code != 0 and "did not put there" in out, out
+
+
+def test_a_skill_file_name_that_is_a_directory_is_never_rmtreed(tmp_path):
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+    (skill / "LICENSE").unlink()
+    (skill / "LICENSE").mkdir()
+    (skill / "LICENSE" / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert (skill / "LICENSE" / "MEMORY.md").is_file(), "UNINSTALL DELETED A STORE"
+    code, out = _run("codex", tmp_path, "--install-skill", "--force")
+    assert code != 0 and "did not put there" in out, out

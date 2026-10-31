@@ -26,8 +26,8 @@ finding checked against the code), most costly first.
   store another run had put inside the installed skill's `tools/` went with that
   directory on uninstall, and a `--force` reinstall removed the whole skill directory,
   a store kept at its root included. Both now remove only what the installer ships,
-  decided from a fixed list of its files (and of every template index it has
-  shipped), so it holds when the installed copy itself runs the uninstall. A payload
+  decided from a fixed list of its files and of every template version it has
+  shipped, so it holds when the installed copy itself runs the uninstall. A payload
   directory with anything else in it is kept whole and named, and `--force` refuses
   while one is.
 - **AGENT-SETUP's guard check could replace a real index.** With

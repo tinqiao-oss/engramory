@@ -336,44 +336,66 @@ _PAYLOAD_FILES = {
     "tools": ("engramory_check.py", "engramory_doctor.py", "engramory_init.py",
               "engramory_sync.py", "engramory_trace.py"),
 }
-# Every templates/MEMORY.md a release has shipped (sha256, line endings as LF). One that
-# matches none has been edited and may be a store's index (`--memory-root
-# .agents/skills/engramory/templates`). A test checks the current one is listed.
-_TEMPLATE_INDEX_SHA256 = frozenset((
+# Every version of every file in templates/ a release has shipped (sha256, line
+# endings as LF). One that matches none has been edited and may be a store's index
+# or note (`--memory-root .agents/skills/engramory/templates`). A test checks the
+# current files are listed.
+_TEMPLATE_SHA256 = frozenset((
+    "0dccdd0d50a19182aaba95b224c52b0069505617954f5deea2482acd835c8803",
+    "2fc64d4e1e978dcf158a223bc8dc587a5a588ba3c422a4e2603bae89e2cbd3c2",
+    "5cdafdd92ebf471b627f234912789ef8eb49ebc64986c9e4c9416b1e7f80783f",
+    "64b06a7cf9d3beebc2df33a8e25aa7e06e5d3a835aeadcb471d8ddcb168071bb",
+    "6e35ee15a078889dc2d6f648d3706aeba3b6cf3d7f5229de9f1cd55f278db3e0",
+    "71e772b5094c228109ca1585dd39a1711093d12b7c8e0d136a3590c6a865941c",
+    "c1bea38ce92398022936613603d06106f1fa1f7519c3f284273b219d64d75250",
+    "c4e2436b5f432cd26d2e56c82175a4ec39be5091e04f9e8039fd9a86fc1e72fa",
+    "d56698204467948cf5103c92570f0b52af3f01ffcbc10790c47f6c179fa1ac2d",
     "dab0b0de71ad4ab1817bd42435b5c3e687914580cac257291c060a3f985cc38a",
     "e3b67068dcd79adb9426f2ef634e4a297f7030ef76dd60e1377b699db6c4b616",
-    "c4e2436b5f432cd26d2e56c82175a4ec39be5091e04f9e8039fd9a86fc1e72fa",
-    "71e772b5094c228109ca1585dd39a1711093d12b7c8e0d136a3590c6a865941c",
+    "e6143c526d55475743d87391bdcf569a2143f88d5d0fadede4b0a8a919367dea",
+    "e7e39e046b8cba0f697628443b3b98c56152cb2a89445e96e5403304dbbcbf9d",
 ))
+# No shipped template comes near this; a larger one is not read to be hashed.
+_TEMPLATE_MAX_BYTES = 1 << 20
 
 
 def _not_ours(skill_root, name):
-    """Entries of payload dir `name` that this installer did not put there, by name.
+    """Entries at payload name `name` that this installer did not put there.
 
-    Ours: the files in _PAYLOAD_FILES (templates/MEMORY.md only as shipped) and a
+    Ours: a skill file that is a regular file; a payload directory whose entries are
+    the files in _PAYLOAD_FILES (a template only as some release shipped it) and a
     `__pycache__` holding nothing but `.pyc` files. A directory with anything else in
-    it is kept whole: deleting around a user's files gains nothing.
+    it is kept whole: deleting around a user's files gains nothing. What cannot be
+    read is not known to be ours.
     """
     import hashlib
 
     path = skill_root / name
+    if name in _SKILL_FILES:
+        return [name + "/"] if path.is_dir() and not path.is_symlink() else []
     if not path.is_dir() or path.is_symlink():
         return []
     others = []
-    for entry in sorted(path.iterdir()):
-        if entry.is_symlink():
-            others.append(entry.name)
-        elif entry.is_dir():
-            if entry.name != "__pycache__" or any(
-                    not f.is_file() or f.is_symlink() or f.suffix != ".pyc"
-                    for f in entry.iterdir()):
-                others.append(entry.name + "/")
-        elif entry.name not in _PAYLOAD_FILES[name]:
-            others.append(entry.name)
-        elif name == "templates" and entry.name == "MEMORY.md":
-            digest = hashlib.sha256(entry.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-            if digest not in _TEMPLATE_INDEX_SHA256:
-                others.append("MEMORY.md (edited)")
+    try:
+        for entry in sorted(path.iterdir()):
+            if entry.is_symlink():
+                others.append(entry.name)
+            elif entry.is_dir():
+                if entry.name != "__pycache__" or any(
+                        not f.is_file() or f.is_symlink() or f.suffix != ".pyc"
+                        for f in entry.iterdir()):
+                    others.append(entry.name + "/")
+            elif entry.name not in _PAYLOAD_FILES[name]:
+                others.append(entry.name)
+            elif name == "templates":
+                if entry.stat().st_size > _TEMPLATE_MAX_BYTES:
+                    others.append(entry.name + " (edited)")
+                    continue
+                digest = hashlib.sha256(entry.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+                if digest not in _TEMPLATE_SHA256:
+                    others.append(entry.name + " (edited)")
+    except OSError as exc:
+        others.append("unreadable: %s" % exc)
     return others
 
 
@@ -391,11 +413,11 @@ def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
         # Replace our own files only, as uninstall removes them: a store kept at this
         # path (`--memory-root .agents/skills/engramory`) survives, which an rmtree of
         # the whole directory did not; anything not ours inside a payload dir refuses.
-        for name in _SKILL_DIRS:
+        for name in _SKILL_FILES + _SKILL_DIRS:
             others = _not_ours(skill_root, name)
             if others:
                 raise SystemExit(
-                    "refusing to replace %s: %s/ holds files this installer did not put "
+                    "refusing to replace %s: %s holds files this installer did not put "
                     "there (%s) - a memory store, perhaps. Move them out of the skill "
                     "directory first." % (rel, name, ", ".join(others[:3])))
         for name in _SKILL_FILES + _SKILL_DIRS:
@@ -1182,11 +1204,11 @@ def _uninstall_skill(project_root, cfg, memory_root, dry_run):
     # contains a MEMORY.md of its own, so "holds an index" is not a usable signal for
     # the payload directories; the store that matters sits at the root.)
     payload = [n for n in (_SKILL_FILES + _SKILL_DIRS) if n in entries]
-    held = {n: _not_ours(skill_root, n) for n in _SKILL_DIRS if n in payload}
+    held = {n: _not_ours(skill_root, n) for n in payload}
     held = {n: o for n, o in held.items() if o}
     payload = [n for n in payload if n not in held]
     others = [n for n in entries if n not in payload]
-    kept = "".join("; KEPT %s/ whole: it holds files this installer did not put there (%s)"
+    kept = "".join("; KEPT %s whole: it holds files this installer did not put there (%s)"
                    % (n, ", ".join(o[:3])) for n, o in held.items())
     if dry_run:
         if payload and not others:

@@ -284,6 +284,13 @@ test("str_replace_editor is judged as it edits: by its own path, matching the te
     arguments: { command: 'insert', path, insert_line: 1, new_str: 'b' } }), undefined)
 })
 
+test("another plugin's write taking `path` is still judged on it", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-scoped-'))
+  const path = join(dir, INDEX)
+  writeFileSync(path, big(10), 'utf8')
+  assert.match(mount().guard({ name: 'write', arguments: { path, content: big(300) } }), /300 lines/)
+})
+
 test('an index name with replacement patterns is named as written', () => {
   assert.match(mount({ indexName: '$&.md', language: 'en' }).skills[0].description, /through \$&\.md /)
 })
