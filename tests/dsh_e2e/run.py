@@ -74,6 +74,9 @@ INDEX_HEADS = ("Project memory index (", "项目记忆索引（")  # index.js re
 # past it whatever output the model reserves.
 REMINDER_MARKS = ("close to its context limit", "快到上下文上限了")
 QUIET_SHARE, REMIND_SHARE = 0.3, 0.7
+# The plugin release that brought the reminder (CHANGELOG 1.0.7): an older one, checked as
+# published, has none to look for.
+REMINDER_SINCE = (1, 0, 7)
 
 # Every tool dsh has offered in a passing run, and why it cannot put the index past the
 # cap behind the guard's back. A tool missing from this table fails the run until
@@ -221,6 +224,12 @@ def read_bytes(path):
             return f.read()
     except OSError:
         return None
+
+
+def release_of(version):
+    """(major, minor, patch) of a semver string, or None."""
+    m = SEMVER.fullmatch(version or "")
+    return tuple(int(m.group(i)) for i in (1, 2, 3)) if m else None
 
 
 def recorded_window(home):
@@ -446,19 +455,21 @@ def check_release(version, plugin, work, node, npm):
     # dsh's own token meter, projections and compaction engine: one conversation whose model
     # reports QUIET_SHARE, then REMIND_SHARE, of the window dsh recorded is reminded on the
     # request after the second report only. (Too short to compact, it stays whole.)
-    window = recorded_window(home)
-    if check("dsh recorded a context window", window, "no contextWindow under %s" % home):
-        plan = [{"tool": "read", "args": {"file_path": seeded}, "usage": int(window * QUIET_SHARE)},
-                {"tool": "read", "args": {"file_path": seeded}, "usage": int(window * REMIND_SHARE)},
-                {"text": "done"}]
-        with FakeLLM(plan) as fake:
-            code, out, err = run(dsh + ["--profile", PROFILE, "Read the memory index."], cwd=ws,
-                                 env=dsh_env(home, fake.base_url), timeout=300)
-        bodies = [json.dumps(b, ensure_ascii=False) for b in fake.main]
-        reminded = [any(m in b for m in REMINDER_MARKS) for b in bodies]
-        check("reminded to save as the conversation nears compaction, not before",
-              code == 0 and reminded[:3] == [False, False, True],
-              "exit %s, reminder in requests: %s, window %s: %s" % (code, reminded, window, tail(err or out)))
+    # (a plugin from before the reminder has none to look for)
+    if (release_of(plugin["version"]) or ()) >= REMINDER_SINCE:
+        window = recorded_window(home)
+        if check("dsh recorded a context window", window, "no contextWindow under %s" % home):
+            plan = [{"tool": "read", "args": {"file_path": seeded}, "usage": int(window * QUIET_SHARE)},
+                    {"tool": "read", "args": {"file_path": seeded}, "usage": int(window * REMIND_SHARE)},
+                    {"text": "done"}]
+            with FakeLLM(plan) as fake:
+                code, out, err = run(dsh + ["--profile", PROFILE, "Read the memory index."], cwd=ws,
+                                     env=dsh_env(home, fake.base_url), timeout=300)
+            bodies = [json.dumps(b, ensure_ascii=False) for b in fake.main]
+            reminded = [any(m in b for m in REMINDER_MARKS) for b in bodies]
+            check("reminded to save as the conversation nears compaction, not before",
+                  code == 0 and reminded[:3] == [False, False, True],
+                  "exit %s, reminder in requests: %s, window %s: %s" % (code, reminded, window, tail(err or out)))
 
     code, out, err = run(dsh + ["plugin", "--profile", PROFILE, "remove", "dsh-engramory"],
                          cwd=work, env=quiet, timeout=600)

@@ -72,6 +72,13 @@ endings normalised), every check's outcome, the wire format and the tool list.
 plugin version **and** runtime digest, a contradicting failure, or a map with no
 compatible release. Declare only what passed.
 
+After a release, run the published package (`--plugin dsh-engramory@<version>
+--record`) on three releases, not every declared one: the oldest declared (the OpenAI
+wire), a 0.1.7 (the Anthropic wire, the 0.1 agent loop) and the newest declared. The repo
+runs already cover every release; what the published run adds is that the registry
+tarball carries the runtime digest that was tested, which any release shows, and each
+release costs about a minute.
+
 `dsh.compatibility.dsh` is a display range for directories, not evidence. The plugin
 deliberately declares no `engines.dsh` or `@deepseek-ai/dsh*` peer range, so an
 untested future dsh is not refused outright. DSH-Store installs only on an exact
