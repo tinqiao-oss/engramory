@@ -123,7 +123,8 @@ _CJK_RE = re.compile(r"[一-鿿]")
 # Index pointer target `](path.md)`: lazy + a real terminator after `.md` so a backup
 # like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
 # a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
-_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)")
+# `.MD` too, as note discovery accepts it: missed, `[B](b.MD)` read as an orphan note.
+_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)", re.IGNORECASE)
 # Everything on an index line that is a POINTER rather than prose: a Markdown link
 # target `](...)` and a `[[wikilink]]`. What remains after stripping these is the hook
 # text the author wrote — the part that grows when content leaks into the index. A

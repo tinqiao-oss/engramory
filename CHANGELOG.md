@@ -6,6 +6,58 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.2 — 2026-10-31
+
+Fixes from an audit of the whole repository (GPT and DeepSeek through Codex, each
+finding checked against the code), most costly first.
+
+- **dsh: a decoy argument could carry an edit past the cap.** dsh's `edit` applies
+  `old_string` / `new_string` and ignores other fields, but the guard read `old_str` /
+  `new_str` first: a call that also carried a decoy `old_str` matching nothing was
+  predicted to change nothing and passed, while dsh wrote the real edit. dsh's `edit` is
+  now judged on its own arguments alone, `str_replace_editor` on its own, and a tool
+  whose schema is not known here on every reading (any one that grows past the cap
+  refuses).
+- **Uninstall and `--install-skill --force` no longer delete a store kept inside the
+  skill directory.** The overlap check knew only the store the current run names: a
+  store another run had put inside the installed skill's `tools/` went with that
+  directory on uninstall, and a `--force` reinstall removed the whole skill directory,
+  a store kept at its root included. Both now remove the skill's own files and
+  directories only, keep a payload directory that holds a memory store (and say so),
+  and `--force` refuses while one does.
+- **AGENT-SETUP's guard check could replace a real index.** With
+  `ENGRAMORY_INDEX_PATH` set it sent the agent to test on the real index, and a
+  250-line whole-file write on an index already longer is a shrink, which the guard
+  rightly allows. It now says to append to the real index with an edit, never to
+  rewrite it; hooks/INSTALL.md says the same.
+- **dsh: `insert` is simulated.** `str_replace_editor`'s `insert` (and a tool named
+  `insert` taking the same arguments) counted as unmeasurable, so one large insert could
+  carry an index from under the cap to far past it. dsh's own file tools are `write`
+  and `edit`; this matters for tools other plugins add.
+- **dsh: the built-in skill states the caps and the index name you configured**, not
+  always 200 lines / 25 KB and `MEMORY.md`, and asks for the added / updated /
+  archived / skipped report after every memory write, as SKILL.md does.
+- **dsh social mode: a global index that is a link** closes the folder it points to
+  for others' conversations, as a pinned index's target already did.
+- **Claude Code hook: a symlink or a Windows 8.3 short name of the index is the
+  index.** Unpinned, the hook matched only the name a tool was called with, so a
+  growing write through `idx.md -> MEMORY.md` or `MEMORY~1.MD` passed; it now matches
+  the name of the file the path resolves to as well, as the dsh guard does (#20). A
+  lone surrogate in the content (valid JSON, not UTF-8) no longer makes it fail open:
+  it counts 3 bytes, as dsh counts it.
+- Smaller: doctor reads `](note.MD)` pointers (a valid one read as an orphan, a broken
+  one passed); re-running the installer keeps the indentation of the line after its
+  rules block.
+- Docs: the root README presents Engramory as memory for any agent, with the dsh
+  plugin as one way in. The plugin README's links are absolute (relative ones broke
+  inside the npm package), and it says that `registerSkill: false` keeps the index in
+  context, that a `language` that is not a string counts as unset, that a custom
+  `skill` reaches others' conversations in social mode, that `indexName` is
+  case-insensitive for the cap only, and that a machine with no desktop shows no open
+  buttons. SECURITY.md names the plugin's two owner-only routes instead of claiming no
+  network surface.
+- dsh-engramory **1.0.2**.
+
 ## 1.0.1 — 2026-10-31
 
 Documentation and packaging. The plugin's runtime is unchanged; the one other code

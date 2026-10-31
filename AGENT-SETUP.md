@@ -378,7 +378,11 @@ Two ways this test lies to you:
   that way is not evidence of anything.
 - If `ENGRAMORY_INDEX_PATH` is set, the hook guards *only* that one path, so a scratch
   `MEMORY.md` is supposed to be ignored. Testing there produces a **false failure**.
-  Check that variable first; if it is set, exercise the real index instead.
+  Check that variable first; if it is set, exercise the real index instead, and **only
+  with an edit that appends 250 lines to it**, never a whole-file write. On an index
+  already longer than the test file, a rewrite is a *shrink*, which the guard rightly
+  allows, and the test would replace the user's index. If the append is not denied,
+  remove the lines it added before you do anything else.
 
 **Where no such hook exists:** do not test for a deny — there is nothing to deny.
 Verify instead that `python tools/engramory_check.py <MEMORY.md>` reports `OVER` on an

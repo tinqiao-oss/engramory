@@ -6,7 +6,8 @@
 
 Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (dsh). What the AI remembers is kept as plain markdown files you can open and edit
-at any time. Part of [Engramory](https://github.com/tinqiao-oss/engramory).
+at any time. It is the dsh build of [Engramory](https://github.com/tinqiao-oss/engramory),
+which is general-purpose agent memory: Claude Code, Codex and others can use the same store.
 
 ![The memory page](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
@@ -36,7 +37,7 @@ dsh plugin --profile <name> add dsh-engramory
 ```
 
 To uninstall, use `remove` instead of `add`. Compatible dsh releases are listed in
-`dsh.compatibility.dshReleases` in [`package.json`](package.json); an unlisted release
+`dsh.compatibility.dshReleases` in [`package.json`](https://github.com/tinqiao-oss/engramory/blob/master/adapters/dsh/plugin/package.json); an unlisted release
 is unverified.
 
 **Where the memory lives:**
@@ -49,7 +50,7 @@ is unverified.
   that project goes there; everything else stays in the global store.
 
 Only one AI may write a store; two writers overwrite each other. To share it, let the
-others read it only: see [one writer, many readers](../../reader/README.md). Memories are plain text and carry machine-local detail. Inside a project's git repo
+others read it only: see [one writer, many readers](https://github.com/tinqiao-oss/engramory/blob/master/adapters/reader/README.md). Memories are plain text and carry machine-local detail. Inside a project's git repo
 the store must be git-ignored; a dedicated private repo for the store is fine.
 
 **Without the plugin:** `python tools/engramory_init.py dsh --install-skill` writes the
@@ -64,7 +65,7 @@ companion switch on the settings page, or set `companion: true`.
 
 ![The memory page in companion mode](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/companion-mode.png)
 
-- **Three more types for the character's own life** ([SKILL.md §2.2](../../../SKILL.md)):
+- **Three more types for the character's own life** ([SKILL.md §2.2](https://github.com/tinqiao-oss/engramory/blob/master/SKILL.md)):
   `moment`, something you shared, with its date, folded into a monthly archive when
   the index fills; `upcoming`, something coming up in your life, asked about once its
   date passes and rewritten as a moment once you say how it went; `self`, a change in
@@ -95,7 +96,9 @@ Someone else's conversation gets no index and is not told where the store is; ds
 file tools there may name files only (every directory is refused), and any path into
 a store is refused however it is spelled. This is **not** a security boundary: a shell
 tool reads any file, and another profile on the same account can read the store too.
-Real isolation needs filesystem permissions or a sandbox.
+Real isolation needs filesystem permissions or a sandbox. A custom `skill` (see
+[Configuration](#configuration)) reaches every conversation as written, someone else's
+included, so if it says where the store is, they are told too.
 
 ### For bridge authors
 
@@ -133,8 +136,9 @@ owner, so a program forwarding other people's messages must leave it out.
   workspace's project store (with an absolute `indexPath`, that store alone; with a
   relative one, none), with each index's size against the cap, its notes' names
   by type, and its archive. Read-only, never a note's text; a name, *Open the index* and
-  *Open the folder* open on the machine dsh runs on. The two switches at the top save
-  as you flip them.
+  *Open the folder* open on the machine dsh runs on; a machine with no desktop (a
+  headless server, a session over SSH) shows none of them. The switches at the top
+  (companion mode, and memory access once it is on) save as you flip them.
 
 ## Configuration
 
@@ -152,16 +156,16 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `indexName` | `MEMORY.md` | The file name treated as the index, case-insensitive. |
+| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; putting the index into context needs the exact name on a case-sensitive filesystem (Linux, say). |
 | `maxLines` | `200` | Line cap for the index. |
 | `maxBytes` | `25600` | UTF-8 byte cap for the index (25 KB). |
 | `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |
-| `registerSkill` | `true` | `false` keeps the cap but skips the built-in rules. |
+| `registerSkill` | `true` | `false` skips the built-in rules; the cap and the index in context stay. |
 | `injectIndex` | `true` | `false` stops putting the index into context; the AI reads it instead. |
-| `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other value is English. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
+| `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other string is English; a value that is not a string, or is empty, counts as unset. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
 | `companion` | `false` | `true` turns companion mode on. |
 | `audience` | `private` | With companion mode on, `social` turns social mode on. |
-| `skill` | built-in | Your own markdown in place of the built-in rules; it must then say where the store is. |
+| `skill` | built-in | Your own markdown in place of the built-in rules; it must then say where the store is. In social mode, others' conversations see it too. |
 
 ## How the cap decides
 
@@ -170,8 +174,8 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 | The index ends within the caps | allow |
 | The write grows the index past a cap | **deny**, with the numbers and what to compact |
 | The index is over a cap and the write shrinks it or keeps its size | allow, so compaction can go step by step (210 → 205 → 198) |
-| An edit with `old_str`/`new_str` | its result is worked out first, then judged as above |
-| A partial edit whose result cannot be worked out (e.g. `insert`) | deny on an over-cap index, else allow |
+| A partial edit whose result can be worked out: `edit` (`old_string`/`new_string`), `str_replace_editor`'s replace (`old_str`/`new_str`) and `insert` | its result is worked out first, then judged as above; dsh's `edit` is worked out from the arguments it uses alone |
+| A partial edit whose result cannot be worked out (arguments missing or not recognised) | deny on an over-cap index, else allow |
 | The index is missing, unreadable, or not a regular file | a whole-file write is judged as if it were empty; a partial edit passes |
 | The index is past the read limit (`min(16 MiB, max(1 MiB, 4 × maxBytes))`) | not read whole: a whole-file write is judged on bytes alone; a partial edit passes |
 | Reads, writes to other files, unknown tools or arguments | allow; reads are never blocked, even over the cap |
@@ -183,8 +187,8 @@ writable. This table is pinned by `node --test` in CI.
 
 ## Known limits
 
-- **Only dsh's own file tools are capped** (`write`, `edit`, `str_replace_editor` and
-  the like). Shell tools, MCP file tools and external editors go past it: run
+- **Only file tools are capped:** dsh's own `write` and `edit`, and the same kind of
+  tool from other plugins (`str_replace_editor` and the like). Shell tools, MCP file tools and external editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
 - **Stores are found only where the installer puts them.** Elsewhere, or for a project
   store that links out of the project, set `indexPath`. A project's root is found by
@@ -206,7 +210,7 @@ This package carries Engramory's version: `dsh-engramory@X.Y.Z` is the repo's
 `vX.Y.Z`. The cap's decisions (the table above) and the settings outside the
 experimental features change incompatibly only in a major version. See Engramory's
 [Versioning](https://github.com/tinqiao-oss/engramory/blob/master/README.en.md#versioning); history is in the
-[CHANGELOG](../../../CHANGELOG.md).
+[CHANGELOG](https://github.com/tinqiao-oss/engramory/blob/master/CHANGELOG.md).
 
 ## License
 

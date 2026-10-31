@@ -2,7 +2,11 @@
 
 Engramory is a local developer tool: a discipline, a Claude Code index hook, optional
 Codex lifecycle hooks, a dsh guard plugin (`adapters/dsh/plugin/`) and helper scripts.
-It has no network surface and runs entirely on your machine.
+It runs entirely on your machine and opens no network service of its own. The one
+network surface is inside dsh: the plugin adds two routes to dsh's web server for its
+settings and memory pages (`/api/engramory/settings`, `/api/engramory/memory`), which
+dsh answers only for the signed-in owner. They save the plugin's settings, list note
+names, and ask dsh to open a note on the dsh machine; no note's text is served.
 
 ## Reporting a vulnerability
 

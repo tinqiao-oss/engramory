@@ -225,14 +225,55 @@ test('a simulable edit is judged by its RESULT: shrink passes, growth is refused
   writeFileSync(path, `HEAD\n${big(220)}`, 'utf8')
   const shrink = {
     name: 'edit',
-    arguments: { file_path: path, old_str: `HEAD\n${big(220)}`, new_str: big(150) },
+    arguments: { file_path: path, old_string: `HEAD\n${big(220)}`, new_string: big(150) },
   }
   assert.equal(guard(shrink), undefined, 'a compacting edit must pass while over')
   const grow = {
     name: 'edit',
-    arguments: { file_path: path, old_str: 'HEAD', new_str: big(30) },
+    arguments: { file_path: path, old_string: 'HEAD', new_string: big(30) },
   }
   assert.match(guard(grow), /lines > 200/, 'an edit growing an over-cap index must be refused')
+  // str_replace_editor names its strings old_str / new_str
+  const viaEditor = {
+    name: 'str_replace_editor',
+    arguments: { command: 'str_replace', path, old_str: 'HEAD', new_str: big(30) },
+  }
+  assert.match(guard(viaEditor), /lines > 200/)
+})
+
+test("an edit is judged on the arguments dsh's edit applies, whatever else the call carries", () => {
+  // dsh's edit reads old_string / new_string and ignores other fields: a decoy old_str
+  // that matches nothing read first predicted "no change" and let dsh write past the cap
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-decoy-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  writeFileSync(path, `HEAD\n${big(150)}`, 'utf8')
+  const real = { file_path: path, old_string: 'HEAD', new_string: big(300) }
+  assert.match(guard({ name: 'edit', arguments: real }), /lines > 200/)
+  assert.match(guard({ name: 'edit', arguments: { ...real, old_str: 'NOT THERE', new_str: '' } }),
+    /lines > 200/)
+  // dsh's edit has no replaceAll: an ambiguous old_string is an error there, nothing changes
+  writeFileSync(path, `x\nx\n${big(150)}`, 'utf8')
+  assert.equal(guard({ name: 'edit',
+    arguments: { file_path: path, old_string: 'x\n', new_string: big(30), replaceAll: true } }), undefined)
+  // a tool whose schema is not known here is judged on every reading: one growth refuses
+  writeFileSync(path, `HEAD\n${big(150)}`, 'utf8')
+  assert.match(guard({ name: 'str_replace',
+    arguments: { file_path: path, old_str: 'NOT THERE', new_str: '', old_string: 'HEAD', new_string: big(300) } }),
+  /lines > 200/)
+})
+
+test('an insert is simulated: one large insert cannot carry the index past the cap', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-insert-'))
+  const path = join(dir, INDEX)
+  const { guard } = mount()
+  writeFileSync(path, big(150), 'utf8')
+  const insert = (new_str, insert_line = 1) =>
+    guard({ name: 'str_replace_editor', arguments: { command: 'insert', path, insert_line, new_str } })
+  assert.equal(insert(big(10)), undefined, 'an insert within the cap passes')
+  assert.match(insert(big(100)), /250 lines > 200/)
+  assert.equal(insert(big(100), 999), undefined, 'a line out of range is the tool\'s error: nothing changes')
+  assert.match(guard({ name: 'insert', arguments: { path, insert_line: 0, new_str: big(100) } }), /lines > 200/)
 })
 
 const crlf = (text) => text.split('\n').join('\r\n')
@@ -298,13 +339,14 @@ test('an unsimulable partial on an over-cap index is refused, naming the open do
   const path = join(dir, INDEX)
   const { guard } = mount()
   writeFileSync(path, big(10), 'utf8')
-  const insert = {
+  // no old string, so nothing says what it replaces
+  const blind = {
     name: 'str_replace_editor',
-    arguments: { command: 'insert', path, insert_line: 1, new_str: 'x' },
+    arguments: { command: 'str_replace', path, new_str: 'x' },
   }
-  assert.equal(guard(insert), undefined, 'a healthy index must stay editable')
+  assert.equal(guard(blind), undefined, 'a healthy index must stay editable')
   writeFileSync(path, big(300), 'utf8')
-  const reason = guard(insert)
+  const reason = guard(blind)
   assert.match(reason, /already over/)
   assert.match(reason, /whole-file write/, 'the refusal must say how to compact')
 })
@@ -441,6 +483,18 @@ test('a refusal names the pinned file, not an indexName that is being ignored', 
   const reason = guard({ name: 'edit', arguments: { file_path: real, new_str: 'x' } })
   assert.match(reason, /FOO\.md is already over/)
   assert.doesNotMatch(reason, /BAR\.md/)
+})
+
+test('the skill states the caps and the index the user configured, and the report rule', () => {
+  // it said 200 lines / 25 KB and MEMORY.md whatever the guard was set to enforce
+  const en = mount({ maxLines: 100, maxBytes: 10000, indexName: 'INDEX.md', language: 'en' }).skills[0]
+  assert.match(en.content, /past 100 lines \/ 10000 bytes/)
+  assert.match(en.description, /through INDEX\.md/)
+  assert.match(mount({ language: 'en' }).skills[0].content, /past 200 lines \/ 25 KB/)
+  const zh = mount({ maxLines: 300, maxBytes: 51200, language: 'zh' }).skills[0].content
+  assert.match(zh, /超过 300 行 \/ 50 KB/)
+  assert.match(en.content, /After any memory write or sync, report/)
+  assert.match(zh, /每次写记忆或同步之后，都汇报/)
 })
 
 test('an empty or non-string indexName falls back instead of disabling the guard', () => {
@@ -1598,6 +1652,23 @@ test('companion mode: a stranger cannot reach a store by another spelling, or pl
   assert.match(call('read', { file_path: join(home, '.ENGRAMORY-MEMORY', INDEX) }), closed)
   assert.match(call('glob', { pattern: '*', path: join(home, '.Engramory-Memory') }), closed)
   assert.equal(call('write', { file_path: join(project, 'notes.md'), content: 'x' }), undefined)
+})
+
+test('companion mode: a global index that is a link closes the folder it points to', (t) => {
+  // recall reads the global index through the link, so its target is the user's index too
+  const home = scratch('home')
+  const vault = scratch('vault')
+  const target = join(vault, 'index.md')
+  writeFileSync(target, '- [u](u.md) - user\n', 'utf8')
+  mkdirSync(join(home, '.engramory-memory'), { recursive: true })
+  if (fileLink(target, join(home, '.engramory-memory', INDEX)) === null) {
+    return t.skip('no symlink privilege here')
+  }
+  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
+  const stranger = theirs('douyin-10', scratch('companion'))
+  const call = (name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(stranger) }))
+  assert.match(call('read', { file_path: target }), /closed to it/)
+  assert.match(call('write', { file_path: join(vault, 'other.md'), content: 'x' }), /closed to it/)
 })
 
 test('companion mode fails closed without a projection registry, or when it refuses or fails', () => {

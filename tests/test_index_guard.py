@@ -511,3 +511,41 @@ def test_leaky_line_budget_env_override(tmp_path):
     assert rc == 0 and out is None
     rc, out = _run(idx, _w(idx, "- [a](a.md) — " + "p" * 120), env={"ENGRAMORY_LINE_WARN_BYTES": "100"})
     assert rc == 0 and _nudges(out) and "100 B" in out["additionalContext"]
+
+
+def test_a_symlink_under_another_name_is_still_the_index(tmp_path):
+    # Claude Code follows a symlink, so `idx.md -> MEMORY.md` writes the index; the
+    # unpinned guard decided on the name it was called by and let 201 lines through
+    idx = _write(tmp_path / "MEMORY.md", lines=150)
+    alias = tmp_path / "idx.md"
+    try:
+        alias.symlink_to(idx)
+    except (OSError, NotImplementedError):
+        return  # no symlink privilege here (Windows without developer mode)
+    rc, out = _run(idx, _w(alias, "\n".join(["L"] * 201)))
+    assert rc == 0 and _decision(out) == "deny"
+    rc, out = _run(idx, _w(tmp_path / "other.md", "\n".join(["L"] * 201)))
+    assert rc == 0 and out is None
+
+
+def test_a_windows_short_name_is_still_the_index(tmp_path):
+    if os.name != "nt":
+        return
+    import ctypes
+    idx = _write(tmp_path / "MEMORY-INDEX-LONG.md", lines=150)
+    buf = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(idx), buf, 1024):
+        return
+    short = buf.value
+    if os.path.basename(short).lower() == idx.name.lower():
+        return  # 8.3 names are off on this volume
+    rc, out = _run(idx, _w(short, "\n".join(["L"] * 201)),
+                   env={"ENGRAMORY_INDEX_NAME": idx.name})
+    assert rc == 0 and _decision(out) == "deny"
+
+
+def test_a_lone_surrogate_does_not_open_the_guard(tmp_path):
+    # valid JSON, not valid UTF-8: a strict encode raised and the hook failed open
+    idx = _write(tmp_path / "MEMORY.md", lines=150)
+    rc, out = _run(idx, _w(idx, "\n".join(["L"] * 201) + "\ud800"))
+    assert rc == 0 and _decision(out) == "deny"

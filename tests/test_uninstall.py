@@ -551,3 +551,64 @@ def _main():
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+def test_uninstall_keeps_a_store_nested_in_a_payload_dir(tmp_path):
+    """The overlap check sees only the store THIS run names.
+
+    A store another run made inside `tools/` went whole with its rmtree: the bare
+    uninstall resolves the default store, which overlaps nothing.
+    """
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+    code, out = _run("codex", tmp_path, "--memory-root", ".agents/skills/engramory/tools/store")
+    assert code == 0, out
+    store = skill / "tools" / "store"
+    (store / "precious.md").write_text("half a year of notes\n", encoding="utf-8")
+
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert (store / "MEMORY.md").is_file(), "UNINSTALL DELETED THE MEMORY INDEX"
+    assert (store / "precious.md").is_file(), "UNINSTALL DELETED THE USER'S NOTES"
+    assert "holds a memory store" in out
+    assert not (skill / "SKILL.md").exists(), "the rest of the payload still goes"
+
+
+def test_force_reinstall_replaces_only_the_skills_own_files(tmp_path):
+    """`--install-skill --force` rmtree'd the whole skill dir, store and all."""
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    skill = tmp_path / ".agents" / "skills" / "engramory"
+    code, out = _run("codex", tmp_path, "--memory-root", ".agents/skills/engramory")
+    assert code == 0, out
+    (skill / "precious.md").write_text("notes\n", encoding="utf-8")
+
+    code, out = _run("codex", tmp_path, "--install-skill", "--force")
+    assert code == 0, out
+    assert (skill / "MEMORY.md").is_file(), "FORCE REINSTALL DELETED THE MEMORY INDEX"
+    assert (skill / "precious.md").is_file(), "FORCE REINSTALL DELETED THE USER'S NOTES"
+    assert (skill / "SKILL.md").is_file() and (skill / "tools").is_dir()
+
+
+def test_force_reinstall_refuses_a_store_inside_a_payload_dir(tmp_path):
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    store = tmp_path / ".agents" / "skills" / "engramory" / "tools" / "store"
+    code, out = _run("codex", tmp_path, "--memory-root", ".agents/skills/engramory/tools/store")
+    assert code == 0, out
+
+    code, out = _run("codex", tmp_path, "--install-skill", "--force")
+    assert code != 0 and "holds a memory store" in out, out
+    assert (store / "MEMORY.md").is_file(), "FORCE REINSTALL DELETED THE MEMORY INDEX"
+
+
+def test_reinstall_keeps_the_indentation_after_the_end_marker(tmp_path):
+    # the re-run's block replacement lstrip()ed what followed the marker
+    assert _run("codex", tmp_path)[0] == 0
+    rules = tmp_path / "AGENTS.md"
+    indented = "    indented code the user keeps\n"
+    rules.write_text(rules.read_text(encoding="utf-8") + "\n" + indented, encoding="utf-8")
+    code, out = _run("codex", tmp_path)
+    assert code == 0, out
+    assert "\n    indented code the user keeps" in rules.read_text(encoding="utf-8")

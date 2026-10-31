@@ -47,7 +47,9 @@ bypass it; see [the reliability ladder](../PORTING.md#4-enforce-the-size-cap--th
 > `python3` on a stock Windows, where it may be a Store stub), Claude Code treats that
 > as a non-blocking error and lets every write through. Self-test: ask the agent to
 > Write a 250-line `MEMORY.md` in a scratch folder. It must be **denied** with the
-> Engramory message; delete the folder afterwards.
+> Engramory message; delete the folder afterwards. With `ENGRAMORY_INDEX_PATH` set, a
+> scratch file is not guarded: append 250 lines to the real index with an Edit instead,
+> never rewrite it (on an index already that long a rewrite is a shrink, and passes).
 
 ### Hook configuration (environment variables, all optional)
 

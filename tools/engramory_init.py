@@ -156,13 +156,16 @@ def _replace_block(existing, block, begin, end, heading="AGENTS.md"):
     ends = [n for n, ln in enumerate(lines) if ln.strip() == end]
     if len(begins) == 1 and len(ends) == 1 and begins[0] < ends[0]:
         before = "\n".join(lines[:begins[0]])
-        after = "\n".join(lines[ends[0] + 1:])
         # A block at the END of the file has nothing to separate from, so it gets a
         # single trailing newline - the same ending the append paths below produce.
         # Emitting "\n\n" unconditionally left one blank line the first re-run added
         # and every later run kept, which showed up as a spurious one-line diff on a
-        # rules file people keep in git.
-        tail = "\n\n" + after.lstrip() if after.strip() else "\n"
+        # rules file people keep in git. Only blank lines are dropped: an indented
+        # code block right after the marker keeps its indentation, which lstrip() took.
+        rest = lines[ends[0] + 1:]
+        while rest and not rest[0].strip():
+            rest.pop(0)
+        tail = "\n\n" + "\n".join(rest) if rest else "\n"
         return before.rstrip() + "\n\n" + block + tail
     # Malformed: drop the stray marker LINES only. A line that merely mentions a marker
     # is left alone — it is user prose, not a marker.
@@ -322,6 +325,34 @@ _SKILL_FILES = ("SKILL.md", "rules-snippet.md", "PORTING.md", "AGENT-SETUP.md", 
 _SKILL_DIRS = ("templates", "tools")
 
 
+def _store_in_payload(skill_root, name):
+    """The directory of a memory store kept inside payload dir `name`, else None.
+
+    The overlap check knows only the store THIS run names. One made by another run
+    (`--memory-root .agents/skills/engramory/tools/store`) sat inside `tools/`, which
+    went whole with its rmtree. Our payload holds no index but the shipped
+    `templates/MEMORY.md`, and `templates/` nothing beyond the shipped files.
+    """
+    path = skill_root / name
+    if not path.is_dir() or path.is_symlink():
+        return None
+    try:
+        shipped = {e.name for e in (_repo_root() / name).iterdir()}
+    except OSError:
+        shipped = set()
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".pytest_cache")]
+        here = Path(dirpath)
+        top = here == path
+        index = [f for f in filenames if f.lower() == "memory.md"]
+        if index and not (top and name == "templates"):
+            return here
+        if top and index and any(f.lower().endswith(".md") and f not in shipped
+                                 for f in filenames):
+            return here  # notes beside the template: a store at templates/ itself
+    return None
+
+
 def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
     rel = f"{skill_dir}/engramory"
     skill_root = project_root.joinpath(*skill_dir.split("/"), "engramory")
@@ -333,7 +364,22 @@ def _copy_skill(source_root, project_root, force, skill_dir=DEFAULT_SKILL_DIR):
     if skill_root.exists():
         if not force:
             return f"kept existing {rel} (use --force to replace)"
-        shutil.rmtree(skill_root)
+        # Replace our own files only, as uninstall removes them: a store kept at this
+        # path (`--memory-root .agents/skills/engramory`) or inside a payload dir
+        # survives, which an rmtree of the whole directory did not.
+        for name in _SKILL_DIRS:
+            held = _store_in_payload(skill_root, name)
+            if held is not None:
+                raise SystemExit(
+                    "refusing to replace %s: %s holds a memory store. Move the store "
+                    "out of the skill directory first." % (rel, held))
+        for name in _SKILL_FILES + _SKILL_DIRS:
+            _refuse_symlink_escape(skill_root, project_root, "the skill install dir")
+            target = skill_root / name
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            elif target.exists() or target.is_symlink():
+                target.unlink()
 
     skill_root.mkdir(parents=True, exist_ok=True)
     # AGENT-SETUP.md travels with the install so the runbook is still reachable
@@ -1111,16 +1157,24 @@ def _uninstall_skill(project_root, cfg, memory_root, dry_run):
     # contains a MEMORY.md of its own, so "holds an index" is not a usable signal for
     # the payload directories; the store that matters sits at the root.)
     payload = [n for n in (_SKILL_FILES + _SKILL_DIRS) if n in entries]
+    held = {}
+    for name in _SKILL_DIRS:
+        store = _store_in_payload(skill_root, name) if name in payload else None
+        if store is not None:
+            held[name] = store
+    payload = [n for n in payload if n not in held]
     others = [n for n in entries if n not in payload]
+    kept = "".join("; KEPT %s/: it holds a memory store at %s" % (n, _display_path(s, project_root))
+                   for n, s in held.items())
     if dry_run:
         if payload and not others:
             return "would remove %s" % display
         if payload:
-            return ("would remove %d entr%s from %s and keep %d other%s (%s)"
+            return ("would remove %d entr%s from %s and keep %d other%s (%s)%s"
                     % (len(payload), "y" if len(payload) == 1 else "ies", display,
                        len(others), "" if len(others) == 1 else "s",
-                       ", ".join(others[:3])))
-        return "would leave %s (nothing in it is recognisably ours)" % display
+                       ", ".join(others[:3]), kept))
+        return "would leave %s (nothing in it is recognisably ours)%s" % (display, kept)
     removed, failed = [], []
     for name in payload:
         # Re-check containment immediately before each delete, exactly as _copy_skill
@@ -1136,9 +1190,9 @@ def _uninstall_skill(project_root, cfg, memory_root, dry_run):
             removed.append(name)
         except OSError as exc:
             failed.append("%s (%s)" % (name, exc))
-    note = ""
+    note = kept
     if failed:
-        note = "; could NOT remove %s" % "; ".join(failed)
+        note += "; could NOT remove %s" % "; ".join(failed)
     if removed and not others and not failed:
         try:
             skill_root.rmdir()

@@ -6,35 +6,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-**Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(dsh).** What the AI remembers is kept as small markdown files, one per memory, with a
-pointer-only index (`MEMORY.md`) listing them all. The plugin brings the index into
-context on every step and puts a hard cap on it, refusing most writes past the cap
-before they land. No
-database, embeddings, or server; you can read and edit every file yourself. The same
-approach works with Claude Code, Codex and other AI tools.
+**Long-term memory for AI agents.** What the AI remembers is kept as small markdown
+files, one per memory, with a pointer-only index (`MEMORY.md`) that is read at the start
+of every session; a note is opened when its details are needed. No database,
+embeddings, or server; you can read and edit every file yourself. It works with Claude
+Code, Codex, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh),
+OpenClaw, Kiro and others; one agent writes a store, and others can read it.
+
+**dsh has a dedicated plugin**, `dsh-engramory`: it works once installed, brings the
+index into context on every step, refuses most writes that would grow the index past
+its cap before they land, and adds a Memory page to the sidebar. On Claude Code a hook
+refuses those writes; other tools rely on the rules plus a checker.
 
 > The name is *engram* (a memory's physical trace) + *memory*. This project is
-> `tinqiao-oss/engramory` (npm: `dsh-engramory`); same-named repositories under other
-> owners are unrelated.
+> `tinqiao-oss/engramory` (the dsh plugin is `dsh-engramory` on npm); same-named
+> repositories under other owners are unrelated.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.0.1.** The store format, the tools and the index caps now change
+> **Status: 1.0.2.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
-
-![The memory page in dsh](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
-
-## Install on dsh
-
-```sh
-dsh plugin --profile <name> add dsh-engramory
-```
-
-In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page. It
-works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default, and
-the sidebar gets a read-only Memory page. Settings, companion mode, social mode and the
-cap's rules are in the [plugin README](adapters/dsh/plugin/README.en.md).
 
 ## What it looks like
 
@@ -63,40 +54,24 @@ Run the tests after a code change, and only then call it done.
 **How to apply:** finish every code change with a test run.
 ```
 
-## Why it works this way
+## Install
 
-- **A small index, details on demand.** The index is read at the start of every
-  session (injected by the host, as the dsh plugin does, or read by the agent), so it holds
-  pointers only, capped at 200 lines / 25 KB by default.
-- **Curated notes, not a log.** Four types: `user | feedback | project | reference`.
-  Before writing, the agent checks for a duplicate, updates an existing note rather
-  than adding one, retires what is stale, and does not copy what git or the code
-  already records. A companion character adds `moment`, `upcoming` and `self` for its
-  own life ([SKILL.md](SKILL.md) §2.2); a store can be written in Chinese (§1.1).
-- **The cap is enforced before the write.** On dsh (a plugin) and Claude Code (a hook),
-  a write whose result can be worked out and would grow the index past the cap is
-  refused before it lands; compaction still passes. Other tools rely on the rules plus
-  a checker.
-- **Continuity without a handoff store.** An unfinished task keeps one `project` note,
-  updated in place with its status and next step; before a compact, clear, or new
-  thread, the agent runs a [continuity sync](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional).
+> The dsh plugin installs from npm and needs nothing else. The others need Python 3.9+;
+> run the commands from this repository, and use `python3` on macOS / Linux where bare
+> `python` is unavailable.
 
-## How it compares
+### DeepSeek Harness (dsh)
 
-- **Native memory** (such as Claude Code auto-memory): the same index-plus-files
-  pattern; Engramory adds explicit curation rules and a pre-write cap.
-- **Retrieval and auto-capture systems** (basic-memory, mem0, Zep, agentmemory, …):
-  built for large memory sets. Engramory has no search engine or automatic ingestion;
-  it is for a curated personal set.
-- **No MCP server.** For a host that already reads files and loads standing rules, MCP
-  would open a second write channel past the pre-write cap, and turn recall from an
-  index loaded every session into a tool the model has to remember to call. For a host
-  with neither, an MCP entry point is worth adding as a supplement.
+```sh
+dsh plugin --profile <name> add dsh-engramory
+```
 
-## Other AI tools
+In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page. It
+works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default, and
+the sidebar gets a read-only Memory page. Settings, companion mode, social mode and the
+cap's rules are in the [plugin README](adapters/dsh/plugin/README.en.md).
 
-> Needs Python 3.9+; run the commands from this repository. Use `python3` on macOS /
-> Linux where bare `python` is unavailable.
+![The memory page in dsh](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
 ### Claude Code
 
@@ -150,6 +125,36 @@ python tools/engramory_init.py codex-reader --project-root ~/.codex \
 A reader creates no store; `--memory-root` must already hold a `MEMORY.md`. "Read-only"
 is a rule the agent follows, not enforced, and what it recalls goes to that host's
 model provider. See the [reader guide](adapters/reader/README.md).
+
+## Why it works this way
+
+- **A small index, details on demand.** The index is read at the start of every
+  session (injected by the host, as the dsh plugin does, or read by the agent), so it holds
+  pointers only, capped at 200 lines / 25 KB by default.
+- **Curated notes, not a log.** Four types: `user | feedback | project | reference`.
+  Before writing, the agent checks for a duplicate, updates an existing note rather
+  than adding one, retires what is stale, and does not copy what git or the code
+  already records. A companion character adds `moment`, `upcoming` and `self` for its
+  own life ([SKILL.md](SKILL.md) §2.2); a store can be written in Chinese (§1.1).
+- **The cap is enforced before the write.** On dsh (a plugin) and Claude Code (a hook),
+  a write whose result can be worked out and would grow the index past the cap is
+  refused before it lands; compaction still passes. Other tools rely on the rules plus
+  a checker.
+- **Continuity without a handoff store.** An unfinished task keeps one `project` note,
+  updated in place with its status and next step; before a compact, clear, or new
+  thread, the agent runs a [continuity sync](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional).
+
+## How it compares
+
+- **Native memory** (such as Claude Code auto-memory): the same index-plus-files
+  pattern; Engramory adds explicit curation rules and a pre-write cap.
+- **Retrieval and auto-capture systems** (basic-memory, mem0, Zep, agentmemory, …):
+  built for large memory sets. Engramory has no search engine or automatic ingestion;
+  it is for a curated personal set.
+- **No MCP server.** For a host that already reads files and loads standing rules, MCP
+  would open a second write channel past the pre-write cap, and turn recall from an
+  index loaded every session into a tool the model has to remember to call. For a host
+  with neither, an MCP entry point is worth adding as a supplement.
 
 ## Uninstall
 

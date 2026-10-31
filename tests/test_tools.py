@@ -1642,3 +1642,16 @@ def test_doctor_wikilink_counts_as_pointer_not_prose(tmp_path):
                    encoding="utf-8")
     rc, out = _run(DOCTOR, str(tmp_path))
     assert rc == 0 and "carry over" not in out
+
+
+def test_doctor_reads_an_uppercase_md_pointer(tmp_path):
+    # note discovery took `b.MD` as a note while the pointer regex skipped `](b.MD)`:
+    # a valid note read as an orphan, and a broken `.MD` pointer passed
+    _note(tmp_path / "b.MD", "b")
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [B](b.MD) — hook\n", encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 0 and "clean" in out, out
+    (tmp_path / "MEMORY.md").write_text("# Index\n- [B](b.MD) — hook\n- [G](gone.MD) — hook\n",
+                                        encoding="utf-8")
+    rc, out = _run(DOCTOR, str(tmp_path))
+    assert rc == 1 and "gone.MD" in out, out

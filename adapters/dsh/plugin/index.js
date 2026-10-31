@@ -214,7 +214,8 @@ export function apply(ctx, config = {}) {
         if (typeof dispose === 'function') dispose()
         dispose = inner.skills.register({
           name: 'engramory',
-          description: settings.text.description +
+          // the description names the index the user configured, not always MEMORY.md
+          description: settings.text.description.replace('MEMORY.md', storesOf(settings).indexName) +
             (settings.companion ? settings.text.descriptionCompanion : ''),
           whenToUse: settings.text.whenToUse +
             (settings.companion ? settings.text.whenToUseCompanion : ''),
@@ -1355,6 +1356,14 @@ function osKey(p) {
 function storeTargets(cwd, settings) {
   const start = checkedRoot(cwd ?? process.cwd())
   const dirs = [checkedRoot(join(dshHome(), STORE_DIR))]
+  if (settings.indexPath === undefined) {
+    // The global index may itself be a link, and recall reads through it: the directory
+    // it points to holds the user's index under a name no store has.
+    const index = join(dirs[0], settings.indexName)
+    dirs.push(dirname(realpathOr(index)))
+    const pointed = linkTarget(index)
+    if (pointed !== undefined) dirs.push(dirname(pointed))
+  }
   for (let dir = start; ; dir = dirname(dir)) {
     const store = join(dir, STORE_DIR)
     if (present(store)) dirs.push(store)
@@ -1698,22 +1707,21 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
   const currentBuf = readIndex(target, settings.readLimit)
   if (currentBuf === undefined || !Buffer.isBuffer(currentBuf)) return undefined
   const current = currentBuf.toString('utf8')
-  const simulated = simulateEdit(current, args, settings.readLimit)
-  if (typeof simulated === 'string') {
-    return verdict(simulated, currentBuf, filePath, settings)
-  }
-  if (simulated !== undefined) {
-    // Too long to build: judged on lower bounds of its size, by the same grow-past-the-
-    // cap rule as verdict(). A bound that clears both tests refuses only what the full
-    // result would; one that does not lets the edit through unmeasured.
-    const over = []
-    if (simulated.newlines > settings.maxLines && simulated.newlines > countLines(current)) {
-      over.push(`at least ${simulated.newlines} lines > ${settings.maxLines}`)
+  const insert = insertOf(tool, args)
+  const edits = insert === undefined ? editsOf(tool, args) : []
+  if (insert !== undefined || edits.length > 0) {
+    // A tool whose schema this guard does not know may be judged on more than one
+    // reading of its arguments: the refusal stands if any reading would refuse.
+    const results = insert !== undefined
+      ? [simulateInsert(current, insert, settings.readLimit)]
+      : edits.map((edit) => simulateEdit(current, edit, settings.readLimit))
+    for (const simulated of results) {
+      const reason = typeof simulated === 'string'
+        ? verdict(simulated, currentBuf, filePath, settings)
+        : bounded(simulated, current, currentBuf, filePath, settings)
+      if (reason !== undefined) return reason
     }
-    if (simulated.bytes > settings.maxBytes && simulated.bytes > currentBuf.length) {
-      over.push(`at least ${simulated.bytes} bytes > ${settings.maxBytes}`)
-    }
-    return over.length ? capRefusal(over, filePath, settings) : undefined
+    return undefined
   }
 
   // The edit's result genuinely cannot be reconstructed from its arguments. Honest,
@@ -1818,13 +1826,80 @@ function notMyIndexHint(settings) {
 }
 
 /**
- * Reconstruct a partial edit's post-write text when its arguments carry enough to
- * do it (`old_str`/`new_str`, or the Claude-style `old_string`/`new_string`).
- * Mirrors the Python guard's Edit simulation: replace the unique occurrence, or all
- * of them under a replace-all flag; an absent or ambiguous old-string means the
- * real tool errors and changes nothing, so the current text is the honest
- * prediction. Returns undefined when the shape isn't recognised, and `{ bytes, newlines }`
- * — lower bounds of the result's size — when it is too long to build.
+ * A result too long to build, judged on lower bounds of its size by the same
+ * grow-past-the-cap rule as verdict(). A bound that clears both tests refuses only what
+ * the full result would; one that does not lets the edit through unmeasured.
+ */
+function bounded(simulated, current, currentBuf, filePath, settings) {
+  const over = []
+  if (simulated.newlines > settings.maxLines && simulated.newlines > countLines(current)) {
+    over.push(`at least ${simulated.newlines} lines > ${settings.maxLines}`)
+  }
+  if (simulated.bytes > settings.maxBytes && simulated.bytes > currentBuf.length) {
+    over.push(`at least ${simulated.bytes} bytes > ${settings.maxBytes}`)
+  }
+  return over.length ? capRefusal(over, filePath, settings) : undefined
+}
+
+/**
+ * The replacements a call asks for, read in the argument names its tool reads. dsh's
+ * `edit` reads `old_string` / `new_string` / `replace_all` and ignores any other field,
+ * so a call carrying `old_str` as well must be judged on what dsh applies: reading a
+ * decoy `old_str` first predicted "not found, no change" and let dsh write past the cap.
+ * `str_replace_editor` reads `old_str` / `new_str` and has no replace-all. A tool whose
+ * schema is not known here is read both ways. A reading with no non-empty old string
+ * is dropped (the real tool errors on it); none left means the call is unsimulable.
+ */
+function editsOf(tool, args) {
+  const claude = { old: args.old_string, neu: args.new_string, all: args.replace_all === true }
+  const anthropic = { old: args.old_str, neu: args.new_str, all: false }
+  const readings = tool === 'edit' ? [claude]
+    : tool === 'str_replace_editor' ? [anthropic]
+      : [{ ...claude, all: claude.all || args.replaceAll === true },
+          { ...anthropic, all: args.replace_all === true || args.replaceAll === true }]
+  return readings
+    .filter((r) => typeof r.old === 'string' && r.old !== '')
+    .map((r) => ({ old: r.old, neu: typeof r.neu === 'string' ? r.neu : '', all: r.all }))
+}
+
+/**
+ * An insert's line and text (`str_replace_editor`'s `insert` command, or a tool named
+ * `insert` taking the same arguments), or undefined when the call is not one. Treating it
+ * as unsimulable let one large insert carry an index from under the cap to far past it.
+ */
+function insertOf(tool, args) {
+  const isInsert = tool === 'insert' || (tool === 'str_replace_editor' && args.command === 'insert')
+  if (!isInsert || !Number.isSafeInteger(args.insert_line) || typeof args.new_str !== 'string') {
+    return undefined
+  }
+  return { line: args.insert_line, text: args.new_str }
+}
+
+/**
+ * An insert's result, as `str_replace_editor` builds it: the text's lines placed after
+ * line `line` (0 = before the first), the whole joined on `\n`. A line out of range is an
+ * error in the real tool, so nothing changes. `{ bytes, newlines }` when too long to build.
+ */
+function simulateInsert(current, { line, text }, limit) {
+  const segments = occurrences(current, '\n') + 1
+  if (line < 0 || line > segments) return current
+  if (current.length + text.length + 1 > limit) {
+    return {
+      bytes: Buffer.byteLength(current) + Buffer.byteLength(text) + 1,
+      newlines: occurrences(current, '\n') + occurrences(text, '\n') + 1,
+    }
+  }
+  const lines = current.split('\n')
+  return [...lines.slice(0, line), text, ...lines.slice(line)].join('\n')
+}
+
+/**
+ * Reconstruct a partial edit's post-write text from one reading of its arguments
+ * (editsOf). Mirrors the Python guard's Edit simulation: replace the unique occurrence,
+ * or all of them under a replace-all flag; an absent or ambiguous old-string means the
+ * real tool errors and changes nothing, so the current text is the honest prediction.
+ * Returns `{ bytes, newlines }` — lower bounds of the result's size — when it is too
+ * long to build.
  *
  * Matching happens on LF-normalised text and the result goes back in the file's own
  * line endings, as dsh's local backend does it (`applyLiteralEdit` /
@@ -1832,10 +1907,7 @@ function notMyIndexHint(settings) {
  * index — common on Windows — read every LF `old_string` as "not found", predict no
  * change, and pass an edit dsh then applied.
  */
-function simulateEdit(current, args, limit) {
-  const oldRaw = firstString(args.old_str, args.old_string)
-  if (oldRaw === undefined || oldRaw === '') return undefined
-  const newRaw = firstString(args.new_str, args.new_string) ?? ''
+function simulateEdit(current, { old: oldRaw, neu: newRaw, all }, limit) {
   // dsh decodes with TextDecoder, which drops a leading BOM — from the text it
   // matches, from the sample it detects line endings on, and from what it writes back.
   const decoded = current.startsWith('\uFEFF') ? current.slice(1) : current
@@ -1847,7 +1919,6 @@ function simulateEdit(current, args, limit) {
   const oldStr = lf(oldRaw)
   const first = text.indexOf(oldStr)
   if (first === -1) return current // the real tool errors: nothing changes
-  const all = args.replace_all === true || args.replaceAll === true
   if (!all && text.indexOf(oldStr, first + oldStr.length) !== -1) {
     return current // ambiguous: the real tool errors, nothing changes
   }
@@ -2226,10 +2297,22 @@ const TEXT = {
  * directory, where neither recall nor the memory page looks, after searching the disk.
  */
 function storesOf(settings) {
-  const how = { injected: settings.injectIndex !== false, social: settings.social === true }
+  const how = {
+    injected: settings.injectIndex !== false,
+    social: settings.social === true,
+    maxLines: settings.maxLines ?? DEFAULT_MAX_LINES,
+    maxBytes: settings.maxBytes ?? DEFAULT_MAX_BYTES,
+  }
   return settings.indexPath !== undefined
     ? { ...how, pinned: settings.indexPath, indexName: basename(settings.indexPath) }
     : { ...how, global: join(dshHome(), STORE_DIR), indexName: settings.indexName }
+}
+
+/** The configured caps as the skill states them: `200 lines / 25 KB` by default. */
+function capsOf(stores, zh = false) {
+  const size = stores.maxBytes % 1024 === 0 ? `${stores.maxBytes / 1024} KB`
+    : zh ? `${stores.maxBytes} 字节` : `${stores.maxBytes} bytes`
+  return zh ? `${stores.maxLines} 行 / ${size}` : `${stores.maxLines} lines / ${size}`
 }
 
 /** The store's own folder: the pinned index's, or the global store. */
@@ -2435,9 +2518,12 @@ function skillEn(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     'refresh project state, promote only reusable feedback, retire completed transient',
     'state, then report what was added, updated, archived, and skipped.',
     '',
+    'After any memory write or sync, report what was added, updated, archived (deletions',
+    'included) and skipped, with a reason for each skip; when nothing was written, say so.',
+    '',
     '## The cap is enforced here',
     '',
-    'This host denies a write that would GROW the index past 200 lines / 25 KB. That is',
+    `This host denies a write that would GROW the index past ${capsOf(stores)}. That is`,
     'a real refusal, not a warning — but a write that shrinks the index always passes,',
     'so compact first, step by step if needed: the index is loaded every session, and',
     'anything past the cap stops being recalled.',
@@ -2552,9 +2638,12 @@ function skillZh(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     '在主动压缩、清空或开新线程之前：扫一遍任务，去重并更新，刷新项目状态，只提炼可复用',
     '的反馈，退休已完成的临时状态，然后汇报新增、更新、归档、跳过了什么。',
     '',
+    '每次写记忆或同步之后，都汇报新增、更新、归档（含删除）、跳过了什么，每条跳过写明原因；',
+    '什么都没写，也要说一声。',
+    '',
     '## 上限由这里强制',
     '',
-    '本宿主会拒绝让索引**增长**到超过 200 行 / 25 KB 的写入。这是真拒绝，不是警告——但',
+    `本宿主会拒绝让索引**增长**到超过 ${capsOf(stores, true)} 的写入。这是真拒绝，不是警告——但`,
     '让索引变小的写入总能通过，所以先压缩，必要时分几步：索引每次会话都会加载，超过上限',
     '的部分就不会再被回忆。',
     '',

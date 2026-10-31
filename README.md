@@ -6,23 +6,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-**给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）用的长期记忆。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记。插件每轮把索引带进上下文，并给索引设了硬上限，写超上限的操作大多在写入前就被拦下。不需要数据库、向量或服务器，文件你能直接看、能改。同一套做法也能用在 Claude Code、Codex 等其他 AI 工具上。
+**给 AI agent 用的长期记忆。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw、Kiro 等都能用；一个工具负责写，别的工具可以只读同一个库。
 
-> 名字来自 *engram*（记忆痕迹）+ *memory*。本项目是 `tinqiao-oss/engramory`（npm 包 `dsh-engramory`），与其他所有者名下的同名仓库无关。
+**dsh 有专用插件** `dsh-engramory`：装上就能用，每轮自动带上索引，把索引写超上限的写入大多在落盘前就被拦下，侧栏还多一个记忆页。Claude Code 用 hook 拦超限写入；其他工具靠规则加校验脚本。
+
+> 名字来自 *engram*（记忆痕迹）+ *memory*。本项目是 `tinqiao-oss/engramory`（dsh 插件的 npm 包叫 `dsh-engramory`），与其他所有者名下的同名仓库无关。
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.0.1。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
-
-![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
-
-## 在 dsh 上安装
-
-```sh
-dsh plugin --profile <名字> add dsh-engramory
-```
-
-dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`，侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
+> **状态:1.0.2。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ## 长什么样
 
@@ -51,22 +43,19 @@ updated: 2026-10-31
 **怎么用：** 任何代码改动收尾前跑一遍测试。
 ```
 
-## 为什么这样做
+## 安装
 
-- **索引小，细节按需打开。** 索引每次会话开头都要读进来（宿主自动注入，比如 dsh 插件；或者由 AI 自己读），所以只放指针，默认上限 200 行 / 25 KB。
-- **笔记要整理，不是堆日志。** 四种类型 `user | feedback | project | reference`。写之前查重，能更新旧笔记就不新建，过时的删掉或归档，git 和代码里已有的不重复记。陪伴角色另有 `moment`（经历）、`upcoming`（约定）、`self`（我自己）三类（[SKILL.md](SKILL.md) §2.2）；记忆库可以用中文写（§1.1）。
-- **写入前卡上限。** 在 dsh（插件）和 Claude Code（hook）上，算得出结果、会把索引写超上限的写入，在写入前就被拒绝，压缩照样放行。其他工具靠规则加校验脚本。
-- **任务续接不另建交接库。** 没做完的任务只留一条 `project` 笔记，就地更新状态和下一步；compact、清空或开新线程前做一次[续接同步](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional)。
+> dsh 插件从 npm 装，别的都不需要。其他工具需要 Python 3.9+，在本仓库目录里运行；macOS / Linux 没有 `python` 就用 `python3`。
 
-## 和别的方案比
+### DeepSeek Harness（dsh）
 
-- **原生记忆**（如 Claude Code auto-memory）：同样是索引加详情文件；Engramory 多了明确的整理规则和写前上限。
-- **检索和自动捕获系统**（basic-memory、mem0、Zep、agentmemory 等）：面向大量记忆；Engramory 不做搜索和自动摄取，只管人工精选的个人记忆。
-- **不做 MCP server。** 对能读写文件、能加载常驻规则的宿主，MCP 会多出一条绕过写前上限的写入通道，还会把"每次都加载的索引"降级成"模型得记得去调用的工具"。两样都没有的宿主，可以把 MCP 当补充入口。
+```sh
+dsh plugin --profile <名字> add dsh-engramory
+```
 
-## 其他 AI 工具
+dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`，侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
 
-> 需要 Python 3.9+，在本仓库目录里运行。macOS / Linux 没有 `python` 就用 `python3`。
+![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
 ### Claude Code
 
@@ -102,6 +91,19 @@ python tools/engramory_init.py codex-reader --project-root ~/.codex \
 ```
 
 读者不建库，`--memory-root` 里必须已有 `MEMORY.md`。"只读"靠规则约束，不是强制的；回忆到的内容会发给那个宿主的模型服务商。详见[读取器指南](adapters/reader/README.md)。
+
+## 为什么这样做
+
+- **索引小，细节按需打开。** 索引每次会话开头都要读进来（宿主自动注入，比如 dsh 插件；或者由 AI 自己读），所以只放指针，默认上限 200 行 / 25 KB。
+- **笔记要整理，不是堆日志。** 四种类型 `user | feedback | project | reference`。写之前查重，能更新旧笔记就不新建，过时的删掉或归档，git 和代码里已有的不重复记。陪伴角色另有 `moment`（经历）、`upcoming`（约定）、`self`（我自己）三类（[SKILL.md](SKILL.md) §2.2）；记忆库可以用中文写（§1.1）。
+- **写入前卡上限。** 在 dsh（插件）和 Claude Code（hook）上，算得出结果、会把索引写超上限的写入，在写入前就被拒绝，压缩照样放行。其他工具靠规则加校验脚本。
+- **任务续接不另建交接库。** 没做完的任务只留一条 `project` 笔记，就地更新状态和下一步；compact、清空或开新线程前做一次[续接同步](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional)。
+
+## 和别的方案比
+
+- **原生记忆**（如 Claude Code auto-memory）：同样是索引加详情文件；Engramory 多了明确的整理规则和写前上限。
+- **检索和自动捕获系统**（basic-memory、mem0、Zep、agentmemory 等）：面向大量记忆；Engramory 不做搜索和自动摄取，只管人工精选的个人记忆。
+- **不做 MCP server。** 对能读写文件、能加载常驻规则的宿主，MCP 会多出一条绕过写前上限的写入通道，还会把"每次都加载的索引"降级成"模型得记得去调用的工具"。两样都没有的宿主，可以把 MCP 当补充入口。
 
 ## 卸载
 

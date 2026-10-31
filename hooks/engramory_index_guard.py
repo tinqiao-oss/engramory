@@ -121,7 +121,9 @@ def _lines(text):
 
 
 def _bytes(text):
-    return len(text.encode("utf-8"))
+    # surrogatepass: a lone surrogate (valid in JSON, not in UTF-8) counts its 3 bytes,
+    # as the dsh guard counts it; a strict encode raised and the hook failed open.
+    return len(text.encode("utf-8", "surrogatepass"))
 
 
 def _kb(n):
@@ -162,7 +164,7 @@ _POINTER_PART_RE = re.compile(r"\]\([^)]*\)|\[\[[^\]]+\]\]")
 def _leaky_lines(text, budget):
     # Count index lines whose prose (pointers stripped) exceeds `budget` bytes.
     return sum(1 for ln in text.split("\n")
-               if len(_POINTER_PART_RE.sub("", ln).encode("utf-8")) > budget)
+               if len(_POINTER_PART_RE.sub("", ln).encode("utf-8", "surrogatepass")) > budget)
 
 
 def _apply_edits(current, edits):
@@ -215,7 +217,12 @@ def main():
         if _key(file_path) != _key(index_path):
             _allow_silently()
     else:
-        if os.path.basename(file_path).lower() != index_name.lower():
+        # The name it is called by, or the name of the file it lands on: Claude Code
+        # follows a symlink, so `idx.md -> MEMORY.md` writes the index (the dsh guard
+        # learnt this in #20). realpath also expands a Windows 8.3 short name.
+        def _named(p):
+            return os.path.basename(p).lower() == index_name.lower()
+        if not _named(file_path) and not _named(os.path.realpath(file_path)):
             _allow_silently()
 
     hard = _envint("ENGRAMORY_HARD", 200)
