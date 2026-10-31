@@ -98,6 +98,17 @@ window.__ModuleLoader__.load({
       group: '{type} · {count}',
       archive: '归档（{count}）',
       more: '文件太多，这里只列出了一部分。',
+      healthTitle: '体检',
+      healthOk: '体检：没发现问题。',
+      healthBroken: '索引里指向不存在的文件（{count}）',
+      healthBrokenMore: '索引里指向不存在的文件（{count} 个以上）',
+      healthBrokenUnlisted: '索引里有指向不存在的文件，太多了，这里没列出。',
+      healthUnindexed: '不在索引里（{count}）：AI 回忆从索引开始，这些它通常找不到，除非别的笔记链到它们。',
+      healthUntyped: '没写类型或类型不认识（{count}），列在「其他」里。',
+      healthFix: '可以让 AI 整理：把漏掉的补进索引，删掉或改正坏链接。完整检查用 engramory_doctor.py。',
+      healthLarge: '要核对的太多，没做体检。',
+      healthUnreadable: '有文件读不了，没做体检。',
+      healthPartial: '文件太多没列全，没做体检。',
     }
     const en = {
       summary: 'Companion mode and memory access, and the index cap.',
@@ -166,6 +177,17 @@ window.__ModuleLoader__.load({
       group: '{type} · {count}',
       archive: 'Archive ({count})',
       more: 'Too many files: only some are listed here.',
+      healthTitle: 'Check-up',
+      healthOk: 'Check-up: nothing to fix.',
+      healthBroken: 'The index points to files that are not there ({count})',
+      healthBrokenMore: 'The index points to files that are not there (over {count})',
+      healthBrokenUnlisted: 'The index points to files that are not there: too many to list here.',
+      healthUnindexed: 'Not in the index ({count}): recall starts from the index, so the AI will not find these unless another note links to them.',
+      healthUntyped: 'No type, or one it does not know ({count}), listed under Other.',
+      healthFix: 'The AI can tidy this up: add what is missing to the index, and remove or fix the broken links. For a full check, run engramory_doctor.py.',
+      healthLarge: 'Too much to check here, so no check-up.',
+      healthUnreadable: 'Some files could not be read, so no check-up.',
+      healthPartial: 'Too many files to list them all, so no check-up here.',
     }
 
     const CSS = `
@@ -225,6 +247,8 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
 .eng-name:focus-visible,.eng-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
 .eng-archive>summary{cursor:pointer;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
 .eng-archive[open]>summary{margin-bottom:2px;}
+.eng-health{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,10px);background:var(--dsw-alias-bg-layer-1);}
+.eng-health-item{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
 `
 
     /** The settings the page edits, in the order the host computes its revision from. */
@@ -517,7 +541,40 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
     const byName = (a, b) => collator.compare(a, b)
 
-    /** One store: where it is, how full its index is, and its notes' names by type. */
+    /**
+     * A store's check-up (index.js checkUp): that nothing was found, what was, or why it
+     * did not run. An index over the cap is not checked, and the page already says so.
+     */
+    function Health({ store, names, t }) {
+      const check = store.health
+      if (check === undefined || check === null) return null
+      if (!check.checked) {
+        const reason = { large: 'healthLarge', partial: 'healthPartial', unreadable: 'healthUnreadable' }[check.reason]
+        return reason === undefined ? null : h('p', { className: 'eng-note' }, t(reason))
+      }
+      const untyped = store.notes.filter((note) => note.type === 'other').length
+      // pointers to nothing past what the page is told of are still pointers to nothing
+      const broken = check.broken.length > 0 || check.brokenMore
+      if (!broken && check.unindexed.length === 0 && untyped === 0) {
+        return h('p', { className: 'eng-note' }, t('healthOk'))
+      }
+      return h('section', { className: 'eng-health', 'aria-label': t('healthTitle') },
+        h('h3', { className: 'eng-group-title' }, t('healthTitle')),
+        broken ? h('div', { className: 'eng-group' },
+          h('p', { className: 'eng-health-item' },
+            check.broken.length === 0 ? t('healthBrokenUnlisted')
+              : t(check.brokenMore ? 'healthBrokenMore' : 'healthBroken', { count: check.broken.length })),
+          // what the index says, as it says it: there is no file to open
+          check.broken.length > 0 ? h('ul', { className: 'eng-names' }, check.broken.map((target) => h('li', { key: target },
+            h('span', { className: 'eng-name', title: target }, target)))) : null) : null,
+        check.unindexed.length > 0 ? h('div', { className: 'eng-group' },
+          h('p', { className: 'eng-health-item' }, t('healthUnindexed', { count: check.unindexed.length })),
+          names(check.unindexed, false)) : null,
+        untyped > 0 ? h('p', { className: 'eng-health-item' }, t('healthUntyped', { count: untyped })) : null,
+        h('p', { className: 'eng-note' }, t('healthFix')))
+    }
+
+    /** One store: where it is, how full its index is, its check-up, and its notes' names by type. */
     function StoreSection({ store, cap, canOpen, open, t }) {
       const title = store.kind === 'user' ? [t('storeUser'), ...store.titles].join(' · ')
         : store.kind === 'pinned' ? [t('storePinned'), ...store.titles].join(' · ')
@@ -548,6 +605,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
               t('openFolder'))) : null),
         h('p', { className: 'eng-path' }, store.dir),
         index?.over ? h('p', { className: 'eng-note' }, t('overHint')) : null,
+        h(Health, { store, names, t }),
         ...groups.map(([type, list]) => h('div', { className: 'eng-group', key: type },
           h('h3', { className: 'eng-group-title' }, t('group', { type: t(typeKey(type)), count: list.length })),
           names(list, false))),

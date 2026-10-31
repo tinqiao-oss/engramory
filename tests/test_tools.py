@@ -352,7 +352,7 @@ def test_init_reader_cline_targets_clinerules(tmp_path):
 def test_init_reader_untested_host_prints_unverified_note(tmp_path):
     # a non-dogfooded reader host must print the honesty note; codex-reader (tested) must not
     store = _existing_store(tmp_path / "cc-memory")
-    rc, out = _run(INIT, "claude-reader", "--project-root", str(tmp_path / "a"), "--memory-root", str(store))
+    rc, out = _run(INIT, "cursor-reader", "--project-root", str(tmp_path / "a"), "--memory-root", str(store))
     assert rc == 0 and "not been verified" in out.lower()
     rc2, out2 = _run(INIT, "codex-reader", "--project-root", str(tmp_path / "b"), "--memory-root", str(store))
     assert rc2 == 0 and "not been verified" not in out2.lower()

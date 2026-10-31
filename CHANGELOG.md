@@ -6,6 +6,29 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.6 — 2026-10-31
+
+dsh's memory page checks each store, and Claude Code joins Codex and dsh as a reader
+verified on a real host. How memory is stored, recalled and guarded does not change.
+
+- **dsh: the memory page has a check-up** — under each store, the index's links to
+  files that are not there, the notes the index does not name (recall starts from the
+  index, so the AI will not find them unless another note links to them), and the notes
+  with no type. It goes by file names and the index's links, never through a symbolic
+  link, and sends no note's text to the page; it is skipped while the index is over the
+  cap, when there is too much to check, or when a file cannot be read.
+  `engramory_doctor.py` still does the full check. By default the desktop app installs a
+  version only once it has been published for 24 hours, unless you ask for
+  `dsh-engramory@1.0.6`.
+- **Readers: `claude-reader` is verified** — Claude Code read a dsh store's index, opened
+  the right note and answered from it, and put a new fact in its own memory, not the
+  store. The README shows the dsh plugin writing while Claude Code and Codex read, and
+  that a reader keeps its own memory.
+- **Readers: the read-only block says where a new fact may go** — not into the store,
+  but to the user, or into the reader's own memory if its host has one; before, "do not
+  persist it yourself" could be read as forbidding that too. It also no longer says the
+  writer is "typically Claude Code", which read oddly to a Claude Code reader.
+
 ## 1.0.5 — 2026-10-31
 
 dsh's sidebar entry and the memory page's title catch up with the new logo. How memory

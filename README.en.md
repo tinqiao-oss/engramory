@@ -26,7 +26,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.0.5.** The store format, the tools and the index caps now change
+> **Status: 1.0.6.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like
@@ -117,16 +117,27 @@ after each index write, and `tools/engramory_doctor.py` now and then.
 ### Let another agent read the same store
 
 One agent writes a store; others only read it
-([one writer, many readers](adapters/reader/README.md)):
+([one writer, many readers](adapters/reader/README.md)). Say the dsh plugin writes its
+global store, and Claude Code and Codex read it:
 
 ```sh
+# Claude Code: into the user-level ~/.claude/CLAUDE.md, which every project loads
+python tools/engramory_init.py claude-reader --project-root ~/.claude \
+  --memory-root ~/.dsh/.engramory-memory
+# Codex: into ~/.codex/AGENTS.md
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
-  --memory-root ~/.claude/projects/<project>/memory
+  --memory-root ~/.dsh/.engramory-memory
 ```
 
-A reader creates no store; `--memory-root` must already hold a `MEMORY.md`. "Read-only"
-is a rule the agent follows, not enforced, and what it recalls goes to that host's
-model provider. See the [reader guide](adapters/reader/README.md).
+The other way round, dsh reading Claude Code's store, is `dsh-reader` with
+`--memory-root ~/.claude/projects/<project>/memory`.
+
+A reader creates no store; `--memory-root` must already hold a `MEMORY.md`. A reader
+keeps its own memory: Claude Code reading the dsh store still files what you tell it to
+remember in its own store, which dsh does not see. For both to know, let each write its
+own store and read the other's. "Read-only" is a rule the agent follows, not enforced,
+and what it recalls goes to that host's model provider. See the
+[reader guide](adapters/reader/README.md).
 
 ## Why it works this way
 

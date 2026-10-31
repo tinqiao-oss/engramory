@@ -18,6 +18,11 @@ Claude Code or dsh), and any number of readers only read. Never attach a second 
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.claude/projects/<project>/memory
 
+# Claude Code reading the dsh plugin's global store (dogfooded); ~/.claude holds
+# Claude Code's user-level CLAUDE.md, which every project loads
+python tools/engramory_init.py claude-reader --project-root ~/.claude \
+  --memory-root ~/.dsh/.engramory-memory
+
 # any other host: same shape, different rules file
 python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
   --memory-root ~/.claude/projects/<project>/memory
@@ -28,8 +33,14 @@ python tools/engramory_init.py cursor-reader --project-root /path/to/repo \
 - `--memory-root` **must** already hold a `MEMORY.md`; the reader never creates a store.
 
 Supported hosts and their verification status are in
-[PORTING.md](../../PORTING.md#read-only-host-wiring); only `codex-reader` and
-`dsh-reader` are verified on a real host.
+[PORTING.md](../../PORTING.md#read-only-host-wiring); only `codex-reader`,
+`claude-reader` and `dsh-reader` are verified on a real host.
+
+**A reader keeps its own memory.** Wiring a reader does not turn off the host's own
+memory: Claude Code reading a dsh store still writes what you tell it ("remember…") to
+its own auto-memory, and dsh never sees it. To have both agents know what either
+learned, let each write its own store and read the other's — two stores, each with
+one writer.
 
 The rules ([`reader-snippet.md`](reader-snippet.md)) tell the agent to read
 `MEMORY.md` at the start of a task, open only relevant notes, treat recall as fallible,

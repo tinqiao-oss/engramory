@@ -2498,6 +2498,264 @@ test('memory GET: the global store by name only — the index size, the notes by
   assert.doesNotMatch(JSON.stringify(body), /secret line|the fact/)
 })
 
+/** Whether the disk under `dir` opens a name in any case: probed, as a volume may differ from its OS's default. */
+function caselessAt(dir) {
+  const probe = join(dir, 'case-probe.tmp')
+  writeFileSync(probe, '')
+  try {
+    return fs.existsSync(join(dir, 'CASE-PROBE.TMP'))
+  } finally {
+    rmSync(probe)
+  }
+}
+
+test('memory GET: the check-up names the index\'s pointers to nothing and the notes it does not name', async () => {
+  const { home, dir } = globalStore('mem-health', [
+    '# Memory — a secret line',
+    '- [a](a.md) · [a again](<a.md> "title") · [section](a.md#why)',
+    '- [gone](gone.md) — not there',
+    '- [old](archive/old.md) · [lost](archive/lost.md)',
+    '- [web](https://example.com/x.md) · [up](../x.md) · [rooted](/x.md) · [drive](C:/x.md)',
+    '- [sub](sub/x.md) · [self](MEMORY.md) · [hidden](.hidden.md) · [folder](folder.md)',
+    '- [here](./here.md) · [B](B.md)',
+    '',
+  ].join('\n'))
+  for (const n of ['a.md', 'b.md', 'here.md', 'c.md']) writeFileSync(join(dir, n), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'odd.md'), 'no frontmatter', 'utf8')
+  writeFileSync(join(dir, 'archive', 'old.md'), noteOf('moment'), 'utf8')
+  mkdirSync(join(dir, 'folder.md'))
+  const { body } = await withHomeAsync(home, () => memoryMount().call())
+  const { health } = body.stores[0]
+  // a case-insensitive disk finds B.md as b.md, as it would for the AI; a case-sensitive one does not
+  const caseless = caselessAt(dir)
+  // in the index's order, a folder where a note should be among them; a URL, a path out of
+  // the store or into a subfolder, the index itself, a name no note can have: not judged
+  assert.deepEqual([health.checked, health.broken, health.brokenMore],
+    [true, ['gone.md', 'archive/lost.md', 'folder.md', ...(caseless ? [] : ['B.md'])], false])
+  assert.deepEqual([...health.unindexed].sort(), ['c.md', 'odd.md', ...(caseless ? [] : ['b.md'])].sort())
+  // the index's text is read for its pointers, and stays on the host
+  assert.doesNotMatch(JSON.stringify(body), /secret line|not there/)
+})
+
+test('memory GET: with no index every note is out of it; past the cap, or listed in part, no check-up', async () => {
+  const { home, dir } = globalStore('mem-health-none')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  rmSync(join(dir, INDEX))
+  let s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(s.health, { checked: true, broken: [], brokenMore: false, unindexed: ['a.md'] })
+  writeFileSync(join(dir, INDEX), `${big(250)}\n- [gone](gone.md)\n`, 'utf8')
+  s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(s.health, { checked: false, reason: 'over' })
+  // under a cap past recall's read the index is not read whole: too large to check
+  writeFileSync(join(dir, INDEX), 'x'.repeat(17 * 1024 * 1024), 'utf8')
+  s = (await withHomeAsync(home, () => memoryMount({ maxBytes: 20000000 }).call())).body.stores[0]
+  assert.deepEqual(s.health, { checked: false, reason: 'large' })
+  // an index that is there but cannot be read is not taken for none
+  rmSync(join(dir, INDEX))
+  mkdirSync(join(dir, INDEX))
+  s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual([s.index, s.health], [null, { checked: false, reason: 'unreadable' }])
+  rmSync(join(dir, INDEX), { recursive: true })
+  writeFileSync(join(dir, INDEX), '- [a](a.md)\n', 'utf8')
+  for (let i = 0; i <= 2000; i++) writeFileSync(join(dir, `f${i}.txt`), '')
+  s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(s.health, { checked: false, reason: 'partial' })
+})
+
+test('memory GET: a store whose folder cannot be read to its end gets no check-up', async () => {
+  const { home, dir } = globalStore('mem-health-eio')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const native = promises.opendir
+  promises.opendir = async (p, ...rest) => {
+    if (String(p) === dir) throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' })
+    return native(p, ...rest)
+  }
+  syncBuiltinESMExports()
+  try {
+    const s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+    assert.deepEqual(s.health, { checked: false, reason: 'unreadable' })
+  } finally {
+    promises.opendir = native
+    syncBuiltinESMExports()
+  }
+})
+
+test('memory GET: the check-up names at most 200 pointers to nothing, and says there are more', async () => {
+  // five a line, so the index stays within the cap and is checked
+  const index = Array.from({ length: 41 }, (_, l) =>
+    Array.from({ length: 5 }, (_, k) => `[n${l * 5 + k}](n${l * 5 + k}.md)`).join(' ')).join('\n')
+  const { home } = globalStore('mem-health-many', `${index}\n`)
+  const { health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.equal(health.broken.length, 200)
+  assert.deepEqual([health.broken[0], health.broken.at(-1), health.brokenMore], ['n0.md', 'n199.md', true])
+})
+
+test('memory GET: the check-up reads pointers as the doctor does, in time linear in the index', async () => {
+  const long = `${'n'.repeat(600)}.md`
+  const { home, dir } = globalStore('mem-health-shape', [
+    // the doctor's pointer ends at a delimiter or the index's end: not at a control
+    // character, and a run past a name's length is no pointer
+    `- [ctl](ctl.md\u0001) · [long](${long}) · [ok](a.md)`,
+    `- ${'](x'.repeat(4000)}`, // a crafted run of link openings, within the cap
+    '- [last](gone.md',
+  ].join('\n'))
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const started = performance.now()
+  const { health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.ok(performance.now() - started < 1000)
+  assert.deepEqual([health.checked, health.broken, health.unindexed], [true, ['gone.md'], []])
+})
+
+test('memory GET: past 1000 names only the disk could judge, the check-up does not guess', async () => {
+  // names no note has: each is looked up, past the 200 listed too
+  const { home } = globalStore('mem-health-lookups', `${Array.from({ length: 101 }, (_, l) =>
+    Array.from({ length: 10 }, (_, k) => `[d](d${l * 10 + k}.md)`).join(' ')).join('\n')}\n`)
+  const { health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(health, { checked: false, reason: 'large' })
+})
+
+test('memory GET: past 200 pointers to nothing, the rest are still judged', async () => {
+  const missing = Array.from({ length: 20 }, (_, l) =>
+    Array.from({ length: 10 }, (_, k) => `[g](g${l * 10 + k}.md)`).join(' ')).join('\n')
+  const { home, dir } = globalStore('mem-health-after', `${missing}\n- [b](B.md)\n`)
+  writeFileSync(join(dir, 'b.md'), noteOf('user'), 'utf8')
+  const { health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  const caseless = caselessAt(dir)
+  // a case-insensitive disk opens B.md as b.md: 200 pointers to nothing, b.md in the index
+  assert.deepEqual([health.broken.length, health.brokenMore, health.unindexed],
+    caseless ? [200, false, []] : [200, true, ['b.md']])
+})
+
+test('memory GET: the disk decides the archive\'s and the index\'s case; a file named archive holds nothing', async () => {
+  const { home, dir } = globalStore('mem-health-case', '- [old](ARCHIVE/old.md) · [self](memory.md)\n')
+  writeFileSync(join(dir, 'archive', 'old.md'), noteOf('moment'), 'utf8')
+  const caseless = caselessAt(dir)
+  let { health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(health.broken, caseless ? [] : ['ARCHIVE/old.md', 'memory.md'])
+  rmSync(join(dir, 'archive'), { recursive: true })
+  writeFileSync(join(dir, 'archive'), 'not a folder', 'utf8')
+  writeFileSync(join(dir, INDEX), '- [old](archive/old.md)\n', 'utf8')
+  ;({ health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0])
+  assert.deepEqual(health.broken, ['archive/old.md'])
+})
+
+test('memory GET: the check-up never looks through a link — a note\'s, or the archive\'s', async (t) => {
+  const { home, dir } = globalStore('mem-health-links', '- [x](x.md) · [y](archive/y.md) · [z](Archive/z.md)\n')
+  const outside = scratch('mem-health-out')
+  writeFileSync(join(outside, 'x.md'), noteOf('user'), 'utf8')
+  rmSync(join(dir, 'archive'), { recursive: true })
+  symlinkSync(outside, join(dir, 'archive'), process.platform === 'win32' ? 'junction' : 'dir')
+  const linkedNote = fileLink(join(outside, 'x.md'), join(dir, 'x.md'))
+  // every lookup is of the entry itself: nothing reaches the folder the links lead to
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const seen = []
+  const natives = { stat: promises.stat, lstat: promises.lstat }
+  for (const name of ['stat', 'lstat']) {
+    promises[name] = async (p, ...rest) => { seen.push([name, String(p)]); return natives[name](p, ...rest) }
+  }
+  syncBuiltinESMExports()
+  let health
+  try {
+    ;({ health } = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0])
+  } finally {
+    Object.assign(promises, natives)
+    syncBuiltinESMExports()
+  }
+  // a link is not judged; with no link made, x.md is simply not there
+  assert.deepEqual([health.checked, health.broken], [true, linkedNote === null ? ['x.md'] : []])
+  // (the store's own folder is stat'ed when it is found, before any check-up)
+  const real = realpathSync.native(dir)
+  assert.deepEqual(seen.filter(([name, p]) => (name === 'stat' && p !== dir && p !== real) || p.startsWith(outside)), [])
+  assert.ok(!seen.some(([, p]) => /[\\/][yz]\.md$/.test(p)), JSON.stringify(seen))
+  if (linkedNote === null) t.diagnostic('no symlink privilege here: the linked note was not made')
+})
+
+test('memory GET: on a case-sensitive disk, notes one case apart are two notes, and memory.md is one', async (t) => {
+  const { home, dir } = globalStore('mem-health-twins', '- [a](a.md) · [A](A.md)\n')
+  if (caselessAt(dir)) return t.skip('this disk takes a.md and A.md for one file')
+  for (const n of ['a.md', 'A.md', 'memory.md']) writeFileSync(join(dir, n), noteOf('user'), 'utf8')
+  const s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual(s.notes.map((n) => n.name).sort(), ['A.md', 'a.md', 'memory.md'])
+  assert.deepEqual([s.health.broken, s.health.unindexed], [[], ['memory.md']])
+})
+
+test('memory GET: on a disk with no file ids, the index is told by its name as before', async (t) => {
+  // an index and a note whose names are one apart in Unicode form only: two files on NTFS and ext4
+  const nfc = 'é.md'
+  const nfd = 'é.md'
+  const { home, dir } = globalStore('mem-health-noid', '- [n](n.md)\n')
+  writeFileSync(join(dir, nfc), '- [n](n.md)\n', 'utf8')
+  writeFileSync(join(dir, nfd), noteOf('user'), 'utf8')
+  if (fs.readdirSync(dir).filter((n) => n.endsWith('.md')).length < 3) return t.skip('this disk takes the two forms for one name')
+  const listed = async () => (await withHomeAsync(home, () => memoryMount({ indexName: nfc }).call())).body.stores[0].notes
+    .map((n) => n.name).filter((n) => n !== INDEX)
+  assert.deepEqual(await listed(), [nfd])
+  // every file id 0, as some network and FAT volumes give: the note is still a note
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const native = promises.lstat
+  promises.lstat = async (p, options) => {
+    const info = await native(p, options)
+    return options?.bigint ? Object.assign(Object.create(Object.getPrototypeOf(info)), info, { dev: 1n, ino: 0n }) : info
+  }
+  syncBuiltinESMExports()
+  try {
+    assert.deepEqual(await listed(), [nfd])
+  } finally {
+    promises.lstat = native
+    syncBuiltinESMExports()
+  }
+})
+
+test('memory GET: on a case-insensitive disk, the index under another spelling is still the index', async (t) => {
+  const { home, dir } = globalStore('mem-health-spelling', '- [a](a.md)\n')
+  if (!caselessAt(dir)) return t.skip('this disk keeps MEMORY.md and memory.md apart')
+  renameSync(join(dir, INDEX), join(dir, 'memory.md'))
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+  assert.deepEqual([s.notes.map((n) => n.name), s.health.unindexed], [['a.md'], []])
+})
+
+test('memory GET: a note that cannot be read is no note without a type: no check-up', async () => {
+  const { home, dir } = globalStore('mem-health-unread', '- [a](a.md)\n')
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const native = promises.open
+  promises.open = async (p, ...rest) => {
+    if (String(p) === join(dir, 'a.md')) throw Object.assign(new Error('EACCES: denied'), { code: 'EACCES' })
+    return native(p, ...rest)
+  }
+  syncBuiltinESMExports()
+  try {
+    const s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
+    assert.deepEqual([s.notes, s.health], [[{ name: 'a.md', type: 'other' }], { checked: false, reason: 'unreadable' }])
+  } finally {
+    promises.open = native
+    syncBuiltinESMExports()
+  }
+})
+
+test('memory GET: the whole listing names at most 1000 pointers to nothing, lookups or not', async () => {
+  // archived names under no archive: each is nothing without a lookup
+  const index = `${Array.from({ length: 20 }, (_, l) =>
+    Array.from({ length: 10 }, (_, k) => `[x](archive/x${l * 10 + k}.md)`).join(' ')).join('\n')}\n`
+  const home = scratch('mem-health-total')
+  const workspaces = []
+  for (let w = 0; w < 6; w++) {
+    const repo = realpathSync.native(scratch(`mem-health-total-${w}`))
+    mkdirSync(join(repo, '.git'))
+    store(repo, index)
+    workspaces.push({ id: `w${w}`, path: repo, title: `w${w}` })
+  }
+  const { body } = await withHomeAsync(home, () => memoryMount({}, { workspaces }).call())
+  const health = body.stores.map((s) => [s.health.broken.length, s.health.brokenMore])
+  assert.deepEqual(health, [[200, false], [200, false], [200, false], [200, false], [200, false], [0, true]])
+})
+
 test('memory GET: a note that is a link is not listed', async (t) => {
   const { home, dir } = globalStore('mem-link')
   const outside = join(scratch('mem-outside'), 'id.md')

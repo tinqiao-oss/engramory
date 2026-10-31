@@ -564,7 +564,7 @@ const TIMED_OUT = Symbol('timed out')
 /**
  * The memory page's one route. GET lists the stores recall can use, by name only: where each
  * is, its index's size against the cap, its notes' names with their types, its archive's
- * names. POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
+ * names, and its check-up (checkUp). POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
  * app — or, with no `file`, shows the store's index in the file manager — through dsh's
  * session controller, which checks the path once more. The page never sends a path: a store
  * is the id the listing gave it, a file a name in that store's directory, and both are found
@@ -688,7 +688,7 @@ function candidatesOf(settings, registry) {
  */
 async function listStores(settings, registry) {
   const { list, more, pinned } = candidatesOf(settings, registry)
-  const budget = { notes: MAX_NOTES }
+  const budget = { notes: MAX_NOTES, lookups: MAX_LOOKUPS, broken: MAX_BROKEN_SHOWN }
   const stores = []
   for (const candidate of list) {
     try {
@@ -809,23 +809,208 @@ function contains(root, p) {
 
 /** A real path as compared here: case folded on Windows only, as pathKey(). */
 const folded = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)
+/** A name as a case- and normalization-insensitive disk (Windows', macOS's by default) takes it. */
+const fold = (n) => n.normalize('NFC').toLowerCase()
 
-/** What the page shows of a store: its index's size, and its notes' and archive's names. */
+/** A file id that names no file: some network and FAT volumes give 0, ReFS may give all ones. */
+const NO_ID = new Set([0n, 0xffffffffffffffffn])
+
+/**
+ * Whether two paths name one directory entry, as the disk has it: on a case-insensitive
+ * disk two spellings of a name do, on a case-sensitive one they are two files. Decided by
+ * the entries' identity, links not followed, rather than guessed from the platform;
+ * `undefined` when the disk gives no identity to tell by.
+ */
+async function sameEntry(a, b) {
+  try {
+    const [x, y] = await Promise.all([fsp.lstat(a, { bigint: true }), fsp.lstat(b, { bigint: true })])
+    if (NO_ID.has(x.ino) || NO_ID.has(y.ino)) return undefined
+    return x.dev === y.dev && x.ino === y.ino
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether directory entry `name` in `dir` is the index `index`: by its own name, or by
+ * another spelling the disk takes for the same file. With no identity to tell by, any case
+ * of the index's name is the index, as it always was here.
+ */
+async function isIndexEntry(dir, name, index) {
+  if (name === index) return true
+  if (fold(name) !== fold(index)) return false
+  const same = await sameEntry(join(dir, name), join(dir, index))
+  return same ?? name.toLowerCase() === index.toLowerCase()
+}
+
+/** What the page shows of a store: its index's size, its notes' and archive's names, its check-up. */
 async function contents(store, settings, budget) {
-  const index = await indexSize(join(store.dir, store.indexName), settings)
+  const read = await indexSize(join(store.dir, store.indexName), settings)
   const listed = await noteNames(store.dir, store.indexName, budget)
   const notes = []
-  for (const name of listed.names) notes.push({ name, type: await noteType(join(store.dir, name)) })
+  let unread = false
+  for (const name of listed.names) {
+    const type = await noteType(join(store.dir, name))
+    // a note it could not read is no note without a type: the check-up says so instead
+    if (type === UNREAD) unread = true
+    notes.push({ name, type: type === UNREAD ? 'other' : type })
+  }
   const folder = join(store.dir, ARCHIVE_DIR)
   // a folder of its own, not a link out of the store
-  const archive = await plainDirectory(folder)
+  const archiveKind = await kindOf(folder)
+  const archive = archiveKind === 'dir'
     ? await noteNames(folder, undefined, budget)
-    : { names: [], more: false }
+    : { names: [], more: false, failed: archiveKind === 'error' }
+  // the index's text stays here: the page is given names, never what a file says
+  const { text, ...index } = read ?? {}
   return {
-    index: index === undefined ? null : { name: store.indexName, ...index },
+    index: read === undefined ? null : { name: store.indexName, ...index },
     notes,
     archive: archive.names,
     more: listed.more || archive.more,
+    health: await checkUp(store, read, { ...listed, failed: listed.failed || unread },
+      { ...archive, kind: archiveKind }, budget),
+  }
+}
+
+/**
+ * How many pointers to nothing the page is told of: of one store, and of the whole
+ * listing (MAX_BROKEN_SHOWN, from the listing's budget); past either, `brokenMore`.
+ */
+const MAX_BROKEN = 200
+const MAX_BROKEN_SHOWN = 1000
+/**
+ * Bounds on the check-ups, whatever the cap is set to: the index text one looks through
+ * (an index at the default cap is 25 KB), and the paths the whole listing looks up on disk.
+ */
+const MAX_CHECKED_TEXT = 1024 * 1024
+const MAX_LOOKUPS = 1000
+/**
+ * A link's target, read the way tools/engramory_doctor.py's `_PTR_RE` reads an index
+ * pointer: after `](`, a run of characters up to the first `)`, `>`, space, `#`, `?` or
+ * control character. The doctor's pattern finds the run lazily, which on a crafted index
+ * (`](](](…`) costs time in the square of its length — here, on dsh's main thread — so
+ * this one takes the run greedily, at most POINTER_RUN long, and pointers() checks
+ * where it stopped. A note's name is at most 243 characters (NOTE_NAME).
+ */
+const POINTER_RUN = 512
+const POINTER = new RegExp(`\\]\\(\\s*<?([^)>\\s#?\\u0000-\\u001f]{1,${POINTER_RUN}})`, 'g')
+
+/** The index's pointers to `.md` files, as the doctor finds them, each once. */
+function pointers(text) {
+  const found = new Set()
+  for (const match of text.matchAll(POINTER)) {
+    const end = match.index + match[0].length
+    // a pointer ends at a delimiter or the end of the index, never at a control
+    // character or at the bound, as the doctor's `(?=[)>\s#?]|$)` has it
+    if (end < text.length && !/[)>\s#?]/.test(text[end])) continue
+    if (/\.md$/i.test(match[1])) found.add(match[1])
+  }
+  return found
+}
+
+/**
+ * A store's check-up, from the listing and the index: the index's pointers to a note or an
+ * archived note that is not there, and the notes no pointer names — recall starts from the
+ * index, so the AI does not find those unless another note links to one. A pointer a
+ * listing cannot judge — a URL, an absolute path, one into a subfolder of its own or out of
+ * the store — is left alone; the doctor checks everything. Run only on a listing that is
+ * whole and read without error, and an index read whole within the cap (or not there at
+ * all); otherwise `{ checked: false, reason }`, rather than a verdict on part of the store.
+ *
+ * A pointer whose name is not listed under that spelling goes to the disk, which decides
+ * as it would for the AI — a case-insensitive disk finds `A.md` as `a.md` — looking only at
+ * the entry itself, never through a link (kindOf): the store may come with a cloned
+ * repository, and a link there could lead the lookup off the store or onto a share that
+ * never answers. A link is not judged, as the page does not list one; a folder or a device
+ * where a note should be is no note. An archived note is looked up only in a plain folder.
+ *
+ * Every lookup comes out of the listing's budget (MAX_LOOKUPS): a check-up that would need
+ * more is not run. The broken pointers are listed as the index writes them.
+ */
+async function checkUp(store, read, listed, archive, budget) {
+  if (listed.failed || archive.failed) return { checked: false, reason: 'unreadable' }
+  if (listed.more || archive.more) return { checked: false, reason: 'partial' }
+  if (read?.over) return { checked: false, reason: 'over' }
+  if (read !== undefined && (read.text === undefined || read.text.length > MAX_CHECKED_TEXT)) {
+    return { checked: false, reason: 'large' }
+  }
+  const TOO_MANY = Symbol('too many')
+  const look = async (...path) => {
+    if (budget.lookups <= 0) return TOO_MANY
+    budget.lookups--
+    return kindOf(join(store.dir, ...path))
+  }
+  // no index to read: only a store with none has every note out of it
+  if (read === undefined) {
+    const kind = await look(store.indexName)
+    if (kind === TOO_MANY) return { checked: false, reason: 'large' }
+    if (kind !== 'missing') return { checked: false, reason: 'unreadable' }
+  }
+  // a note by the spelling a case-insensitive disk also opens it under; two notes that
+  // share one (a case-sensitive disk) are neither credited through it
+  const byFold = new Map()
+  for (const n of listed.names) byFold.set(fold(n), byFold.has(fold(n)) ? null : n)
+  const notes = new Set(listed.names)
+  const archived = new Set(archive.names)
+  const indexed = new Set()
+  const broken = []
+  let brokenMore = false
+  for (const target of pointers(read?.text ?? '')) {
+    const parts = target.replace(/\\/g, '/').split('/').filter((p) => p !== '.')
+    // a scheme or a drive (`https:`, `C:`), a rooted path, `..`: not a name in this store
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || parts.some((p) => p === '' || p === '..')) continue
+    // the archive under any spelling the disk may take for it; any other folder is not judged
+    const folder = parts.length === 2 && parts[0].toLowerCase() === ARCHIVE_DIR ? parts[0] : undefined
+    if (parts.length !== 1 && folder === undefined) continue
+    const name = parts.at(-1)
+    if (!NOTE_NAME.test(name)) continue
+    if (folder === undefined && name === store.indexName) continue
+    let kind
+    if (folder === undefined ? notes.has(name) : folder === ARCHIVE_DIR && archived.has(name)) {
+      kind = 'file'
+    } else if (folder === undefined) {
+      kind = await look(name)
+    } else {
+      const dir = folder === ARCHIVE_DIR ? archive.kind : await look(folder)
+      // nothing is in a folder that is not one; a link or an error is told as such
+      kind = dir === 'dir' ? await look(folder, name) : dir === 'file' || dir === 'other' ? 'missing' : dir
+    }
+    if (kind === TOO_MANY) return { checked: false, reason: 'large' }
+    if (kind === 'error') return { checked: false, reason: 'unreadable' }
+    if (kind === 'link') continue
+    if (kind === 'file') {
+      const named = folder !== undefined ? undefined : notes.has(name) ? name : byFold.get(fold(name))
+      if (named) indexed.add(named)
+      continue
+    }
+    // missing, a folder, a device: nothing the AI could open as a note
+    if (broken.length >= MAX_BROKEN || budget.broken <= 0) {
+      brokenMore = true
+      continue
+    }
+    budget.broken--
+    broken.push(target)
+  }
+  return {
+    checked: true,
+    broken,
+    brokenMore,
+    unindexed: listed.names.filter((n) => !indexed.has(n)),
+  }
+}
+
+/**
+ * What is at `path` itself, a link not followed (Windows reports a junction as one):
+ * 'file', 'dir', 'link', 'other' (a FIFO, a device), 'missing', or 'error' when it could not
+ * be told.
+ */
+async function kindOf(path) {
+  try {
+    const info = await fsp.lstat(path)
+    return info.isSymbolicLink() ? 'link' : info.isFile() ? 'file' : info.isDirectory() ? 'dir' : 'other'
+  } catch (error) {
+    return error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? 'missing' : 'error'
   }
 }
 
@@ -841,13 +1026,15 @@ async function plainDirectory(path) {
  * The names of the notes directly in `dir`: regular files by their directory entry — not a
  * link, a folder, a FIFO or a device — named as NOTE_NAME allows, the index left out. At
  * most MAX_DIR_ENTRIES entries are looked at, one at a time, and the budget shared by the
- * whole listing is not exceeded; `more` says something was left. (On a filesystem whose
+ * whole listing is not exceeded; `more` says something was left, `failed` that the
+ * directory could not be read to its end. (On a filesystem whose
  * directory entries carry no type — some network mounts — Node stats each entry
  * synchronously to type it: that much main-thread I/O, bounded by MAX_DIR_ENTRIES.)
  */
 async function noteNames(dir, skip, budget) {
   const names = []
   let more = false
+  let failed = false
   let handle
   try {
     handle = await fsp.opendir(dir)
@@ -859,16 +1046,18 @@ async function noteNames(dir, skip, budget) {
         break
       }
       if (!entry.isFile() || !NOTE_NAME.test(entry.name)) continue
-      if (skip !== undefined && entry.name.toLowerCase() === skip.toLowerCase()) continue
+      // the index, under another spelling only where the disk takes that for the index
+      if (skip !== undefined && await isIndexEntry(dir, entry.name, skip)) continue
       names.push(entry.name)
     }
   } catch {
-    // unreadable part way: what was read
+    // unreadable part way: what was read, said to be no whole listing (checkUp)
+    failed = true
   } finally {
     await handle?.close().catch(() => {})
   }
   budget.notes -= names.length
-  return { names, more }
+  return { names, more, failed }
 }
 
 /** Open a file a listing found for reading: a FIFO does not wait for a writer, a device fails. */
@@ -884,19 +1073,22 @@ async function openRegular(path) {
   return undefined
 }
 
-/** A note's type, from its head only; `other` when it cannot be told. */
+/** What noteType() gives for a note it could not read: listed as `other`, and no check-up. */
+const UNREAD = Symbol('unread')
+
+/** A note's type, from its head only; `other` when the head names none, UNREAD when unread. */
 async function noteType(path) {
   let opened
   try {
     opened = await openRegular(path)
-    if (opened === undefined) return 'other'
+    if (opened === undefined) return UNREAD
     // one byte more than the head, to tell a line that ends there from one cut there
     const head = Buffer.alloc(HEAD_BYTES + 1)
     const { bytesRead } = await opened.handle.read(head, 0, HEAD_BYTES + 1, 0)
     const cut = bytesRead > HEAD_BYTES && head[HEAD_BYTES] !== 0x0a && head[HEAD_BYTES] !== 0x0d
     return typeIn(head.subarray(0, Math.min(bytesRead, HEAD_BYTES)).toString('utf8'), cut)
   } catch {
-    return 'other'
+    return UNREAD
   } finally {
     await opened?.handle.close().catch(() => {})
   }
@@ -931,6 +1123,7 @@ function typeIn(text, cut) {
 /**
  * The index's size against the cap, read as far as recall reads it: lines are known only
  * when the whole file was read; past that only its bytes tell whether it is over the cap.
+ * A file read whole comes with its `text`, for the check-up, which the page is not given.
  */
 async function indexSize(path, settings) {
   let opened
@@ -948,8 +1141,9 @@ async function indexSize(path, settings) {
     const bytes = Math.max(opened.size, got)
     // past the cap, or past recall's read ceiling under an even larger cap
     if (got > limit) return { bytes, over: bytes > settings.maxBytes }
-    const lines = countLines(buffer.subarray(0, got).toString('utf8'))
-    return { bytes, lines, over: lines > settings.maxLines || bytes > settings.maxBytes }
+    const text = buffer.subarray(0, got).toString('utf8')
+    const lines = countLines(text)
+    return { bytes, lines, over: lines > settings.maxLines || bytes > settings.maxBytes, text }
   } catch {
     return undefined
   } finally {

@@ -16,7 +16,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.0.5。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
+> **状态:1.0.6。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ## 长什么样
 
@@ -85,14 +85,20 @@ python tools/engramory_init.py codex --project-root /path/to/project --install-s
 
 ### 让另一个 AI 只读同一个库
 
-一个库只有一个 AI 负责写，别的 AI 只读（[单写者、多读者](adapters/reader/README.md)）：
+一个库只有一个 AI 负责写，别的 AI 只读（[单写者、多读者](adapters/reader/README.md)）。比如 dsh 插件写它的全局库，Claude Code 和 Codex 来读：
 
 ```sh
+# Claude Code：写进用户级的 ~/.claude/CLAUDE.md，每个项目都读得到
+python tools/engramory_init.py claude-reader --project-root ~/.claude \
+  --memory-root ~/.dsh/.engramory-memory
+# Codex：写进 ~/.codex/AGENTS.md
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
-  --memory-root ~/.claude/projects/<project>/memory
+  --memory-root ~/.dsh/.engramory-memory
 ```
 
-读者不建库，`--memory-root` 里必须已有 `MEMORY.md`。"只读"靠规则约束，不是强制的；回忆到的内容会发给那个宿主的模型服务商。详见[读取器指南](adapters/reader/README.md)。
+反过来让 dsh 读 Claude Code 的库，换成 `dsh-reader`，`--memory-root` 指向 `~/.claude/projects/<project>/memory`。
+
+读者不建库，`--memory-root` 里必须已有 `MEMORY.md`。读者自己的记忆照旧：Claude Code 读着 dsh 的库，你跟它说「记住……」，它记进自己的库，dsh 看不到。想让两边都知道，就各写各的库、互相只读对方的。"只读"靠规则约束，不是强制的；回忆到的内容会发给那个宿主的模型服务商。详见[读取器指南](adapters/reader/README.md)。
 
 ## 为什么这样做
 

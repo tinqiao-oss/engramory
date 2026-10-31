@@ -25,7 +25,8 @@ which is general-purpose agent memory: Claude Code, Codex and others can use the
 - **The rules come with it.** What to save, how, and when to clean up: the rules
   (a skill) are registered by the plugin, with no files to install.
 - **A Memory page in the sidebar.** Read-only; it lists the notes by name and opens
-  one in your computer's default app.
+  one in your computer's default app, with a check-up that flags broken links in the
+  index and notes left out of it.
 
 ## Install
 
@@ -138,7 +139,13 @@ owner, so a program forwarding other people's messages must leave it out.
 - **Memory page:** *Memory* in the sidebar. It lists the global store and each
   workspace's project store (with an absolute `indexPath`, that store alone; with a
   relative one, none), with each index's size against the cap, its notes' names
-  by type, and its archive. Read-only, never a note's text; a name, *Open the index* and
+  by type, and its archive. Each store comes with a check-up: the index's links to
+  files that are not there, the notes not in the index (recall starts from the index, so
+  the AI will not find them unless another note links to them), and notes with no type.
+  It goes by file names and the index's links alone, never through a symbolic link, and
+  is skipped when the index is over the cap, there is too much to check, or a file cannot
+  be read; `engramory_doctor.py` still does the full check.
+  Read-only, never a note's text; a name, *Open the index* and
   *Open the folder* open on the machine dsh runs on; a machine with no desktop (a
   headless server, a session over SSH) shows none of them. The switches at the top
   (companion mode, and memory access once it is on) save as you flip them.

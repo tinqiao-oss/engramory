@@ -1,6 +1,6 @@
 {
   "name": "dsh-engramory",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "DeepSeek Harness 的长期记忆插件：AI 记住的东西存成普通 markdown 文件，每轮自动带上记忆索引，索引有大小上限。",
   "keywords": [
     "dsh-plugin",

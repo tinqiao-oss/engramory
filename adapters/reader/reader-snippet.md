@@ -3,7 +3,7 @@
 Paste this into your host's **always-loaded** rules (Codex `AGENTS.md`, Claude Code
 `CLAUDE.md`, Cline `.clinerules`, a Cursor `.mdc` with `alwaysApply: true`, a Kiro steering
 file with `inclusion: always`, …) so the agent can *recall* from a memory store that
-**another agent** (typically Claude Code) owns and writes. This agent reads; it never writes.
+**another agent** (Claude Code, dsh, …) owns and writes. This agent reads; it never writes.
 Keep it short — the full protocol lives in the engramory `SKILL.md`. (`engramory_init.py
 <host>-reader` wires this for you.)
 
@@ -12,8 +12,8 @@ Keep it short — the full protocol lives in the engramory `SKILL.md`. (`engramo
 ## Memory (Engramory — read-only)
 
 You have **READ-ONLY** access to a curated, file-based memory at `<MEMORY_ROOT>/`
-(index: `MEMORY.md`). It is maintained by another agent (typically Claude Code), the
-**sole writer** — you recall from it, you never change it.
+(index: `MEMORY.md`). It is maintained by another agent, its **sole writer** — you
+recall from it, you never change it.
 
 - **What counts as a task.** A turn, a message, or a session is not by itself a
   task; a task is user-directed work whose **correct** handling could depend on
@@ -42,7 +42,8 @@ You have **READ-ONLY** access to a curated, file-based memory at `<MEMORY_ROOT>/
 - **Never write here.** Do not create, edit, move, or delete any file in this store — no
   new notes, no edits to `MEMORY.md`, nothing. The owning agent curates it (Engramory assumes
   a single writer; a second writer races the index). If you learn something durable worth
-  saving, **tell the user** (or hand it back to the owning agent) — do not persist it yourself.
+  saving, do not put it in this store: **tell the user** (or hand it back to the owning
+  agent), or keep it in your host's own memory if it has one — that store is yours.
 
 Read-only recall only. The full protocol, including the write side you do not use, is in
 the engramory `SKILL.md`.

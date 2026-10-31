@@ -25,12 +25,12 @@ milestone guidance.
 
 A READ-ONLY reader host `<host>-reader` (codex-reader, claude-reader, cursor-reader, kiro-reader,
 cline-reader, windsurf-reader, openclaw-reader, hermes-reader, dsh-reader) instead wires that host to *recall*
-from a store ANOTHER agent (typically Claude Code) owns and writes — one writer, N readers. It
+from a store ANOTHER agent (Claude Code, dsh, …) owns and writes — one writer, N readers. It
 creates no store, touches no .gitignore, installs no write tools, and uses a recall-only snippet
 (no write protocol). `--memory-root` MUST point at an existing store (e.g. Claude Code's memory
 dir). It injects into the host's own always-loaded rules file (AGENTS.md / CLAUDE.md / .clinerules
 / Cursor .mdc / Kiro steering …); a marked block coexists with other Engramory blocks. Only the
-codex-reader and dsh-reader wirings are verified against their real hosts — the others are
+codex-reader, claude-reader and dsh-reader wirings are verified against their real hosts — the others are
 built from each host's documented
 rules-file format but printed with an "unverified" note. See adapters/reader/README.md.
 
@@ -536,10 +536,11 @@ def _reader_note(index_display, check_display, protocol_display,
     # step and check_display is intentionally unused (signature kept uniform for _render_block).
     return f"""Read-only wiring:
 
-- Recall from `{index_display}` — the memory index of a store another agent (typically
-  Claude Code's native auto-memory) owns and writes. You have READ access only.
+- Recall from `{index_display}` — the memory index of a store another agent owns and
+  writes (Claude Code's auto-memory, a dsh plugin's store, …). You have READ access only.
 - NEVER create, edit, move, or delete anything in this store (no new notes, no edits to
-  `MEMORY.md`). If you learn something durable, surface it to the user instead of writing it.
+  `MEMORY.md`). If you learn something durable, surface it to the user, or keep it in your
+  host's own memory if it has one — never in this store.
 - Full protocol reference (recall + the write side you do NOT use): `{protocol_display}`.
 - Asked to check or change this wiring itself? Follow `{setup_display}`. You are a
   READER here: it will tell you to confirm ownership before anything else."""
@@ -591,7 +592,7 @@ HOST_CONFIG = {
 
 
 # Read-only READER hosts ("<host>-reader"): wire an agent to RECALL from a store that
-# ANOTHER agent (typically Claude Code) owns and writes — one writer, N readers. The recall
+# ANOTHER agent (Claude Code, dsh, …) owns and writes — one writer, N readers. The recall
 # discipline is identical and host-agnostic; the ONLY per-host difference is which
 # always-loaded rules file it lands in (and, for Cursor/Kiro, the frontmatter that file
 # needs). Every reader creates no store, touches no .gitignore, installs no write tools, and
@@ -602,7 +603,7 @@ HOST_CONFIG = {
 # (Engramory's honesty rule — see adapters/reader/README.md).
 READER_HOSTS = {
     "codex":    {"label": "Codex",       "rules_file": "AGENTS.md",      "tested": True},
-    "claude":   {"label": "Claude Code", "rules_file": "CLAUDE.md",      "tested": False},
+    "claude":   {"label": "Claude Code", "rules_file": "CLAUDE.md",      "tested": True},
     "openclaw": {"label": "OpenClaw",    "rules_file": "AGENTS.md",      "tested": False},
     "hermes":   {"label": "Hermes",      "rules_file": "AGENTS.md",      "tested": False},
     "dsh":      {"label": "DeepSeek Harness", "rules_file": "AGENTS.md", "tested": True},

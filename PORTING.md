@@ -36,7 +36,7 @@ without becoming a writer:
 |---|---|---|
 | `codex-reader` | `AGENTS.md` | dogfooded end-to-end |
 | `dsh-reader` | `AGENTS.md` | dogfooded end-to-end |
-| `claude-reader` | `CLAUDE.md` | unverified wiring |
+| `claude-reader` | `CLAUDE.md` | dogfooded end-to-end |
 | `openclaw-reader` / `hermes-reader` | `AGENTS.md` | unverified wiring |
 | `cline-reader` | `.clinerules` | unverified wiring |
 | `windsurf-reader` | `.windsurfrules` | unverified wiring |

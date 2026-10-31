@@ -477,6 +477,55 @@ test('client: a name opens its note through the memory route — and the index, 
   assert.deepEqual((await posted(() => button(view.tree, 'openFolder').props.onClick())).body, { store: 'user' })
 })
 
+test('client: the check-up lists the index\'s pointers to nothing as text and the notes out of it to open', async () => {
+  const store = {
+    ...memoryData().stores[0],
+    health: { checked: true, broken: ['gone.md', 'archive/lost.md'], brokenMore: false, unindexed: ['b-note.md'] },
+  }
+  const { view, sent, zh } = await memoryPage({
+    [`GET ${MEMORY}`]: memoryData({ stores: [store] }), [`POST ${MEMORY}`]: { ok: true },
+  }, { zh: true })
+  await view.settle()
+  const [health] = findAll(view.tree, (n) => n.props.className === 'eng-health')
+  const text = textOf(health)
+  for (const shown of ['体检', '索引里指向不存在的文件（2）', 'gone.md', 'archive/lost.md', '不在索引里（1）',
+    '没写类型或类型不认识（1）', zh.healthFix]) {
+    assert.ok(text.includes(shown), shown)
+  }
+  // a pointer to nothing is not a button; a note out of the index opens as any note does
+  assert.equal(findAll(health, (n) => n.type === 'button' && textOf(n) === 'gone.md').length, 0)
+  findAll(health, (n) => n.type === 'button' && textOf(n) === 'b-note')[0].props.onClick()
+  await view.settle()
+  assert.deepEqual(sent.filter((s) => s.method === 'POST').at(-1).body, { store: 'user', file: 'b-note.md' })
+})
+
+test('client: a clean check-up is one line; one not run says why, except past the cap, said already', async () => {
+  const clean = { ...memoryData().stores[0], notes: [{ name: 'who.md', type: 'user' }],
+    health: { checked: true, broken: [], brokenMore: false, unindexed: [] } }
+  const over = { ...memoryData().stores[1], health: { checked: false, reason: 'over' } }
+  const partial = { ...memoryData().stores[0], id: 'pinned', kind: 'pinned', health: { checked: false, reason: 'partial' } }
+  const unreadable = { ...memoryData().stores[0], id: 'ws:w2', kind: 'project', titles: ['b'],
+    health: { checked: false, reason: 'unreadable' } }
+  const large = { ...unreadable, id: 'ws:w3', health: { checked: false, reason: 'large' } }
+  const { view, zh } = await memoryPage({
+    [`GET ${MEMORY}`]: memoryData({ stores: [clean, over, partial, unreadable, large] }),
+  }, { zh: true })
+  await view.settle()
+  assert.deepEqual(textsOf(view.tree, 'eng-note'),
+    [zh.healthOk, zh.overHint, zh.more, zh.healthPartial, zh.healthUnreadable, zh.healthLarge])
+  assert.equal(findAll(view.tree, (n) => n.props.className === 'eng-health').length, 0)
+  const many = { ...clean, health: { checked: true, broken: ['x.md'], brokenMore: true, unindexed: [] } }
+  const more = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [many] }) }, { zh: true })
+  await more.view.settle()
+  assert.ok(textOf(more.view.tree).includes('索引里指向不存在的文件（1 个以上）'))
+  // the listing's share of them spent elsewhere: none listed here, and still no clean bill
+  const unlisted = { ...clean, health: { checked: true, broken: [], brokenMore: true, unindexed: [] } }
+  const none = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [unlisted] }) }, { zh: true })
+  await none.view.settle()
+  const text = textOf(none.view.tree)
+  assert.ok(text.includes(none.zh.healthBrokenUnlisted) && !text.includes(none.zh.healthOk), text)
+})
+
 test('client: a store with no index offers its notes but no index or folder to open', async () => {
   const store = { ...memoryData().stores[0], index: null }
   const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [store] }) })
