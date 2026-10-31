@@ -153,7 +153,14 @@ owner, so a program forwarding other people's messages must leave it out.
   *Open the folder* open on the machine dsh runs on; a machine with no desktop (a
   headless server, a session over SSH) shows none of them. The switches at the top
   (companion mode, and memory access once it is on) save as you flip them. Below them
-  is a short *How to use it*, open while there is no memory yet; at the foot, where to
+  is a short *How to use it*, open while there is no memory yet; then an overview (notes
+  by type, archived files, plans, notes past 12 KB, when it was read; it says when the
+  listing was cut short or a store could not be read, rather than counting that as
+  nothing), the plans by where they stand (date passed and outcome to confirm, today,
+  days ahead, undated; a reminder, nothing is archived), and a filter by name. Each
+  store's index fill is a bar (to the nearer of its two caps), and *Copy tidy-up
+  instructions* copies a request for the AI to paste into a conversation; the plugin
+  itself changes no file. Notes past 12 KB are listed as worth splitting. At the foot, where to
   send feedback: a new GitHub issue (its body pre-filled with the plugin's version and the
   OS family, no path and no note), or an email, with a button that copies the address.
 

@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.0.8'
+    const VERSION = '1.1.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -35,6 +35,11 @@ window.__ModuleLoader__.load({
     const EMAIL = 'engramory@agent.qq.com'
     /** The how-to's lines, in order. */
     const HOW_TO = ['howToSay', 'howToRecall', 'howToEdit', 'howToMove', 'howToSocial']
+    /** A note past this is almost always a timeline under one slug (SKILL.md: "A note has a size
+     * too"); the doctor warns at the same size (ENGRAMORY_NOTE_WARN_BYTES). */
+    const LARGE_NOTE = 12 * 1024
+    /** An `upcoming` note named with its date: `2026-10-31-interview`, `2026-10-31面试` (SKILL.md §2.2). */
+    const DATED = /^(\d{4})-(\d{2})-(\d{2})(?!\d)/
     const DEFAULT_LINES = 200
     const DEFAULT_BYTES = 25600
     /** The order the memory page shows note types in (SKILL.md §2, §2.2). */
@@ -114,7 +119,7 @@ window.__ModuleLoader__.load({
       healthBrokenUnlisted: '索引里有指向不存在的文件，太多了，这里没列出。',
       healthUnindexed: '不在索引里（{count}）：AI 回忆从索引开始，这些它通常找不到，除非别的笔记链到它们。',
       healthUntyped: '没写类型或类型不认识（{count}），列在「其他」里。',
-      healthFix: '可以让 AI 整理：把漏掉的补进索引，删掉或改正坏链接。完整检查用 engramory_doctor.py。',
+      healthFix: '可以点上面的「复制整理指令」，粘贴进对话让 AI 整理。完整检查用 engramory_doctor.py。',
       healthLarge: '要核对的太多，没做体检。',
       healthUnreadable: '有文件读不了，没做体检。',
       healthPartial: '文件太多没列全，没做体检。',
@@ -132,6 +137,30 @@ window.__ModuleLoader__.load({
       copyFailed: '复制不了，请手动选中上面的地址。',
       feedbackNote: '邮件会由 AI 助手协助整理，issue 是公开的，两处都别把记忆内容原样贴上去。插件版本 {version}。',
       issueBody: '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：',
+      overview: '概览',
+      statsNotes: '笔记 {notes} 条 · 归档文件 {archive} 个',
+      listSep: '，',
+      statsUpcoming: '约定：日期已过、结果待确认 {past} · 今天及以后 {ahead} · 未定日期 {undated}',
+      statsLarge: '超过 12 KB 的笔记 {count} 篇，建议拆分',
+      statsReadAt: '读取于 {time}，约定按那时的日期算，点刷新更新。',
+      statsPartial: '列表太长，只列出了一部分，这些数字偏少。',
+      statsUnreadable: '有 {count} 处可能存放记忆库的位置没读到（读不了或查不了），没算在内。',
+      statsIncomplete: '有的库里有文件读不了，这些数字可能偏少。',
+      upcomingTitle: '约定',
+      upcomingPast: '日期已过，结果待确认',
+      upcomingToday: '就是今天',
+      upcomingTomorrow: '明天',
+      upcomingSoon: '还有 {days} 天',
+      upcomingUndated: '未定日期',
+      filterLabel: '筛选笔记',
+      filterPlaceholder: '按名字筛选',
+      filterCount: '匹配 {count} 条（只在已列出的笔记里找）',
+      filterNone: '这个库里没有匹配的笔记。',
+      largeNotes: '超过 12 KB 的笔记（{count}）：一条笔记该只记一件事，可以让 AI 拆成几篇。',
+      tidyCopy: '复制整理指令',
+      tidyCopied: '已复制，粘贴进对话发给 AI',
+      tidyFailed: '复制不了，请手动选中下面的指令：',
+      tidyPrompt: '请按 Engramory 的记忆规则整理这个记忆库：{dir}\n- 索引里指向不存在文件的链接：找得到对应笔记的就改对，确实没有了的只删这个链接；一行里没有别的有效链接了，才删掉整行。\n- 不在索引里的笔记：以后回忆用得上的补进索引，过时的移进 archive/ 或删掉；不要为了补齐全部加进去。\n- 没写类型的笔记补上 type。\n- 索引超出上限就先压缩：合并重复，细节挪回笔记，索引只留指针。\n- 超过约 12 KB 的笔记，按规则拆成几篇。\n- 日期已过的约定别删，问到结果再改写成经历。\n改完再看一遍索引有没有超出上限，然后告诉我改了什么。',
     }
     const en = {
       summary: 'Companion mode and memory access, and the index cap.',
@@ -207,7 +236,7 @@ window.__ModuleLoader__.load({
       healthBrokenUnlisted: 'The index points to files that are not there: too many to list here.',
       healthUnindexed: 'Not in the index ({count}): recall starts from the index, so the AI will not find these unless another note links to them.',
       healthUntyped: 'No type, or one it does not know ({count}), listed under Other.',
-      healthFix: 'The AI can tidy this up: add what is missing to the index, and remove or fix the broken links. For a full check, run engramory_doctor.py.',
+      healthFix: 'Copy the tidy-up instructions above and paste them into a conversation for the AI to tidy this up. For a full check, run engramory_doctor.py.',
       healthLarge: 'Too much to check here, so no check-up.',
       healthUnreadable: 'Some files could not be read, so no check-up.',
       healthPartial: 'Too many files to list them all, so no check-up here.',
@@ -225,6 +254,30 @@ window.__ModuleLoader__.load({
       copyFailed: 'Could not copy; select the address above by hand.',
       feedbackNote: 'Emails are sorted with the help of an AI assistant, and issues are public: do not paste your memory notes into either. Plugin version {version}.',
       issueBody: '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ',
+      overview: 'Overview',
+      statsNotes: '{notes} notes · {archive} archived files',
+      listSep: ', ',
+      statsUpcoming: 'Coming up: date passed, outcome to confirm {past} · today or ahead {ahead} · no date yet {undated}',
+      statsLarge: '{count} notes past 12 KB, worth splitting',
+      statsReadAt: 'Read at {time}; plans stand as of that day. Refresh to update.',
+      statsPartial: 'The listing was too long to finish, so these numbers fall short.',
+      statsUnreadable: '{count} places that may hold a memory store could not be read and are not counted.',
+      statsIncomplete: 'Some files in a store could not be read, so these numbers may fall short.',
+      upcomingTitle: 'Coming up',
+      upcomingPast: 'Date passed, outcome to confirm',
+      upcomingToday: 'Today',
+      upcomingTomorrow: 'Tomorrow',
+      upcomingSoon: 'In {days} days',
+      upcomingUndated: 'No date yet',
+      filterLabel: 'Filter notes',
+      filterPlaceholder: 'Filter by name',
+      filterCount: '{count} matching (among the notes listed)',
+      filterNone: 'No matching notes in this store.',
+      largeNotes: 'Notes past 12 KB ({count}): a note should hold one fact; the AI can split these.',
+      tidyCopy: 'Copy tidy-up instructions',
+      tidyCopied: 'Copied; paste it into a conversation',
+      tidyFailed: 'Could not copy; select the instructions below by hand:',
+      tidyPrompt: 'Tidy up this memory store by the Engramory rules: {dir}\n- Links in the index to files that are not there: fix the ones whose note you can find; where there is none, remove that link alone, and the line only when it has no other live link left.\n- Notes the index does not name: add the ones recall will need, move the outdated ones into archive/ or delete them; do not add them all just to be complete.\n- Notes with no type: give them one.\n- An index over its cap: compact it first by merging duplicates and moving detail back into the notes, so the index holds pointers only.\n- Notes past about 12 KB: split them as the rules say.\n- Plans whose date has passed: do not delete them; rewrite them as what happened once you learn the outcome.\nThen check the index is within its cap, and tell me what you changed.',
     }
 
     const CSS = `
@@ -272,7 +325,7 @@ window.__ModuleLoader__.load({
 .eng-store-title{margin:0;font-size:14px;font-weight:500;line-height:22px;}
 .eng-usage{font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;}
 .eng-usage[data-over="true"]{color:var(--dsw-alias-state-error-primary);}
-.eng-store-actions{margin-left:auto;display:inline-flex;gap:8px;}
+.eng-store-actions{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:8px;}
 .eng-path{margin:-8px 0 0;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;line-height:18px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}
 .eng-group{display:flex;flex-direction:column;gap:2px;}
 .eng-group-title{margin:0;font-size:12px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-secondary);}
@@ -296,6 +349,22 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
 .eng-email{margin:0 8px 0 2px;font-family:var(--ds-font-family-code,ui-monospace,monospace);user-select:all;color:var(--dsw-alias-label-primary);}
 .eng-btn-small{padding:1px 8px;font-size:11.5px;}
 .eng-feedback-note{color:var(--dsw-alias-label-tertiary);}
+.eng-overview,.eng-upcoming{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg,10px);}
+.eng-overview-line{margin:0;font-size:13px;line-height:20px;}
+.eng-overview-note{margin:2px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
+.eng-upcoming-list{display:flex;flex-direction:column;gap:0;margin:4px -8px 0;padding:0;list-style:none;}
+.eng-upcoming-list li{display:flex;align-items:center;gap:12px;}
+.eng-upcoming-list .eng-name{width:auto;max-width:60%;}
+.eng-upcoming-status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;}
+.eng-upcoming-list li[data-status="past"] .eng-upcoming-status{color:var(--dsw-alias-label-primary);font-weight:600;}
+.eng-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.eng-filter input{width:240px;}
+.eng-filter-count,.eng-filter-none{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
+.eng-meter{display:inline-block;width:96px;height:6px;border-radius:999px;background:var(--dsw-alias-border-l2);overflow:hidden;}
+.eng-meter-fill{display:block;height:100%;border-radius:999px;background:var(--dsw-alias-label-secondary);}
+.eng-meter[data-over="true"] .eng-meter-fill{background:var(--dsw-alias-state-error-primary);}
+.eng-tidy{display:flex;flex-direction:column;gap:6px;}
+.eng-tidy textarea{box-sizing:border-box;width:100%;min-height:150px;resize:vertical;font:inherit;font-size:12px;line-height:18px;}
 .eng-link:focus-visible,.eng-howto>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
 `
 
@@ -568,7 +637,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         try {
           const response = await request(MEMORY_API)
           next = response.ok && Array.isArray(response.body?.stores)
-            ? { phase: 'ready', data: response.body }
+            ? { phase: 'ready', data: response.body, at: Date.now() }
             : { phase: 'error', reason: response.status === 503 ? 'listTimeout' : 'listFailed' }
         } catch {
           next = { phase: 'error', reason: 'listFailed' }
@@ -588,6 +657,70 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     const typeKey = (type) => `type${type[0].toUpperCase()}${type.slice(1)}`
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
     const byName = (a, b) => collator.compare(a, b)
+
+    /** Put `text` on the clipboard; false where there is none (a page over plain http) or it is refused. */
+    async function copyText(text) {
+      try {
+        await globalThis.navigator.clipboard.writeText(text)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    /** The date an `upcoming` note is named with, if it is a real day: `YYYY-MM-DD`, else undefined. */
+    function dateOf(file) {
+      const m = DATED.exec(nameOf(file))
+      if (m === null) return undefined
+      const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+      const day = new Date(Date.UTC(y, mo - 1, d))
+      return day.getUTCFullYear() === y && day.getUTCMonth() === mo - 1 && day.getUTCDate() === d
+        ? `${m[1]}-${m[2]}-${m[3]}` : undefined
+    }
+    /** A `YYYY-MM-DD` day as a number of days, to subtract one from another. */
+    const dayNumber = (date) => Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1,
+      Number(date.slice(8, 10))) / 86400000
+    /** Today on this computer's calendar, as `YYYY-MM-DD`. */
+    function todayOf(now) {
+      const d = new Date(now)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    /**
+     * Every `upcoming` note listed, against today on this computer: a date passed only says
+     * the outcome is yet to be asked about (SKILL.md §2.2 keeps the note until it is known),
+     * so nothing here is called late or stale. Passed first, then the nearest, then undated.
+     */
+    function upcomingOf(stores, now) {
+      const today = dayNumber(todayOf(now))
+      const items = []
+      for (const store of stores) {
+        for (const note of store.notes) {
+          if (note.type !== 'upcoming') continue
+          const date = dateOf(note.name)
+          const days = date === undefined ? undefined : dayNumber(date) - today
+          const status = days === undefined ? 'undated' : days < 0 ? 'past' : days === 0 ? 'today' : 'ahead'
+          items.push({ store, name: note.name, days, status })
+        }
+      }
+      const rank = { past: 0, today: 1, ahead: 2, undated: 3 }
+      return items.sort((a, b) => rank[a.status] - rank[b.status] || (a.days ?? 0) - (b.days ?? 0) ||
+        byName(a.name, b.name))
+    }
+
+    /** How full an index is, the nearer of its two caps; its lines only when they were counted. */
+    function fillOf(index, cap) {
+      const lines = index.lines === undefined ? 0 : index.lines / cap.maxLines
+      return Math.max(lines, index.bytes / cap.maxBytes)
+    }
+
+    /** A name, to open where dsh can, as text where it cannot. */
+    function noteName(store, file, archived, canOpen, open) {
+      return canOpen
+        ? h('button', { type: 'button', className: 'eng-name', title: file,
+          onClick: () => open(store, file, archived) }, nameOf(file))
+        : h('span', { className: 'eng-name', title: file }, nameOf(file))
+    }
 
     /**
      * A store's check-up (index.js checkUp): that nothing was found, what was, or why it
@@ -622,8 +755,16 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         h('p', { className: 'eng-note' }, t('healthFix')))
     }
 
-    /** One store: where it is, how full its index is, its check-up, and its notes' names by type. */
-    function StoreSection({ store, cap, canOpen, open, t }) {
+    /**
+     * One store: where it is, how full its index is (as a bar, the nearer of its two caps), its
+     * check-up, its notes grown past what one fact needs, and its notes' names by type — those
+     * `match` keeps while the page is filtering. Its tidy-up instructions are copied for the
+     * user to hand the AI in a conversation; where there is no clipboard, shown to select.
+     */
+    function StoreSection({ store, cap, canOpen, open, match, t }) {
+      const [tidy, setTidy] = useState('idle')
+      const alive = useRef(true)
+      useEffect(() => () => { alive.current = false }, [])
       const title = store.kind === 'user' ? [t('storeUser'), ...store.titles].join(' · ')
         : store.kind === 'pinned' ? [t('storePinned'), ...store.titles].join(' · ')
           : store.titles.join(' · ')
@@ -633,40 +774,117 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       const usage = index === null ? t('noIndex')
         : index.lines !== undefined ? t('usage', { lines: index.lines, maxLines: cap.maxLines, ...sizes })
           : t(index.over ? 'usageOver' : 'usageSize', sizes)
+      const fill = index === null ? undefined : fillOf(index, cap)
       const names = (list, archive) => h('ul', { className: 'eng-names' },
-        [...list].sort(byName).map((file) => h('li', { key: file },
-          canOpen
-            ? h('button', { type: 'button', className: 'eng-name', title: file,
-              onClick: () => open(store, file, archive) }, nameOf(file))
-            : h('span', { className: 'eng-name', title: file }, nameOf(file)))))
-      const groups = TYPES.map((type) => [type, store.notes.filter((note) => note.type === type).map((note) => note.name)])
-        .filter(([, list]) => list.length > 0)
+        [...list].sort(byName).map((file) => h('li', { key: file }, noteName(store, file, archive, canOpen, open))))
+      const keep = (file) => match === undefined || match(file)
+      const groups = TYPES.map((type) => [type, store.notes.filter((note) => note.type === type && keep(note.name))
+        .map((note) => note.name)]).filter(([, list]) => list.length > 0)
+      const archived = store.archive.filter(keep)
+      const large = store.notes.filter((note) => note.bytes > LARGE_NOTE).map((note) => note.name)
+      const prompt = t('tidyPrompt', { dir: store.dir })
+      const copyTidy = async () => {
+        const done = await copyText(prompt)
+        if (alive.current) setTidy(done ? 'copied' : 'failed')
+      }
       return h('section', { className: 'eng-store' },
         h('div', { className: 'eng-store-head' },
           h('h2', { className: 'eng-store-title' }, title),
+          // the nearer cap, whichever it is; over it, full and marked, not a bar that stops at the edge
+          fill === undefined ? null : h('span', { className: 'eng-meter', 'data-over': index.over === true || fill > 1,
+            'aria-hidden': true },
+          h('span', { className: 'eng-meter-fill', style: { width: `${Math.min(100, Math.floor(fill * 100))}%` } })),
           h('span', { className: 'eng-usage', 'data-over': index?.over === true, title: index?.over ? t('overHint') : undefined }, usage),
-          // the folder is shown with its index selected: no index, no folder to show
-          canOpen && index !== null ? h('div', { className: 'eng-store-actions' },
-            h('button', { type: 'button', className: 'eng-btn',
-              onClick: () => open(store, index.name, false) }, t('openIndex')),
-            h('button', { type: 'button', className: 'eng-btn', onClick: () => open(store, undefined, false) },
-              t('openFolder'))) : null),
+          h('div', { className: 'eng-store-actions' },
+            h('button', { type: 'button', className: 'eng-btn', onClick: copyTidy },
+              t(tidy === 'copied' ? 'tidyCopied' : 'tidyCopy')),
+            // the folder is shown with its index selected: no index, no folder to show
+            ...(canOpen && index !== null ? [
+              h('button', { type: 'button', className: 'eng-btn', key: 'index',
+                onClick: () => open(store, index.name, false) }, t('openIndex')),
+              h('button', { type: 'button', className: 'eng-btn', key: 'folder',
+                onClick: () => open(store, undefined, false) }, t('openFolder'))] : []))),
         h('p', { className: 'eng-path' }, store.dir),
+        tidy === 'failed' ? h('div', { className: 'eng-tidy', role: 'status' },
+          h('p', { className: 'eng-health-item' }, t('tidyFailed')),
+          h('textarea', { readOnly: true, value: prompt, 'aria-label': t('tidyCopy'),
+            onFocus: (event) => event.target.select() })) : null,
         index?.over ? h('p', { className: 'eng-note' }, t('overHint')) : null,
-        h(Health, { store, names, t }),
+        // while filtering, the names that match and nothing else: the check-up comes back after
+        match === undefined ? h(Health, { store, names, t }) : null,
+        match === undefined && large.length > 0 ? h('div', { className: 'eng-group' },
+          h('p', { className: 'eng-health-item' }, t('largeNotes', { count: large.length })),
+          names(large, false)) : null,
         ...groups.map(([type, list]) => h('div', { className: 'eng-group', key: type },
           h('h3', { className: 'eng-group-title' }, t('group', { type: t(typeKey(type)), count: list.length })),
           names(list, false))),
-        store.archive.length > 0 ? h('details', { className: 'eng-archive' },
-          h('summary', null, t('archive', { count: store.archive.length })),
-          names(store.archive, true)) : null,
+        archived.length > 0 ? h('details', { className: 'eng-archive', open: match === undefined ? undefined : true },
+          h('summary', null, t('archive', { count: archived.length })),
+          names(archived, true)) : null,
+        match !== undefined && groups.length === 0 && archived.length === 0
+          ? h('p', { className: 'eng-filter-none' }, t('filterNone')) : null,
         store.more ? h('p', { className: 'eng-note' }, t('more')) : null)
+    }
+
+    /** When a listing was read, its day with its time, as this computer shows them. */
+    const timeOf = (at) => new Date(at).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit',
+      minute: '2-digit' })
+
+    /**
+     * The listing in numbers, as read at `at`: notes by type, archived files, plans, notes past
+     * the size one fact needs — and whether that is all there is (a listing cut short, stores
+     * that could not be read), since what was not listed is not counted as nothing.
+     */
+    function Overview({ data, at, upcoming, t }) {
+      const notes = data.stores.flatMap((store) => store.notes)
+      const archive = data.stores.reduce((sum, store) => sum + store.archive.length, 0)
+      // a note it could not read has no type to count: the counts say the store was read in part
+      const types = TYPES.map((type) => [type, notes.filter((note) => note.type === type && !note.unread).length])
+        .filter(([, count]) => count > 0)
+      const large = notes.filter((note) => note.bytes > LARGE_NOTE).length
+      const partial = data.more === true || data.stores.some((store) => store.more)
+      // a note or a folder it could not read: the check-up says so, and the counts may fall short
+      const incomplete = data.stores.some((store) => store.health?.checked === false &&
+        store.health.reason === 'unreadable')
+      const count = (...statuses) => upcoming.filter((item) => statuses.includes(item.status)).length
+      return h('section', { className: 'eng-overview', 'aria-label': t('overview') },
+        h('h2', { className: 'eng-store-title' }, t('overview')),
+        h('p', { className: 'eng-overview-line' }, t('statsNotes', { notes: notes.length, archive })),
+        types.length > 0 ? h('p', { className: 'eng-overview-line' },
+          types.map(([type, n]) => t('group', { type: t(typeKey(type)), count: n })).join(t('listSep'))) : null,
+        upcoming.length > 0 ? h('p', { className: 'eng-overview-line' },
+          t('statsUpcoming', { past: count('past'), ahead: count('today', 'ahead'), undated: count('undated') })) : null,
+        large > 0 ? h('p', { className: 'eng-overview-line' }, t('statsLarge', { count: large })) : null,
+        h('p', { className: 'eng-overview-note' }, [
+          t('statsReadAt', { time: timeOf(at) }),
+          partial ? t('statsPartial') : null,
+          incomplete ? t('statsIncomplete') : null,
+          data.unreadable > 0 ? t('statsUnreadable', { count: data.unreadable }) : null,
+        ].filter((text) => text !== null).join(' ')))
+    }
+
+    /** The plans listed, by where they stand against today, names to open as everywhere else. */
+    function UpcomingBoard({ items, canOpen, open, t }) {
+      const status = (item) => (item.status === 'past' ? t('upcomingPast')
+        : item.status === 'today' ? t('upcomingToday')
+          : item.status === 'undated' ? t('upcomingUndated')
+            : item.days === 1 ? t('upcomingTomorrow') : t('upcomingSoon', { days: item.days }))
+      return h('section', { className: 'eng-upcoming', 'aria-label': t('upcomingTitle') },
+        h('h2', { className: 'eng-store-title' }, t('upcomingTitle')),
+        h('ul', { className: 'eng-upcoming-list' }, items.map((item) => h('li', { key: `${item.store.id}/${item.name}`,
+          'data-status': item.status },
+        noteName(item.store, item.name, false, canOpen, open),
+        h('span', { className: 'eng-upcoming-status' }, status(item))))))
     }
 
     /** A store with anything in it: an index with text, a note, an archived note. A folder or an
      * empty index alone is not memory yet. */
     const hasMemory = (store) => (store.index !== null && store.index.bytes > 0) ||
       store.notes.length > 0 || store.archive.length > 0
+
+    /** A store not read to its end: a listing cut short, or a file or folder it could not read. */
+    const readInPart = (store) => store.more === true ||
+      (store.health?.checked === false && store.health.reason === 'unreadable')
 
     /** How to use it, in a few lines: open while there is no memory yet, folded once there is. */
     function HowTo({ open, t }) {
@@ -692,13 +910,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
       const copyAddress = async () => {
-        let done = false
-        try {
-          await globalThis.navigator.clipboard.writeText(EMAIL)
-          done = true
-        } catch {
-          // no clipboard here (a page served over plain http) or permission refused
-        }
+        const done = await copyText(EMAIL)
         if (alive.current) setCopy(done ? 'copied' : 'copyFailed')
       }
       const href = `${ISSUES}?body=${encodeURIComponent(t('issueBody', { version: VERSION, os: osName() }))}`
@@ -718,6 +930,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     function MemoryPage({ t }) {
       const { state, load } = useMemory()
       const [status, setStatus] = useState(undefined)
+      const [query, setQuery] = useState('')
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
 
@@ -742,14 +955,32 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
 
       const data = state.phase === 'ready' ? state.data : undefined
       const canOpen = data?.canOpen === true
+      // a name filter over what was listed: case- and width-insensitive, the .md left out
+      const needle = query.trim().normalize('NFKC').toLowerCase()
+      const match = needle === '' ? undefined
+        : (file) => nameOf(file).normalize('NFKC').toLowerCase().includes(needle)
       let body
       if (state.phase === 'loading') body = h('p', { className: 'eng-note' }, t('listing'))
       else if (state.phase === 'error') body = h('div', { className: 'eng-banner', 'data-tone': 'error' }, t(state.reason))
       else {
+        const upcoming = upcomingOf(data.stores, state.at)
+        const listed = data.stores.some((store) => store.notes.length + store.archive.length > 0)
+        const matched = match === undefined ? 0 : data.stores.reduce((sum, store) =>
+          sum + store.notes.filter((note) => match(note.name)).length + store.archive.filter(match).length, 0)
         body = [
           data.pinned === 'relative' ? h('p', { className: 'eng-note', key: 'pinned' }, t('pinnedRelative')) : null,
-          data.stores.length === 0 && data.pinned === undefined ? h('p', { className: 'eng-note', key: 'empty' }, t('empty')) : null,
-          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, t })),
+          data.stores.length === 0 && data.pinned === undefined && !(data.unreadable > 0) && data.more !== true
+            ? h('p', { className: 'eng-note', key: 'empty' }, t('empty')) : null,
+          data.stores.length > 0 || data.unreadable > 0
+            ? h(Overview, { key: 'overview', data, at: state.at, upcoming, t }) : null,
+          upcoming.length > 0 ? h(UpcomingBoard, { key: 'upcoming', items: upcoming, canOpen, open, t }) : null,
+          listed ? h('div', { className: 'eng-filter', key: 'filter' },
+            h('input', { type: 'search', className: 'eng-input', value: query, placeholder: t('filterPlaceholder'),
+              'aria-label': t('filterLabel'), onChange: (event) => setQuery(event.target.value) }),
+            match === undefined ? null : h('p', { className: 'eng-filter-count', role: 'status', 'aria-live': 'polite' },
+              t('filterCount', { count: matched })))
+            : null,
+          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, match, t })),
           data.more ? h('p', { className: 'eng-note', key: 'more' }, t('more')) : null,
         ]
       }
@@ -763,7 +994,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         status ? h('div', { className: 'eng-banner', 'data-tone': status.tone, role: 'status' }, status.text) : null,
         data !== undefined && !canOpen && data.stores.length > 0 ? h('p', { className: 'eng-note' }, t('openUnavailable')) : null,
         h(HowTo, { open: data !== undefined && data.pinned !== 'relative' && data.more !== true &&
-          !data.stores.some(hasMemory), t }),
+          !(data.unreadable > 0) && !data.stores.some((store) => hasMemory(store) || readInPart(store)), t }),
         body,
         h(Feedback, { t }))
     }

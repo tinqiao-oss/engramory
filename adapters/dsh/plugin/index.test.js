@@ -2919,7 +2919,7 @@ test('memory GET: a note that cannot be read is no note without a type: no check
   syncBuiltinESMExports()
   try {
     const s = (await withHomeAsync(home, () => memoryMount().call())).body.stores[0]
-    assert.deepEqual([s.notes, s.health], [[{ name: 'a.md', type: 'other' }], { checked: false, reason: 'unreadable' }])
+    assert.deepEqual([s.notes, s.health], [[{ name: 'a.md', type: 'other', unread: true }], { checked: false, reason: 'unreadable' }])
   } finally {
     promises.open = native
     syncBuiltinESMExports()
@@ -2973,7 +2973,7 @@ test('memory GET: each workspace\'s project store, found as recall finds one, li
   assert.equal(body.stores.length, 1)
   const [s] = body.stores
   assert.deepEqual([s.id, s.kind, s.titles, s.dir], ['ws:w1', 'project', ['repo', 'src'], join(repo, '.engramory-memory')])
-  assert.deepEqual(s.notes, [{ name: 'a.md', type: 'project' }])
+  assert.deepEqual(s.notes, [{ name: 'a.md', type: 'project', bytes: Buffer.byteLength(noteOf('project')) }])
   // no registry: the global store alone, as before
   assert.deepEqual((await withHomeAsync(home, () => memoryMount().call())).body.stores, [])
 })
@@ -2997,6 +2997,79 @@ test('memory GET: a workspace whose path now leads elsewhere, or whose index is 
   if (fileLink(secret, join(repo, '.engramory-memory', INDEX)) === null) return t.skip('no symlink privilege here')
   const linked = memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'r' }] })
   assert.deepEqual((await withHomeAsync(home, () => linked.call())).body.stores, [])
+})
+
+test('memory GET: each note comes with its size, so the page can point out one past what a fact needs', async () => {
+  const { home, dir } = globalStore('mem-sizes')
+  const big = `${noteOf('project')}${'a timeline, round by round\n'.repeat(600)}`
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  writeFileSync(join(dir, 'b.md'), big, 'utf8')
+  const [s] = (await withHomeAsync(home, () => memoryMount().call())).body.stores
+  assert.deepEqual(s.notes.map((n) => [n.name, n.bytes]).sort(),
+    [['a.md', Buffer.byteLength(noteOf('user'))], ['b.md', Buffer.byteLength(big)]])
+  assert.ok(Buffer.byteLength(big) > 12 * 1024)
+})
+
+test('memory GET: a store that cannot be read is left out and counted; one not there yet is neither', async () => {
+  const { home, dir } = globalStore('mem-unreadable')
+  let { body } = await withHomeAsync(home, () => memoryMount().call())
+  assert.deepEqual([body.stores.length, body.unreadable], [1, undefined])
+  // the page reads node:fs/promises through its ES namespace: patch the module, then sync it
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  // refused past resolving it (Node's walk would get round a refused realpath, as recall does)
+  const native = promises.stat
+  promises.stat = async (p, ...rest) => {
+    if (String(p).toLowerCase() === dir.toLowerCase()) throw Object.assign(new Error('EACCES: refused'), { code: 'EACCES' })
+    return native(p, ...rest)
+  }
+  syncBuiltinESMExports()
+  try {
+    ;({ body } = await withHomeAsync(home, () => memoryMount().call()))
+    assert.deepEqual([body.stores, body.unreadable], [[], 1])
+  } finally {
+    promises.stat = native
+    syncBuiltinESMExports()
+  }
+  // the global store before its first note: nothing there, and nothing it could not read
+  ;({ body } = await withHomeAsync(scratch('mem-nostore'), () => memoryMount().call()))
+  assert.deepEqual([body.stores, body.unreadable], [[], undefined])
+})
+
+test('memory GET: a project whose index could not be looked at is counted unreadable, not taken for no store', async () => {
+  const home = scratch('mem-proj-home')
+  const repo = realpathSync.native(scratch('mem-proj-locked'))
+  mkdirSync(join(repo, '.git'))
+  store(repo, '- [a](a.md)\n')
+  mkdirSync(join(repo, 'src'))
+  const plain = realpathSync.native(scratch('mem-proj-plain')) // no store: none, and nothing unreadable
+  const index = join(repo, '.engramory-memory', INDEX).toLowerCase()
+  const below = join(repo, 'src', '.engramory-memory', INDEX).toLowerCase()
+  const both = [{ id: 'w', path: repo, title: 'r' }, { id: 's', path: join(repo, 'src'), title: 's' }]
+  const listed = async (workspaces, refused, call = 'lstat') => {
+    const { syncBuiltinESMExports } = await import('node:module')
+    const promises = (await import('node:fs/promises')).default
+    const native = promises[call]
+    promises[call] = async (p, ...rest) => {
+      if (refused.includes(String(p).toLowerCase())) throw Object.assign(new Error('EACCES: refused'), { code: 'EACCES' })
+      return native(p, ...rest)
+    }
+    syncBuiltinESMExports()
+    try {
+      const { body } = await withHomeAsync(home, () => memoryMount({}, { workspaces }).call())
+      return [body.stores.map((s) => s.id), body.unreadable]
+    } finally {
+      promises[call] = native
+      syncBuiltinESMExports()
+    }
+  }
+  assert.deepEqual(await listed([...both, { id: 'p', path: plain, title: 'p' }], []), [['ws:w'], undefined])
+  // the project's index refused: counted, not taken for no store — once, though two workspaces reach it
+  assert.deepEqual(await listed([...both, { id: 'p', path: plain, title: 'p' }], [index]), [[], 1])
+  // the store's folder found but refused: counted once too, by its folder
+  assert.deepEqual(await listed(both, [join(repo, '.engramory-memory').toLowerCase()], 'stat'), [[], 1])
+  // a level below refused: passed over, as recall passes over it, and the store above still found
+  assert.deepEqual(await listed([{ id: 's', path: join(repo, 'src'), title: 's' }], [below]), [['ws:s'], undefined])
 })
 
 test('memory GET: where the OS will not resolve a project\'s index, Node\'s walk does', async (t) => {

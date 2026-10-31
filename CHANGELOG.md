@@ -6,6 +6,39 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.1.0 — 2026-11-01
+
+dsh's memory page counts what it lists, shows the plans, and copies tidy-up instructions
+for the AI. How memory is stored, recalled and guarded does not change, and the page
+still reads no note's text.
+
+- **dsh: an overview of the memory as listed** — notes by type, archived files, plans by
+  where they stand, and notes past 12 KB, with the day and time it was read. Where the
+  listing was cut short, a store could not be read (the page is now told how many), or a
+  file in one could not, it says so, rather than counting what was not read as nothing;
+  with nothing listed for those reasons, it no longer says there is no memory yet.
+- **dsh: plans by where they stand** — each `upcoming` note named with a real date is
+  passed (its outcome is still to be asked about; the note is kept until then, as
+  SKILL.md says), today, or ahead by so many days, by this computer's calendar; one with
+  no date, or no real one, is undated. Nothing is called late, and nothing is archived.
+- **dsh: an index's fill as a bar** — to the nearer of its two caps; by its bytes alone
+  where its lines were not counted, and full and marked past either.
+- **dsh: a filter by name** over the notes and archived files listed, saying how many
+  match among those listed; while it filters, a store shows the names that match and
+  leaves its check-up and size list for later.
+- **dsh: tidy-up instructions** — each store copies a set for the user to paste into a
+  conversation: fix links to nothing or remove them (a line only when no live link is
+  left on it), index the notes recall needs rather than every one, give untyped notes a
+  type, compact an index over its cap, split notes past 12 KB, keep plans whose date
+  passed. Where there is no clipboard, they are shown to select. The plugin still
+  writes nothing.
+- **dsh: notes past 12 KB** are pointed out under their store, at the doctor's default
+  warning size. The memory route now gives each note's size with its type, marks a note
+  it could not read (counted with no type), and counts a project store it could not look
+  into as unreadable rather than as none.
+  By default the desktop app installs a version only once it has been published for 24
+  hours, unless you ask for `dsh-engramory@1.1.0`.
+
 ## 1.0.8 — 2026-11-01
 
 dsh's memory page says how to use it and where to send feedback. How memory is stored,

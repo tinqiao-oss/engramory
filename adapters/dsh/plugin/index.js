@@ -597,8 +597,8 @@ const TIMED_OUT = Symbol('timed out')
 
 /**
  * The memory page's one route. GET lists the stores recall can use, by name only: where each
- * is, its index's size against the cap, its notes' names with their types, its archive's
- * names, and its check-up (checkUp). POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
+ * is, its index's size against the cap, its notes' names with their types and sizes, its
+ * archive's names, and its check-up (checkUp) — and how many stores could not be read. POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
  * app — or, with no `file`, shows the store's index in the file manager — through dsh's
  * session controller, which checks the path once more. The page never sends a path: a store
  * is the id the listing gave it, a file a name in that store's directory, and both are found
@@ -717,13 +717,16 @@ function candidatesOf(settings, registry) {
 
 /**
  * Every store the page lists, one at a time, each read on its own (an unreadable one
- * drops out, the rest are listed). A store two workspaces reach is listed once, under
- * both titles.
+ * drops out, the rest are listed, and the page is told how many dropped out, so that
+ * what it counts is not taken for the whole). A store two workspaces reach is listed once,
+ * under both titles.
  */
 async function listStores(settings, registry) {
   const { list, more, pinned } = candidatesOf(settings, registry)
   const budget = { notes: MAX_NOTES, lookups: MAX_LOOKUPS, broken: MAX_BROKEN_SHOWN }
   const stores = []
+  // the places it could not read, once each: two workspaces may reach one store
+  const failed = new Set()
   for (const candidate of list) {
     try {
       const store = await locate(candidate, settings)
@@ -735,14 +738,19 @@ async function listStores(settings, registry) {
       }
       stores.push({ ...store, titles: candidate.title === undefined ? [] : [candidate.title],
         ...await contents(store, settings, budget) })
-    } catch {
-      // unreadable now: left out
+    } catch (error) {
+      // not there (the global store before its first note, a pin's folder not made yet): no
+      // store; anything else, a place that may hold one and could not be read: left out, and
+      // counted once
+      // a place by its path, as the disk compares names; one with none by its candidate, as given
+      if (!absent(error)) failed.add(error?.at === undefined ? `${candidate.kind}:${candidate.id}` : folded(error.at))
     }
   }
   return {
     stores: stores.map(({ key, real, indexName, ...shown }) => shown),
     cap: { maxLines: settings.maxLines, maxBytes: settings.maxBytes },
     more,
+    ...(failed.size === 0 ? {} : { unreadable: failed.size }),
     ...(pinned === undefined ? {} : { pinned }),
   }
 }
@@ -767,14 +775,19 @@ async function locate(candidate, settings) {
     if (found === undefined) return undefined
     ;({ dir, root } = found)
   }
-  const real = await fsp.realpath(dir)
-  if (!(await fsp.stat(real)).isDirectory()) return undefined
+  // a failure here names the store's folder, so that two workspaces reaching it count it once
+  let real
+  let realRoot
+  try {
+    real = await realOfAsync(dir)
+    if (!(await fsp.stat(real)).isDirectory()) return undefined
+    if (root !== undefined) realRoot = await realOfAsync(root)
+  } catch (error) {
+    throw unreadableAt(dir, error)
+  }
   // the very path every later check is held to, not a second resolution of `dir`; the
   // project's root itself counts, as a store linked to it holds an index recall accepts
-  if (root !== undefined) {
-    const realRoot = await fsp.realpath(root)
-    if (folded(real) !== folded(realRoot) && !contains(realRoot, real)) return undefined
-  }
+  if (realRoot !== undefined && folded(real) !== folded(realRoot) && !contains(realRoot, real)) return undefined
   return { id: candidate.id, kind: candidate.kind, dir, real, key: folded(real), indexName }
 }
 
@@ -784,15 +797,19 @@ async function locate(candidate, settings) {
  * that root. dsh records a workspace's real path when it is added and never rewrites it, so
  * a path that is now a link, or resolves elsewhere, is not that workspace any more; and a
  * network path is not looked into at all, since every call on an unreachable share waits
- * for it (as refuseStranger).
+ * for it (as refuseStranger). A path that is not there holds no store. A level whose index
+ * could not be looked at is passed over, as recall passes over it (projectIndex), so a store
+ * above it is still found; only when none is does it throw, naming that place, and the page
+ * counts it as one that could not be read (listStores).
  */
 async function projectStoreOf(start, indexName) {
   if (/^[\\/]{2}/.test(start)) return undefined
   try {
     if (!(await fsp.lstat(start)).isDirectory()) return undefined
-    if (folded(await fsp.realpath(start)) !== folded(start)) return undefined
-  } catch {
-    return undefined
+    if (folded(await realOfAsync(start)) !== folded(start)) return undefined
+  } catch (error) {
+    if (absent(error)) return undefined
+    throw unreadableAt(start, error)
   }
   let root = start
   for (let dir = start; ; dir = dirname(dir)) {
@@ -805,15 +822,27 @@ async function projectStoreOf(start, indexName) {
   let realRoot
   try {
     realRoot = await realOfAsync(root)
-  } catch {
-    return undefined
+  } catch (error) {
+    if (absent(error)) return undefined
+    throw unreadableAt(root, error)
   }
+  let failed
   for (let dir = start; ; dir = dirname(dir)) {
     const store = join(dir, STORE_DIR)
-    if (await projectIndexAsync(join(store, indexName), realRoot)) return { dir: store, root }
-    if (dir === root || dirname(dir) === dir) return undefined
+    try {
+      if (await projectIndexAsync(join(store, indexName), realRoot)) return { dir: store, root }
+    } catch (error) {
+      failed ??= unreadableAt(store, error)
+    }
+    if (dir === root || dirname(dir) === dir) break
   }
+  if (failed !== undefined) throw failed
+  return undefined
 }
+
+/** An error that names the place it could not read, so that the page counts each place once. */
+const unreadableAt = (at, error) => Object.assign(new Error(String(error?.message ?? error)),
+  { code: error?.code ?? 'EIO', at })
 
 async function existsAsync(path) {
   try {
@@ -824,14 +853,18 @@ async function existsAsync(path) {
   }
 }
 
-/** projectIndex(), asynchronously, against a root already resolved by realOfAsync(). */
+/**
+ * projectIndex(), asynchronously, against a root already resolved by realOfAsync(): an index
+ * not there is none; one that could not be read throws (projectStoreOf).
+ */
 async function projectIndexAsync(path, realRoot) {
   try {
     const link = await fsp.lstat(path)
     if (link.isSymbolicLink() || !link.isFile()) return false
     return contains(realRoot, await realOfAsync(path))
-  } catch {
-    return false
+  } catch (error) {
+    if (absent(error)) return false
+    throw error
   }
 }
 
@@ -884,10 +917,11 @@ async function contents(store, settings, budget) {
   const notes = []
   let unread = false
   for (const name of listed.names) {
-    const type = await noteType(join(store.dir, name))
-    // a note it could not read is no note without a type: the check-up says so instead
-    if (type === UNREAD) unread = true
-    notes.push({ name, type: type === UNREAD ? 'other' : type })
+    const head = await noteHead(join(store.dir, name))
+    // a note it could not read is no note without a type, nor of any size: the check-up
+    // says so instead
+    if (head === UNREAD) unread = true
+    notes.push(head === UNREAD ? { name, type: 'other', unread: true } : { name, type: head.type, bytes: head.bytes })
   }
   const folder = join(store.dir, ARCHIVE_DIR)
   // a folder of its own, not a link out of the store
@@ -1107,11 +1141,15 @@ async function openRegular(path) {
   return undefined
 }
 
-/** What noteType() gives for a note it could not read: listed as `other`, and no check-up. */
+/** What noteHead() gives for a note it could not read: listed as `other`, and no check-up. */
 const UNREAD = Symbol('unread')
 
-/** A note's type, from its head only; `other` when the head names none, UNREAD when unread. */
-async function noteType(path) {
+/**
+ * A note's type, from its head only (`other` when the head names none), and its size as the
+ * open file has it — the page points out a note grown past what one fact needs; UNREAD
+ * when unread.
+ */
+async function noteHead(path) {
   let opened
   try {
     opened = await openRegular(path)
@@ -1120,7 +1158,8 @@ async function noteType(path) {
     const head = Buffer.alloc(HEAD_BYTES + 1)
     const { bytesRead } = await opened.handle.read(head, 0, HEAD_BYTES + 1, 0)
     const cut = bytesRead > HEAD_BYTES && head[HEAD_BYTES] !== 0x0a && head[HEAD_BYTES] !== 0x0d
-    return typeIn(head.subarray(0, Math.min(bytesRead, HEAD_BYTES)).toString('utf8'), cut)
+    return { type: typeIn(head.subarray(0, Math.min(bytesRead, HEAD_BYTES)).toString('utf8'), cut),
+      bytes: opened.size }
   } catch {
     return UNREAD
   } finally {

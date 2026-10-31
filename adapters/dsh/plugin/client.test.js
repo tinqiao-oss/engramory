@@ -707,6 +707,9 @@ test('client: the memory page\'s how-to is open only while there is no memory', 
   assert.equal(await openFor([{ ...bare, index: { name: 'MEMORY.md', bytes: 40, lines: 1, over: false } }]), false)
   assert.equal(await openFor([{ ...bare, notes: [{ name: 'a.md', type: 'user' }] }]), false)
   assert.equal(await openFor([{ ...bare, archive: ['old.md'] }]), false)
+  // a store found but not read to its end may hold memory: no telling, so no unfolding
+  assert.equal(await openFor([{ ...bare, health: { checked: false, reason: 'unreadable' } }]), false)
+  assert.equal(await openFor([{ ...bare, more: true }]), false)
 })
 
 test('client: the memory page ends with where to send feedback: an issue that names the version, or the mailbox', async () => {
@@ -774,4 +777,217 @@ test('client: the feedback issue names only the version and the OS family, whate
     '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：')
   assert.equal(dictionaries.engramory.en.issueBody,
     '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ')
+})
+
+// --- 1.1.0: the overview, the plans, the bar, the filter, the tidy-up instructions ---
+
+/** Run `fn` with the clock at `at` (a local time), as the page reads it when a listing lands. */
+async function atTime(at, fn) {
+  const real = Date.now
+  Date.now = () => at
+  try {
+    return await fn()
+  } finally {
+    Date.now = real
+  }
+}
+
+test('client: the overview counts what was listed, and says when that is not all there is', async () => {
+  const { view } = await memoryPage({})
+  await view.settle()
+  const [overview] = findAll(view.tree, (n) => n.props.className === 'eng-overview')
+  const lines = findAll(overview, (n) => n.props.className === 'eng-overview-line').map(textOf)
+  assert.deepEqual(lines, [
+    'statsNotes{"notes":4,"archive":1}',
+    // in the protocol's order, only the types there are
+    ['group{"type":"typeUser","count":1}', 'group{"type":"typeFeedback","count":2}',
+      'group{"type":"typeOther","count":1}'].join('listSep'),
+  ])
+  const note = textOf(findAll(overview, (n) => n.props.className === 'eng-overview-note')[0])
+  assert.match(note, /^statsReadAt\{"time":"[^"]+"\} statsPartial$/) // the project store's listing was cut short
+  // stores it could not read: said, and nothing counted for them
+  const missing = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [], unreadable: 2 }) })
+  await missing.view.settle()
+  const [none] = findAll(missing.view.tree, (n) => n.props.className === 'eng-overview')
+  assert.equal(textOf(findAll(none, (n) => n.props.className === 'eng-overview-line')[0]), 'statsNotes{"notes":0,"archive":0}')
+  assert.match(textOf(none), /statsUnreadable\{"count":2\}/)
+  // nothing listed and nothing unreadable: no numbers, only the page's own empty note
+  const empty = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [] }) })
+  await empty.view.settle()
+  assert.equal(findAll(empty.view.tree, (n) => n.props.className === 'eng-overview').length, 0)
+})
+
+test('client: plans are shown by where they stand against today, and a passed date is only to be asked about', async () => {
+  const plan = (name) => ({ name, type: 'upcoming' })
+  const stores = [{
+    id: 'user', kind: 'user', dir: 'C:\\m', titles: [], index: { name: 'MEMORY.md', bytes: 100, lines: 3, over: false },
+    notes: [plan('2026-11-05-dinner.md'), plan('等录取结果.md'), plan('2026-10-30面试.md'), plan('2026-11-01-call.md'),
+      plan('2026-10-31-today.md'), plan('2026-02-30-no-such-day.md'), { name: 'who.md', type: 'user' }],
+    archive: [], more: false,
+  }]
+  await atTime(new Date(2026, 9, 31, 23, 30).getTime(), async () => {
+    const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) })
+    await view.settle()
+    const [board] = findAll(view.tree, (n) => n.props.className === 'eng-upcoming')
+    const rows = findAll(board, (n) => n.type === 'li').map((li) => [li.props['data-status'], textOf(li)])
+    assert.deepEqual(rows, [
+      ['past', '2026-10-30面试upcomingPast'],
+      ['today', '2026-10-31-todayupcomingToday'],
+      ['ahead', '2026-11-01-callupcomingTomorrow'],
+      ['ahead', '2026-11-05-dinnerupcomingSoon{"days":5}'],
+      ['undated', '2026-02-30-no-such-dayupcomingUndated'], // not a real day
+      ['undated', '等录取结果upcomingUndated'],
+    ])
+    // names open as everywhere else on the page
+    assert.equal(findAll(board, (n) => n.type === 'button' && n.props.className === 'eng-name').length, 6)
+    const [overview] = findAll(view.tree, (n) => n.props.className === 'eng-overview')
+    assert.ok(textOf(overview).includes('statsUpcoming{"past":1,"ahead":3,"undated":2}'))
+  })
+  // no plans: no board
+  const { view } = await memoryPage({})
+  await view.settle()
+  assert.equal(findAll(view.tree, (n) => n.props.className === 'eng-upcoming').length, 0)
+})
+
+test('client: an index\'s bar fills to the nearer of its two caps, and past one it is full and marked', async () => {
+  const meters = async (indexes) => {
+    const stores = indexes.map((index, i) => ({ id: `s${i}`, kind: 'project', dir: `C:\\s${i}`, titles: [`s${i}`],
+      index, notes: [], archive: [], more: false }))
+    const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) })
+    await view.settle()
+    return findAll(view.tree, (n) => n.props.className === 'eng-meter')
+      .map((m) => [m.children[0].props.style.width, m.props['data-over']])
+  }
+  assert.deepEqual(await meters([
+    { name: 'MEMORY.md', bytes: 2560, lines: 150, over: false }, // lines nearer: 75%
+    { name: 'MEMORY.md', bytes: 19200, lines: 20, over: false }, // bytes nearer: 75%
+    { name: 'MEMORY.md', bytes: 12800, over: false }, // lines not counted: by bytes alone, not 0%
+    { name: 'MEMORY.md', bytes: 30000, over: true }, // past the cap
+    { name: 'MEMORY.md', bytes: 1000, lines: 260, over: true }, // past the line cap, bytes well within
+    { name: 'MEMORY.md', bytes: 1000, lines: 199, over: false }, // one line short: not full
+  ]), [['75%', false], ['75%', false], ['50%', false], ['100%', true], ['100%', true], ['99%', false]])
+  // no index: no bar
+  assert.deepEqual(await meters([null]), [])
+})
+
+test('client: the filter keeps the names that match, says how many among those listed, and where none do', async () => {
+  const { view } = await memoryPage({}, { zh: true })
+  await view.settle()
+  const input = () => findAll(view.tree, (n) => n.type === 'input' && n.props.type === 'search')[0]
+  assert.equal(findAll(view.tree, (n) => n.props.className === 'eng-filter-count').length, 0)
+  input().props.onChange({ target: { value: ' ＮＯＴＥ ' } }) // trimmed, any case, full-width as plain
+  await view.settle()
+  const names = findAll(view.tree, (n) => n.type === 'button' && n.props.className === 'eng-name').map(textOf)
+  assert.deepEqual(names, ['a-note', 'b-note'])
+  const zh = (await applied()).dictionaries.engramory.zh
+  assert.deepEqual(findAll(view.tree, (n) => n.props.className === 'eng-filter-count').map(textOf),
+    [zh.filterCount.replace('{count}', '2')])
+  // the project store holds nothing that matches: it says so
+  assert.deepEqual(findAll(view.tree, (n) => n.props.className === 'eng-filter-none').map(textOf), [zh.filterNone])
+  // the archive opens on a match
+  input().props.onChange({ target: { value: 'moments' } })
+  await view.settle()
+  const [archive] = findAll(view.tree, (n) => n.type === 'details' && n.props.className === 'eng-archive')
+  assert.equal(archive.props.open, true)
+  assert.deepEqual(findAll(archive, (n) => n.props.className === 'eng-name').map(textOf), ['moments-2026-09'])
+  input().props.onChange({ target: { value: '' } })
+  await view.settle()
+  assert.equal(findAll(view.tree, (n) => n.type === 'button' && n.props.className === 'eng-name').length, 5)
+})
+
+test('client: each store copies tidy-up instructions naming its folder, or shows them to select by hand', async () => {
+  const copied = []
+  await withNavigator({ clipboard: { writeText: async (text) => { copied.push(text) } } }, async () => {
+    const { view, zh } = await memoryPage({}, { zh: true })
+    await view.settle()
+    const buttons = findAll(view.tree, (n) => n.type === 'button' && textOf(n) === zh.tidyCopy)
+    assert.equal(buttons.length, 2) // one per store, whether or not dsh can open its files
+    buttons[1].props.onClick()
+    await view.settle()
+    assert.deepEqual(copied, [zh.tidyPrompt.replace('{dir}', 'E:\\repo\\.engramory-memory')])
+    assert.equal(findAll(view.tree, (n) => n.type === 'button' && textOf(n) === zh.tidyCopied).length, 1)
+    assert.equal(findAll(view.tree, (n) => n.type === 'textarea').length, 0)
+  })
+  await withNavigator({}, async () => {
+    const { view, zh } = await memoryPage({}, { zh: true })
+    await view.settle()
+    findAll(view.tree, (n) => n.type === 'button' && textOf(n) === zh.tidyCopy)[0].props.onClick()
+    await view.settle()
+    const [shown] = findAll(view.tree, (n) => n.type === 'textarea')
+    assert.equal(shown.props.value, zh.tidyPrompt.replace('{dir}', 'C:\\Users\\u\\.dsh\\.engramory-memory'))
+    assert.equal(shown.props.readOnly, true)
+    assert.ok(textOf(view.tree).includes(zh.tidyFailed))
+  })
+  // the instructions keep a passed plan, and say what to do with each finding, not to add everything
+  const { dictionaries } = await applied()
+  for (const lang of ['zh', 'en']) {
+    assert.deepEqual(dictionaries.engramory[lang].tidyPrompt.match(/\{\w+\}/g), ['{dir}'], lang)
+  }
+})
+
+test('client: a note past 12 KB is pointed out in its store and counted in the overview', async () => {
+  const stores = [{
+    id: 'user', kind: 'user', dir: 'C:\\m', titles: [], index: { name: 'MEMORY.md', bytes: 100, lines: 3, over: false },
+    notes: [{ name: 'timeline.md', type: 'project', bytes: 12 * 1024 + 1 }, { name: 'edge.md', type: 'project', bytes: 12 * 1024 },
+      { name: 'small.md', type: 'user', bytes: 300 }, { name: 'unread.md', type: 'other' }],
+    archive: [], more: false,
+  }]
+  const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) })
+  await view.settle()
+  const [block] = findAll(view.tree, (n) => n.props.className === 'eng-group' &&
+    textOf(n).startsWith('largeNotes'))
+  assert.equal(textOf(findAll(block, (n) => n.props.className === 'eng-health-item')[0]), 'largeNotes{"count":1}')
+  assert.deepEqual(findAll(block, (n) => n.props.className === 'eng-name').map(textOf), ['timeline'])
+  assert.ok(textOf(findAll(view.tree, (n) => n.props.className === 'eng-overview')[0]).includes('statsLarge{"count":1}'))
+})
+
+test('client: what was not read is not counted as nothing — no empty note, a word on stores read in part', async () => {
+  // every store unreadable: no "no memory yet", and the how-to does not unfold as if there were none
+  const gone = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [], unreadable: 1 }) })
+  await gone.view.settle()
+  assert.ok(!textsOf(gone.view.tree, 'eng-note').includes('empty'))
+  assert.equal(findAll(gone.view.tree, (n) => n.type === 'details' && n.props.className === 'eng-howto')[0].props.open, false)
+  // a store with a note or a folder it could not read: the overview says the counts may fall short
+  const stores = [{
+    id: 'user', kind: 'user', dir: 'C:\\m', titles: [], index: { name: 'MEMORY.md', bytes: 100, lines: 3, over: false },
+    notes: [{ name: 'a.md', type: 'user', bytes: 300 }, { name: 'locked.md', type: 'other', unread: true }],
+    archive: [], more: false, health: { checked: false, reason: 'unreadable' },
+  }]
+  const part = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) })
+  await part.view.settle()
+  assert.match(textOf(findAll(part.view.tree, (n) => n.props.className === 'eng-overview-note')[0]),
+    /^statsReadAt\{"time":"[^"]+"\} statsIncomplete$/)
+  // the note it could not read is a note, but of no type it could tell: not counted as `other`
+  assert.deepEqual(findAll(part.view.tree, (n) => n.props.className === 'eng-overview-line').map(textOf),
+    ['statsNotes{"notes":2,"archive":0}', 'group{"type":"typeUser","count":1}'])
+})
+
+test('client: while filtering, a store shows the names that match and no check-up or size list beside them', async () => {
+  const stores = [{
+    id: 'user', kind: 'user', dir: 'C:\\m', titles: [], index: { name: 'MEMORY.md', bytes: 100, lines: 3, over: false },
+    notes: [{ name: 'timeline.md', type: 'project', bytes: 20000 }, { name: 'who.md', type: 'user', bytes: 200 }],
+    archive: [], more: false,
+    health: { checked: true, broken: [], brokenMore: false, unindexed: ['timeline.md'] },
+  }]
+  const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores }) })
+  await view.settle()
+  const blocks = () => [findAll(view.tree, (n) => n.props.className === 'eng-health').length,
+    findAll(view.tree, (n) => n.props.className === 'eng-group' && textOf(n).startsWith('largeNotes')).length]
+  assert.deepEqual(blocks(), [1, 1])
+  findAll(view.tree, (n) => n.type === 'input' && n.props.type === 'search')[0].props.onChange({ target: { value: 'zzz' } })
+  await view.settle()
+  assert.deepEqual(blocks(), [0, 0])
+  assert.equal(findAll(view.tree, (n) => n.props.className === 'eng-name').length, 0)
+  assert.deepEqual(textsOf(view.tree, 'eng-filter-none'), ['filterNone'])
+})
+
+test('client: the tidy-up instructions drop a dead link, not the line its live neighbours share', async () => {
+  const { dictionaries } = await applied()
+  assert.ok(dictionaries.engramory.zh.tidyPrompt.includes('只删这个链接；一行里没有别的有效链接了，才删掉整行'))
+  assert.ok(dictionaries.engramory.en.tidyPrompt.includes('remove that link alone, and the line only when it has no other live link left'))
+  for (const lang of ['zh', 'en']) {
+    // a passed plan is kept, and recall's notes are indexed, not every note
+    assert.match(dictionaries.engramory[lang].tidyPrompt, lang === 'zh' ? /日期已过的约定别删/ : /do not delete them/)
+    assert.match(dictionaries.engramory[lang].tidyPrompt, lang === 'zh' ? /不要为了补齐全部加进去/ : /do not add them all/)
+  }
 })
