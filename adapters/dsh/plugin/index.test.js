@@ -279,7 +279,7 @@ test("str_replace_editor is judged as it edits: by its own path, matching the te
     command: 'str_replace', path, old_str: 'HEAD\r\nX', new_str: `HEAD\nX\n${big(100)}` } }),
   /lines > 200/)
   // and writes without the BOM it read through, so a BOM does not count against an insert
-  writeFileSync(path, `﻿${'a'.repeat(99)}`, 'utf8')
+  writeFileSync(path, `\uFEFF${'a'.repeat(99)}`, 'utf8')
   assert.equal(mount({ maxBytes: 101 }).guard({ name: 'str_replace_editor',
     arguments: { command: 'insert', path, insert_line: 1, new_str: 'b' } }), undefined)
 })
