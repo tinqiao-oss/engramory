@@ -24,7 +24,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.0.2.** The store format, the tools and the index caps now change
+> **Status: 1.0.3.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like

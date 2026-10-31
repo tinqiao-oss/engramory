@@ -62,7 +62,9 @@ RESET = "\033[0m"
 
 
 def _strip_injected(text: str) -> str:
-    return SYSREM_RE.sub("", text)
+    # A line break, not nothing: the text on either side never runs together into a
+    # match the transcript does not hold (the prefilter would not find it).
+    return SYSREM_RE.sub("\n", text)
 
 
 def _supports_color() -> bool:
@@ -112,8 +114,8 @@ def _file_contains(path: Path, needle: bytes, case_sensitive: bool, chunk: int =
     whole class of silent misses. `bytes.__contains__` is memchr-backed and scans
     gigabytes in seconds, which is fast enough to not need the dependency.
 
-    `bytes.lower()` only folds ASCII, leaving non-Latin scripts untouched — exactly
-    the intent, since case-insensitivity is meaningless for them.
+    `bytes.lower()` only folds ASCII; `_probe` keeps every character it cannot fold
+    out of the needle.
     """
     overlap = len(needle) - 1
     tail = b""
@@ -129,15 +131,62 @@ def _file_contains(path: Path, needle: bytes, case_sensitive: bool, chunk: int =
             tail = buf[-overlap:] if overlap else b""
 
 
-def _prefilter(dirs: list[Path], needle: str, regex: bool, case_sensitive: bool) -> list[Path]:
+# ASCII letters that re.IGNORECASE also matches against non-ASCII ones (I and i: İ ı;
+# K and k: the Kelvin sign; S and s: the long s), which bytes.lower() cannot fold.
+_FOLDS_BEYOND_ASCII = frozenset("IiKkSs")
+
+
+def _probe(needle: str, case_sensitive: bool) -> bytes:
+    """The longest stretch of the needle every match must contain byte for byte in
+    the raw file (lowered when case-insensitive); b"" when no stretch is safe.
+
+    The matcher reads decoded text, the prefilter raw JSON. JSON stores quotes,
+    backslashes and control characters escaped, and the tool-call text the matcher
+    sees is re-serialized with ", " and ": " separators, so those characters and
+    whitespace break the stretch. Case-insensitively so do the letters above and
+    any cased non-ASCII letter (É matches é, bytes.lower() leaves both alone).
+    """
+    def safe(c: str) -> bool:
+        # U+FFFD also stands for bytes that were not UTF-8; a lone surrogate has no UTF-8.
+        if c in '"\\\ufffd' or c.isspace() or ord(c) < 0x20 or 0xD800 <= ord(c) <= 0xDFFF:
+            return False
+        if case_sensitive:
+            return True
+        if c.isascii():
+            return c not in _FOLDS_BEYOND_ASCII
+        return c.lower() == c == c.upper()
+
+    runs, run = [], []
+    for c in needle:
+        if safe(c):
+            run.append(c)
+        else:
+            runs.append("".join(run))
+            run = []
+    runs.append("".join(run))
+    probe = max(runs, key=lambda r: len(r.encode("utf-8"))).encode("utf-8")
+    return probe if case_sensitive else probe.lower()
+
+
+# Characters of a number as Python writes it back, which the transcript may spell
+# otherwise (`0.000001` is `1e-06` here): tool calls are re-serialized for search.
+_NUMBER_CHARS = frozenset("0123456789eE+-.")
+
+
+def _prefilter(dirs: list[Path], needle: str, regex: bool, case_sensitive: bool,
+               tools: bool = False) -> list[Path]:
     files = [f for d in dirs for f in sorted(d.glob("*.jsonl"))]
     if regex:
         # A pattern cannot be prefiltered by bytes without risking a match split
         # across chunk boundaries; scanning everything is slower but never misses.
         return files
-    probe = needle.encode("utf-8")
-    if not case_sensitive:
-        probe = probe.lower()
+    if tools and (any(c in "0123456789" for c in needle) or set(needle) <= _NUMBER_CHARS):
+        # A match may lie in a number written back otherwise; without a digit, only
+        # in its `e-` / `e+` / `.` / `-`.
+        return files
+    probe = _probe(needle, case_sensitive)
+    if not probe:
+        return files
     return [f for f in files if _file_contains(f, probe, case_sensitive)]
 
 
@@ -150,6 +199,8 @@ def _block_text(block: dict) -> tuple[str, str]:
         return kind, block.get("thinking") or block.get("text") or ""
     if kind == "tool_use":
         name = block.get("name") or "tool"
+        if "input" not in block:
+            return f"tool_use:{name}", ""
         try:
             payload = json.dumps(block.get("input"), ensure_ascii=False)
         except (TypeError, ValueError):
@@ -236,7 +287,7 @@ def cmd_search(args) -> int:
             print(f"bad regex: {exc}", file=sys.stderr)
             return EXIT_USAGE
 
-    files = _prefilter(dirs, args.needle, args.regex, args.case_sensitive)
+    files = _prefilter(dirs, args.needle, args.regex, args.case_sensitive, args.tools)
     rows, total, sessions = [], 0, 0
 
     for path in files:

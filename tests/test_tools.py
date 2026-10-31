@@ -287,9 +287,48 @@ def test_init_reader_cursor_writes_mdc_with_alwaysapply(tmp_path):
     text = mdc.read_text(encoding="utf-8")
     assert text.startswith("---") and "alwaysApply: true" in text
     assert "read-only" in text.lower() and "never" in text.lower()
+    # the line under the frontmatter says who wrote it: init and --uninstall claim it by that
+    assert text.split("---\n\n", 1)[1].startswith("<!-- Written by engramory_init.py")
     # idempotent: the dedicated file is rewritten byte-identically, not appended/duplicated
     _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
     assert mdc.read_text(encoding="utf-8") == text
+
+
+def test_init_reader_keeps_a_rule_file_it_did_not_write_unless_forced(tmp_path):
+    # Regression: the dedicated rule file was overwritten whole even without --force.
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    mdc = cfg / ".cursor" / "rules" / "engramory-recall.mdc"
+    mdc.parent.mkdir(parents=True)
+    mine = "---\nalwaysApply: true\n---\n\nMy own notes on how I use Engramory.\n"
+    mdc.write_text(mine, encoding="utf-8")
+    rc, out = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and "kept existing" in out and "--force" in out
+    assert mdc.read_text(encoding="utf-8") == mine
+    rc, out = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store),
+                   "--force")
+    assert rc == 0 and "<!-- Written by engramory_init.py" in mdc.read_text(encoding="utf-8")
+
+
+def test_init_reader_keeps_an_unmarked_rule_file_an_older_version_may_have_written(tmp_path):
+    # Older versions wrote no mark, and a user's edit of such a file starts the same way:
+    # only --force replaces it. A marked file, even with CRLF endings, is rewritten.
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    steer = cfg / ".kiro" / "steering" / "engramory-recall.md"
+    steer.parent.mkdir(parents=True)
+    older = "---\ninclusion: always\n---\n\n## Memory (Engramory — read-only)\n\nmy edit\n"
+    steer.write_text(older, encoding="utf-8")
+    rc, out = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and "versions before 1.0.3 wrote none" in out
+    assert steer.read_text(encoding="utf-8") == older
+    rc, _ = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store),
+                 "--force")
+    marked = steer.read_text(encoding="utf-8")
+    assert rc == 0 and "<!-- Written by engramory_init.py" in marked
+    steer.write_bytes(marked.replace("\n", "\r\n").encode("utf-8") + b"stale\r\n")
+    rc, out = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and steer.read_text(encoding="utf-8") == marked
 
 
 def test_init_reader_kiro_writes_steering_with_inclusion_always(tmp_path):

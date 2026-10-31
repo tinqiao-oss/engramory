@@ -369,5 +369,32 @@ class SetupRunbookTests(unittest.TestCase):
         self.assertNotIn("## step 5b", lower)
 
 
+class InvisibleCharacterTests(unittest.TestCase):
+    """An editing tool may write the escape for a BOM or a zero-width space as the
+    character itself. In source it then reads like the escape and is not: a compare
+    with it looks empty, and the file's bytes (a published runtime digest) change."""
+
+    def test_no_tracked_file_holds_one(self):
+        import subprocess
+        try:
+            listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
+                                    check=True).stdout.decode("utf-8").split("\0")
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("not a git checkout")
+        # a BOM, zero-width characters, and bidi controls (they reorder what is shown)
+        invisible = {0xFEFF, 0x200B, 0x200C, 0x200D, 0x2060, 0x200E, 0x200F, 0x061C,
+                     *range(0x202A, 0x202F), *range(0x2066, 0x206A)}
+        found = []
+        for name in filter(None, listed):
+            try:
+                text = (ROOT / name).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # binary (the screenshots)
+            for number, line in enumerate(text.splitlines(), 1):
+                if any(ord(c) in invisible for c in line):
+                    found.append(f"{name}:{number}")
+        self.assertEqual(found, [], "write these as escapes in the source")
+
+
 if __name__ == "__main__":
     unittest.main()

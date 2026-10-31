@@ -6,6 +6,52 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.3 — 2026-10-31
+
+The rest of the 1.0.2 audit, and one change for chat bridges, each reviewed by GPT and
+DeepSeek through Codex. Most costly first.
+
+- **dsh social mode: the owner speaking in a group chat no longer gets the private
+  memory.** A bridge may now add `chat` to its `speaker`: `'group'` (QQ bridge aurabot
+  does from its 1.2.0), or any value but `'private'`, counts as someone else's message
+  even when the owner wrote it and before anyone else in the group has spoken — the
+  whole group reads the reply. Without `chat`, nothing changes. Sessions are re-judged
+  from their logs, not from a checkpoint the old rule wrote.
+- **dsh: a path on another machine no longer freezes dsh.** The guard and recall run on
+  dsh's main thread, and a lookup on a share whose host does not answer waits about 21
+  seconds. A write to `\\server\share\notes.md` made four such lookups although the file
+  is not the index, and a session whose directory is on a share made three on every
+  refresh of recall. A UNC path to another host is now compared as written
+  (`\\?\UNC\host\` as `\\host\`) and not looked up unless it holds a `~` (a short name
+  may be the index's), and recall does not look for a project store, or a pin that lands
+  under such a session directory (the memory page already skipped it). A host that is
+  this machine — `localhost`, a loopback or own address in any spelling, its name with or
+  without a domain — and `\\?\C:\…` are looked up as before. Still read
+  synchronously: a mapped drive letter or a local link to a share (their spelling does
+  not tell), and a store you placed on a share by name (an absolute `indexPath`,
+  `$DSH_HOME`). Not new, and not fixed: one share under two host names (or this machine
+  as `\\localhost\c$\…` and as `C:\…`) is two files to the guard, since Windows
+  resolves neither name to the other.
+- **`cursor-reader` / `kiro-reader` no longer replace or delete a rule file they did not
+  write.** The installer overwrote `.cursor/rules/engramory-recall.mdc` /
+  `.kiro/steering/engramory-recall.md` whole even without `--force`, and `--uninstall`
+  deleted it whenever it mentioned "Engramory". The file now carries a mark on its first
+  line under the frontmatter, and only a marked file is rewritten or removed. One written
+  by an earlier version has no mark and cannot be told from a user's edit of it: init
+  keeps it unless `--force`, and `--uninstall` leaves it and says so.
+- **`engramory_trace.py` no longer skips transcripts it should search.** It prefilters
+  files on the needle's raw bytes, but a transcript stores `"` and `\` escaped, and its
+  case-insensitive match folds `É` to `é` (and `k` to the Kelvin sign) where a byte
+  compare does not: `print("hi")` or `ÉCOLE` found nothing. It now prefilters on the
+  longest part of the needle that is stored byte for byte, or not at all — not at all
+  with `--tools` for a needle that may lie in a number (`0.000001` is searched as
+  `1e-06`). Text on both sides of a stripped reminder no longer runs together into a
+  match, a tool call without input is no longer searched as `null`, and a needle with a
+  lone surrogate no longer crashes it.
+- Internal: two invisible BOM characters in source (one shipped in the dsh plugin since
+  1.0.2, harmless) are written as escapes, and a test keeps BOMs, zero-width and bidi
+  control characters out of the repository.
+
 ## 1.0.2 — 2026-10-31
 
 Fixes from an audit of the whole repository (GPT and DeepSeek through Codex, each

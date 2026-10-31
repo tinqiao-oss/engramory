@@ -615,6 +615,20 @@ READER_HOSTS = {
                  "frontmatter": "---\ninclusion: always\n---", "tested": False},
 }
 
+# The first line under the frontmatter of a dedicated rule file (Cursor .mdc / Kiro
+# steering) this installer writes. A file at that path without it may be the user's:
+# init keeps it unless --force, --uninstall leaves it. That includes one an older
+# version wrote, which had no mark: its content cannot tell it from a user's edit.
+GENERATED_MARK = ("<!-- Written by engramory_init.py: running it again rewrites this file "
+                  "and --uninstall deletes it. Keep your own rules in another file. -->")
+
+
+def _generated_rule_file(text, cfg):
+    """Did this installer write this dedicated rule file?"""
+    head = cfg["frontmatter"] + "\n\n"
+    text = text.lstrip("\ufeff").replace("\r\n", "\n")
+    return text.startswith(head + GENERATED_MARK)
+
 
 def _reader_config(host, spec):
     up = host.upper()
@@ -709,8 +723,9 @@ def _render_block(
     fm = cfg.get("frontmatter")
     if fm:
         # A dedicated always-loaded rule file (e.g. Cursor `.mdc` / Kiro steering): the whole
-        # file is ours, so no markers — just the host-required frontmatter + the recall body.
-        return fm + "\n\n" + body + "\n"
+        # file is ours, so no block markers — the host-required frontmatter, the mark that
+        # says who wrote it, and the recall body.
+        return fm + "\n\n" + GENERATED_MARK + "\n\n" + body + "\n"
     return cfg["begin"] + "\n" + body + "\n" + cfg["end"]
 
 
@@ -1445,14 +1460,16 @@ def uninstall_host(args, host):
 
     # 1. The rules wiring.
     if cfg.get("frontmatter"):
-        # A dedicated file this installer owns outright (Cursor .mdc / Kiro steering):
-        # it carries no markers, so ownership is judged by path plus content.
+        # A dedicated file this installer writes whole (Cursor .mdc / Kiro steering): it is
+        # ours only when it starts the way init writes it (_generated_rule_file).
         display = _display_path(target, project_root)
         if not target.exists():
             results.append((rules_file, "absent (%s)" % display))
-        elif "Engramory" not in _read_text(target):
+        elif not _generated_rule_file(_read_text(target), cfg):
             results.append((rules_file,
-                            "left %s (no Engramory content - not ours)" % display))
+                            "left %s (it does not carry the mark of this installer - "
+                            "versions before 1.0.3 wrote none; delete it yourself if one "
+                            "of them wrote it)" % display))
         elif dry:
             results.append((rules_file, "would remove %s" % display))
         else:
@@ -1756,9 +1773,17 @@ def _run_install_steps(args, cfg, source_root, project_root, memory_root,
         install_hooks=args.install_hooks,
     )
     if cfg.get("frontmatter"):
-        # A dedicated rule file we own (Cursor/Kiro): write it whole (idempotent overwrite).
-        _write_text(target, block, guard_root=project_root)
-        results.append((rules_file, f"wrote Engramory {cfg['label']} rule file"))
+        # A dedicated rule file (Cursor/Kiro): written whole, but over another file at that
+        # path only with --force — it may be the user's own.
+        # a link whose target is missing is something there too, and not ours to replace
+        if ((target.exists() or target.is_symlink()) and not args.force
+                and not (target.exists() and _generated_rule_file(_read_text(target), cfg))):
+            results.append((rules_file, "kept existing %s (it does not carry the mark of this "
+                            "installer - versions before 1.0.3 wrote none; use --force to "
+                            "replace)" % _display_path(target, project_root)))
+        else:
+            _write_text(target, block, guard_root=project_root)
+            results.append((rules_file, f"wrote Engramory {cfg['label']} rule file"))
     else:
         old = _read_text(target) if target.exists() else ""
         _write_text(target, _replace_block(old, block, cfg["begin"], cfg["end"],
@@ -1808,7 +1833,8 @@ def build_parser():
              "asks Codex to sync at meaningful milestones (default: explicit)",
     )
     parser.add_argument("--force", action="store_true",
-                        help="replace the installed skill and managed Codex hook scripts")
+                        help="replace the installed skill and managed Codex hook scripts, and "
+                             "a Cursor/Kiro rule file this installer did not write")
     parser.add_argument(
         "--uninstall",
         action="store_true",

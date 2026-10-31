@@ -182,6 +182,110 @@ def test_prefilter_case_matches_the_matcher(tmp_path):
     assert files == []
 
 
+def _raw_rec(role, content):
+    """A record as Claude Code writes it: compact, non-ASCII stored as is, not as \\u escapes."""
+    return json.dumps({"type": role, "timestamp": "2026-01-15T10:00:00.000Z",
+                       "message": {"role": role, "content": content}},
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+def test_needle_with_quotes_and_backslashes_is_found(tmp_path):
+    """Regression: the file stores `"` and `\\` escaped, so the needle's own bytes are
+    not in it; prefiltering on them dropped the whole transcript."""
+    root = _project(tmp_path, lines=[_rec("user", 'it printed print("hi") from C:\\tmp')])
+    for needle in ['print("hi")', "C:\\tmp"]:
+        rc, out = _run(needle, "--root", str(root), "--all", "--no-color")
+        assert rc == 0, needle
+        assert "1 hits" in out
+
+
+def test_non_ascii_case_folding_is_found(tmp_path):
+    """Regression: re.IGNORECASE matches É with é, bytes.lower() does not; the
+    prefilter dropped the transcript before the matcher saw it."""
+    root = _project(tmp_path, lines=[_raw_rec("user", "on a parlé de l'école")])
+    rc, out = _run("ÉCOLE", "--root", str(root), "--all", "--no-color")
+    assert rc == 0 and "1 hits" in out
+    rc, _ = _run("ÉCOLE", "-s", "--root", str(root), "--all", "--no-color")
+    assert rc == trace.EXIT_NO_HITS
+
+
+def test_kelvin_sign_matches_k(tmp_path):
+    """re.IGNORECASE matches k with the Kelvin sign (U+212A); the probe skips k."""
+    root = _project(tmp_path, lines=[_raw_rec("user", "cooled to 4 \u212aelvin")])
+    rc, out = _run("kelvin", "--root", str(root), "--all", "--no-color")
+    assert rc == 0 and "1 hits" in out
+
+
+def test_tool_payload_separator_is_found(tmp_path):
+    """The tool-call text is re-serialized with ": ", which the raw file lacks."""
+    root = _project(tmp_path, lines=[
+        _raw_rec("assistant", [{"type": "tool_use", "name": "Bash", "input": {"timeout": 9}}])])
+    rc, out = _run(": 9", "--tools", "--root", str(root), "--all", "--no-color")
+    assert rc == 0 and "1 hits" in out
+
+
+def test_text_around_stripped_context_does_not_run_together(tmp_path):
+    """Regression: stripping a reminder joined `abc` and `def` into a match the file
+    does not hold, which the prefilter then could not find."""
+    root = _project(tmp_path, lines=[
+        _rec("user", "abc<system-reminder>context</system-reminder>def")])
+    # --regex skips the prefilter: what the matcher sees, on its own
+    assert _run("abcdef", "--regex", "--root", str(root), "--all", "--no-color")[0] == trace.EXIT_NO_HITS
+    rc, out = _run("abc", "--root", str(root), "--all", "--no-color")
+    assert rc == 0 and "1 hits" in out
+
+
+def test_number_written_back_otherwise_is_found(tmp_path):
+    """The transcript holds `0.000001`, as JSON.stringify writes it; the tool-call
+    text written back holds `1e-06`."""
+    line = ('{"type":"assistant","timestamp":"2026-01-15T10:00:00.000Z","message":{"role":'
+            '"assistant","content":[{"type":"tool_use","name":"Bash","input":{"x":0.000001}}]}}')
+    root = _project(tmp_path, lines=[line])
+    for needle in ["1e-06", "e-"]:
+        rc, out = _run(needle, "--tools", "--root", str(root), "--all", "--no-color")
+        assert rc == 0 and "1 hits" in out, needle
+
+
+def test_tool_call_without_input_has_no_text(tmp_path):
+    """Regression: a missing input was searched as `null`, which the file does not hold."""
+    root = _project(tmp_path, lines=[
+        _raw_rec("assistant", [{"type": "tool_use", "name": "Bash"}])])
+    assert _run("null", "--regex", "--tools", "--root", str(root), "--all",
+                "--no-color")[0] == trace.EXIT_NO_HITS
+
+
+def test_probe_skips_characters_with_no_bytes_of_their_own():
+    lone, replaced = chr(0xD800), chr(0xFFFD)
+    assert trace._probe(lone, case_sensitive=True) == b""  # no UTF-8 at all: not a crash
+    assert trace._probe("ab" + replaced + "c", case_sensitive=True) == b"ab"
+
+
+def test_probe_keeps_only_bytes_every_match_contains():
+    assert trace._probe("httpadapter", case_sensitive=False) == b"httpadapter"
+    assert trace._probe("HTTPAdapter", case_sensitive=True) == b"HTTPAdapter"
+    assert trace._probe('print("hi")', case_sensitive=True) == b"print("
+    assert trace._probe("kelvin", case_sensitive=False) == b"elv"
+    assert trace._probe("kelvin", case_sensitive=True) == b"kelvin"
+    assert trace._probe("ÉCOLE", case_sensitive=False) == b"cole"
+    assert trace._probe("流式解析器", case_sensitive=False) == "流式解析器".encode("utf-8")
+    assert trace._probe('"', case_sensitive=True) == b""
+    assert trace._probe("É", case_sensitive=False) == b""
+
+
+def test_folds_beyond_ascii_is_complete():
+    """Every ASCII character re.IGNORECASE matches against a non-ASCII one is listed."""
+    import re
+    ascii_class = re.compile("[\x20-\x7e]", re.IGNORECASE)
+    found = set()
+    for cp in range(0x80, 0x110000):
+        if 0xD800 <= cp <= 0xDFFF:
+            continue
+        c = chr(cp)
+        if ascii_class.fullmatch(c):
+            found.update(a for a in map(chr, range(0x20, 0x7F)) if re.fullmatch(re.escape(a), c, re.I))
+    assert found == set(trace._FOLDS_BEYOND_ASCII)
+
+
 def test_regex_mode(tmp_path):
     root = _project(tmp_path, lines=[_rec("user", "bumped to 1.42.7 today")])
     rc, out = _run(r"1\.\d+\.\d+", "--regex", "--root", str(root), "--all", "--no-color")

@@ -119,8 +119,11 @@ agent.followup(createUserMessage({
 | `guest` | Someone else wrote it, the same as no `speaker` at all. |
 | `none` | Nobody wrote it: your plugin's own report, reminder or notice. It does not make the owner's conversation someone else's. |
 
-A group conversation stays someone else's once anyone else in it speaks. A program
-that talks to dsh only through dsh web's API cannot set a source, so its messages count
+In a group chat, add `chat: 'group'` (`{ role: 'owner', chat: 'group' }`): the whole
+group reads the reply, so the conversation counts as someone else's even while only the
+owner has spoken in it. A private chat may say `chat: 'private'` or leave it out; any
+other value counts as a group. A group conversation stays someone else's once anyone else in it
+speaks. A program that talks to dsh only through dsh web's API cannot set a source, so its messages count
 as someone else's; if it sends `clientTimeZone` with a prompt it is taken for the
 owner, so a program forwarding other people's messages must leave it out.
 

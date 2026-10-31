@@ -10,12 +10,13 @@
  */
 import assert from 'node:assert/strict'
 import { execSync, spawnSync } from 'node:child_process'
-import {
+import fs, {
   chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
   utimesSync, writeFileSync,
 } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { syncBuiltinESMExports } from 'node:module'
+import { homedir, hostname, tmpdir } from 'node:os'
+import { basename, join, relative, resolve } from 'node:path'
 import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
@@ -140,6 +141,31 @@ const big = (lines) => Array.from({ length: lines }, (_, i) => `- line ${i}`).jo
 
 function write(file_path, content) {
   return { name: 'write', arguments: { file_path, content } }
+}
+
+/**
+ * What `fn` returns, and the paths on another machine its synchronous file system calls
+ * named. Each such call holds dsh's main thread while that machine does not answer; the
+ * hosts in these tests fail fast, so a test can see the call but not the wait.
+ */
+function sharesTouched(fn) {
+  const remote = /^[\\/]{2}(?![?.][\\/][A-Za-z]:)/
+  const touched = []
+  const watch = (call) => function (p, ...rest) {
+    if (typeof p === 'string' && remote.test(p)) touched.push(p)
+    return call.call(this, p, ...rest)
+  }
+  const names = ['statSync', 'lstatSync', 'realpathSync', 'openSync', 'readlinkSync']
+  const saved = Object.fromEntries(names.map((n) => [n, fs[n]]))
+  for (const n of names) fs[n] = watch(saved[n])
+  fs.realpathSync.native = watch(saved.realpathSync.native)
+  syncBuiltinESMExports()
+  try {
+    return { result: fn(), touched }
+  } finally {
+    Object.assign(fs, saved)
+    syncBuiltinESMExports()
+  }
 }
 
 test('plugin metadata is what the loader expects', () => {
@@ -440,6 +466,43 @@ test('a pinned path is compared by identity, not by spelling', () => {
   const guard = mount({ indexPath: detour }).guard
   assert.match(guard({ name: 'write', arguments: { file_path: real, content: over } }),
     /over the Engramory index cap/, 'a `..` detour is the same file')
+})
+
+test('a write to another machine is judged by its spelling, without waiting on that machine', (t) => {
+  // `\\host\share` names a network share only on Windows; elsewhere it is a relative path
+  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
+  const dir = mkdtempSync(join(tmpdir(), 'engramory-pin-'))
+  const real = join(dir, 'MEMORY.md')
+  writeFileSync(real, '- x\n')
+  const over = Array.from({ length: 201 }, (_, i) => `- line ${i}`).join('\n')
+  for (const guard of [mount().guard, mount({ indexPath: real }).guard]) {
+    for (const unc of ['\\\\no-such-host.invalid\\share\\x.md', '//no-such-host.invalid/share/x.md',
+      '\\\\?\\UNC\\no-such-host.invalid\\share\\x.md']) {
+      const { result, touched } = sharesTouched(() =>
+        guard({ name: 'write', arguments: { file_path: unc, content: over } }))
+      assert.equal(result, undefined)
+      assert.deepEqual(touched, [], `${unc} was judged without a lookup`)
+    }
+  }
+  // this machine's own drive in the device namespace is looked up as any path is
+  const guard = mount({ indexPath: real }).guard
+  assert.match(guard({ name: 'write', arguments: { file_path: `\\\\?\\${real}`, content: over } }),
+    /over the Engramory index cap/, 'the pinned index spelled \\\\?\\ is still the index')
+  // and so is this machine under its other names: an index there may be the pinned one
+  for (const host of ['localhost', '127.1', '0--1.ipv6-literal.net', `${hostname()}.`, 'LOCALHOST@SSL']) {
+    const { touched } = sharesTouched(() =>
+      guard({ name: 'write', arguments: { file_path: `\\\\${host}\\no-such-share\\x.md`, content: over } }))
+    assert.notDeepEqual(touched, [], `\\\\${host}\\ is this machine`)
+  }
+  // a short name on a share is resolved: it may be the index's
+  const { touched } = sharesTouched(() => mount().guard({ name: 'write',
+    arguments: { file_path: '\\\\no-such-host.invalid\\share\\MEMORY~1.MD', content: over } }))
+  assert.notDeepEqual(touched, [])
+  // one share under both spellings is one index
+  const onShare = mount({ indexPath: '\\\\no-such-host.invalid\\share\\MEMORY.md' }).guard
+  assert.match(onShare({ name: 'write',
+    arguments: { file_path: '\\\\?\\UNC\\no-such-host.invalid\\share\\memory.md', content: over } }),
+  /over the Engramory index cap/)
 })
 
 test('pinning an index that does not exist yet still guards its first write', () => {
@@ -982,6 +1045,32 @@ test('no store means no injection, and a pinned indexPath is the only index inje
   assert.doesNotMatch(text, /- project/)
 })
 
+test('recall does not look into a session directory on another machine', (t) => {
+  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
+  const home = scratch('home')
+  store(home, '- [u](u.md) - user\n')
+  const unc = '\\\\no-such-host.invalid\\share\\repo'
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const seen = sharesTouched(() => withDshHome(home, () => prompt.contexts[0].text(at(unc))))
+  assert.deepEqual(seen.touched, [], 'no lookup on the share')
+  assert.match(seen.result, /^User memory index[\s\S]*- user$/, 'the store the user placed by name still is')
+  // nor a pin relative to it
+  const pinPrompt = promptRegistry()
+  mount({ indexPath: 'notes/MEMORY.md' }, { workingDirectory: sessionDirs(), systemPrompt: pinPrompt })
+  const pinned = sharesTouched(() => withDshHome(home, () => pinPrompt.contexts[0].text(at(unc))))
+  assert.deepEqual(pinned, { result: '', touched: [] })
+  // a pin naming a local drive without its directory lands on that drive, not on the share
+  const file = join(scratch('drive-pin'), INDEX)
+  writeFileSync(file, '- [x](x.md) - on the local drive\n', 'utf8')
+  const drive = file.slice(0, 2)
+  // relative to that drive's current directory, wherever Windows keeps it now
+  const drivePrompt = promptRegistry()
+  mount({ indexPath: `${drive}${relative(resolve(drive), file)}` },
+    { workingDirectory: sessionDirs(), systemPrompt: drivePrompt })
+  assert.match(withDshHome(home, () => drivePrompt.contexts[0].text(at(unc))), /- on the local drive$/)
+})
+
 test('a session in a subdirectory finds its project store the way dsh finds AGENTS.md', () => {
   // dsh's project root is the nearest ancestor holding `.git`, else the session's own
   // directory; the store nearest the session between the two is the project's.
@@ -1491,6 +1580,21 @@ test('companion mode: who wrote a message is read from the source dsh stamped on
   // the bridge standard: a bridge declares the owner's own messages, and its own notices
   assert.equal(owner(said({ kind: 'plugin:dsh-onebot', speaker: { role: 'owner' } })), true)
   assert.equal(owner(said({ kind: 'user', speaker: { role: 'owner' } })), true)
+  assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'private' } })), true)
+  // the owner in a group: the whole group reads the reply, before anyone else has spoken too
+  assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'group' } })), false,
+    'the owner speaking first in a group')
+  assert.equal(owner(TYPED, said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'group' } })), false,
+    'a group message in the owner\'s own conversation')
+  assert.equal(owner(TYPED, said({ kind: 'plugin:aurabot', speaker: { role: 'none', chat: 'group' } })), true,
+    'a notice decides nothing, wherever it is posted')
+  // a chat that is set but not 'private' is a group's, whatever else the source says
+  for (const chat of ['GROUP', null, 0, '', 'channel']) {
+    assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat } })), false,
+      `chat: ${JSON.stringify(chat)}`)
+  }
+  assert.equal(owner(said({ ...TYPED.data.source, speaker: { chat: 'group' } })), false,
+    'dsh\'s own owner marks, in a group')
   assert.equal(owner(TYPED, said({ kind: 'plugin:life', speaker: { role: 'none' } })), true)
   assert.equal(owner(said({ kind: 'plugin:life', speaker: { role: 'none' } })), false, 'nobody yet')
   assert.equal(owner(TYPED, said({ kind: 'qq-bridge', speaker: { role: 'none' } })), true)

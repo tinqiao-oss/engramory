@@ -32,6 +32,15 @@ def _run(host, project, *extra):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def _init_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("engramory_init", INIT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _digest(root):
     import hashlib
 
@@ -121,6 +130,53 @@ def test_reader_removes_its_dedicated_rule_file_and_spares_the_store(tmp_path):
     assert code == 0, out
     assert not rule.exists()
     assert (store / "MEMORY.md").is_file(), "reader uninstall touched the shared store"
+
+
+def test_reader_leaves_a_rule_file_it_did_not_write(tmp_path):
+    """Regression: any file at that path naming "Engramory" was taken for ours and deleted."""
+    store = tmp_path / "extstore"
+    store.mkdir()
+    (store / "MEMORY.md").write_text("# MEMORY\n", encoding="utf-8")
+    project = tmp_path / "proj"
+    rule = project / ".kiro" / "steering" / "engramory-recall.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("---\ninclusion: always\n---\n\nMy notes on Engramory. " + USER_RULE + "\n",
+                    encoding="utf-8")
+    code, out = _run("kiro-reader", project, "--memory-root", store, "--uninstall")
+    assert code == 0, out
+    assert rule.is_file() and USER_RULE in rule.read_text(encoding="utf-8")
+    assert "does not carry the mark" in out
+
+
+def test_reader_install_keeps_a_link_at_its_rule_path_whose_target_is_missing(tmp_path):
+    """A dangling link does not `exists()`, but it is the user's, not a free path."""
+    store = tmp_path / "extstore"
+    store.mkdir()
+    (store / "MEMORY.md").write_text("# MEMORY\n", encoding="utf-8")
+    project = tmp_path / "proj"
+    rule = project / ".kiro" / "steering" / "engramory-recall.md"
+    rule.parent.mkdir(parents=True)
+    if not _try_symlink(rule, project / "rules" / "pending.md", False):
+        return  # no symlink privilege here; exercised on POSIX CI
+    code, out = _run("kiro-reader", project, "--memory-root", store)
+    assert code == 0, out
+    assert rule.is_symlink() and "kept existing" in out
+
+
+def test_reader_leaves_an_unmarked_rule_file_an_older_version_may_have_written(tmp_path):
+    """Its content cannot tell it from a user's edit of it: it is left, and named."""
+    store = tmp_path / "extstore"
+    store.mkdir()
+    (store / "MEMORY.md").write_text("# MEMORY\n", encoding="utf-8")
+    project = tmp_path / "proj"
+    rule = project / ".cursor" / "rules" / "engramory-recall.mdc"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("---\ndescription: Engramory read-only memory recall\nalwaysApply: true\n"
+                    "---\n\n# Engramory (read-only recall) — pointer\n\n" + USER_RULE + "\n",
+                    encoding="utf-8")
+    code, out = _run("cursor-reader", project, "--memory-root", store, "--uninstall")
+    assert code == 0, out
+    assert rule.is_file() and "delete it yourself" in out
 
 
 def test_uninstall_on_a_never_installed_tree_is_a_clean_noop(tmp_path):
@@ -495,8 +551,9 @@ def test_symlinked_rule_file_parent_does_not_escape(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     victim = outside / "engramory-recall.md"
-    victim.write_text("Engramory - but this file lives outside the project\n",
-                      encoding="utf-8")
+    # marked as init marks it, so only the symlink check stands between it and unlink()
+    victim.write_text("---\ninclusion: always\n---\n\n" + _init_module().GENERATED_MARK +
+                      "\n\nbut this file lives outside the project\n", encoding="utf-8")
     project = tmp_path / "proj"
     (project / ".kiro").mkdir(parents=True)
     if not _try_symlink(project / ".kiro" / "steering", outside, True):

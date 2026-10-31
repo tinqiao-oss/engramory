@@ -28,7 +28,7 @@ import {
   realpathSync, statSync,
 } from 'node:fs'
 import * as fsp from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, hostname, networkInterfaces } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 
@@ -1043,7 +1043,9 @@ const INERT_PRODUCERS = new Set([
  *              web's API, `dsh headless`, an editor or terminal client, a bridge writing that
  *              kind), any kind dsh's own producers do not use (`plugin:<name>`, as chat
  *              bridges write, or any other), `speaker: { role: 'guest' }`, and a source that
- *              cannot be read;
+ *              cannot be read. Anyone in a group, the owner included: a `speaker` whose
+ *              `chat` is set to anything but 'private' ('group' is the standard) — the whole
+ *              group reads the reply, even before anyone else there has spoken;
  *   undefined  nobody: dsh's own producers (INERT_PRODUCERS) and a plugin's own message
  *              declared `speaker: { role: 'none' }` — a report or a reminder no outsider
  *              wrote. These decide nothing. (SPEAKERS also lets through two bare `user`
@@ -1051,10 +1053,11 @@ const INERT_PRODUCERS = new Set([
  */
 function speakerOf(source) {
   if (source === null || typeof source !== 'object') return 'other'
-  const speaker = source.speaker !== null && typeof source.speaker === 'object' ? source.speaker.role : undefined
-  if (speaker === 'owner') return 'owner'
-  if (speaker === 'guest') return 'other'
-  if (speaker === 'none') return undefined
+  const speaker = source.speaker !== null && typeof source.speaker === 'object' ? source.speaker : undefined
+  if (speaker?.role === 'none') return undefined
+  if (speaker?.chat !== undefined && speaker.chat !== 'private') return 'other'
+  if (speaker?.role === 'owner') return 'owner'
+  if (speaker?.role === 'guest') return 'other'
   const kind = source.kind
   if (kind === 'user') {
     return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
@@ -1137,8 +1140,9 @@ function commandsAfter(state, event) {
 const SPEAKERS = {
   key: SPEAKERS_KEY,
   // Bumped whenever the state's fields or the fold change, so dsh refolds a session from its
-  // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes).
-  stateVersion: 2,
+  // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes;
+  // 3: a message in a group chat is someone else's, the owner's included).
+  stateVersion: 3,
   // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
   stateSchema: {
     parse(value) {
@@ -1446,9 +1450,16 @@ function indexRecall(settings, sessionCwd) {
   return (context) => {
     const cwd = sessionCwd(context) ?? process.cwd()
     const { labels } = settings.text
-    const candidates = settings.indexPath !== undefined
-      ? [{ label: labels.pinned, path: hostPath(cwd, settings.indexPath) }]
-      : [projectStore(cwd, settings.indexName, projects, labels.project),
+    // A session directory on another machine is not looked into (remotePath), as the
+    // memory page does not: neither its project store nor a pin that lands under it. A
+    // store the user placed there by name — an absolute pin, $DSH_HOME — still is.
+    const remote = remotePath(cwd)
+    const pinned = settings.indexPath === undefined ? undefined : hostPath(cwd, settings.indexPath)
+    const candidates = pinned !== undefined
+      ? (remote && !qualified(settings.indexPath) && remotePath(pinned)
+          ? []
+          : [{ label: labels.pinned, path: pinned }])
+      : [remote ? undefined : projectStore(cwd, settings.indexName, projects, labels.project),
           { label: labels.user, path: join(dshHome(), STORE_DIR, settings.indexName) }]
     const seen = new Set()
     const parts = []
@@ -1641,7 +1652,8 @@ function withinCap(text, settings, used = 0) {
  *
  * Guards are synchronous by contract, so this stays cheap: every tool that cannot
  * write leaves on string compares; a write pays a path resolution (two with an index
- * pinned), and a write to the index one bounded read of it.
+ * pinned; none for a path on another machine), and a write to the index one bounded
+ * read of it.
  */
 function refuseOversizedIndex(exec, settings, sessionCwd) {
   const args = exec?.arguments
@@ -1893,7 +1905,7 @@ function insertOf(tool, args) {
  */
 function simulateInsert(current, { line, text }, limit) {
   // the editor reads through TextDecoder, which drops a leading BOM, and writes without it
-  const decoded = current.startsWith('﻿') ? current.slice(1) : current
+  const decoded = current.startsWith('\ufeff') ? current.slice(1) : current
   const segments = occurrences(decoded, '\n') + 1
   if (line < 0 || line > segments) return current
   if (decoded.length + text.length + 1 > limit) {
@@ -2132,10 +2144,17 @@ function hostPath(cwd, p) {
  * anyway, as dsh does there, so the path is resolve()d first; the OS then expands an 8.3
  * short name (`PROGRA~1`, `MEMORY~1.MD`), which Node's JS realpath keeps — the same file
  * written through its short name was not the guarded index.
+ *
+ * A path on another machine is keyed as written, `\\?\UNC\host\` as `\\host\`, and not
+ * looked up (remotePath) — unless it holds a `~`: a short name there (`MEMORY~1.MD`) is
+ * worth the wait. (A link on a share is not followed by Windows by default.)
  */
 function pathKey(p) {
   const posix = process.platform !== 'win32'
   let head = posix && isAbsolute(p) ? p : resolve(p)
+  if (remotePath(head) && !head.includes('~')) {
+    return head.replace(/^[\\/]{2}[?.][\\/]UNC[\\/]/i, '\\\\').toLowerCase()
+  }
   const tail = []
   for (;;) {
     try {
@@ -2150,6 +2169,48 @@ function pathKey(p) {
   }
   const out = tail.length ? join(head, ...tail) : head
   return process.platform === 'win32' ? out.toLowerCase() : out
+}
+
+/**
+ * Is `p` on another machine: on Windows, a UNC path to a host that is not this one? A
+ * synchronous call on such a path waits while the host does not answer — 21 s measured
+ * for an address nobody holds — and the guard and recall run on dsh's main thread, so
+ * the whole of dsh would wait. `\\?\C:\…` and `\\.\…` name this machine's own drives and
+ * devices, and a host that is this machine (localHost) the machine itself: those answer
+ * at once, so they are looked up as any path is — a link or a short name there resolves.
+ * (A mapped drive letter, or a local link to a share, cannot be told by its spelling.
+ * Nor is one host under another name the same file: Windows resolves neither
+ * `\\127.0.0.1\c$\x` to `C:\x` nor one server's names to each other, so those were
+ * two keys before this shortcut too.)
+ */
+function remotePath(p) {
+  if (process.platform !== 'win32') return false
+  const host = /^[\\/]{2}(?:[?.][\\/]UNC[\\/])?([^\\/]+)/i.exec(p)?.[1]
+  if (host === undefined || host === '?' || host === '.') return false
+  return !localHost(host)
+}
+
+/**
+ * Does a UNC host name this machine? Its name, also with a domain or a trailing dot; a
+ * loopback address or one of its interfaces', in any spelling a URL takes (`127.1`,
+ * `[::1]`) or as an `ipv6-literal.net` name; a WebDAV `@SSL` / `@port` suffix aside.
+ */
+function localHost(host) {
+  const canonical = (name) => {
+    try {
+      return new URL(`http://${name}/`).hostname
+    } catch {
+      return name
+    }
+  }
+  const name = host.toLowerCase().replace(/@.*$/, '').replace(/\.$/, '')
+  const literal = /^(.+)\.ipv6-literal\.net$/.exec(name)
+  const key = canonical(literal ? `[${literal[1].replace(/s.*$/, '').replace(/-/g, ':')}]` : name)
+  if (key === 'localhost' || key === '[::1]' || /^127\./.test(key)) return true
+  const self = canonical(hostname().toLowerCase())
+  if (key === self || key.split('.')[0] === self.split('.')[0]) return true
+  return Object.values(networkInterfaces()).flat().some((face) => face !== undefined &&
+    canonical(face.address.includes(':') ? `[${face.address.replace(/%.*$/, '')}]` : face.address) === key)
 }
 
 
