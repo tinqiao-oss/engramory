@@ -2,7 +2,7 @@
 
 标志是双链 `[[ ]]` 中间一个光标。`[[ ]]` 是 markdown 笔记里链接另一条笔记的写法，光标表示正在写下一条记忆。动图里它像一本合在左边的书，往右翻过几页，翻开后在光标处打出 `engramory`；最后一个字母 y 落下的同时光标退场，停在 `[[engramory]]`。
 
-标语：**通用 Agent 长期记忆层**（英文 General-purpose long-term memory layer for AI agents）。
+标语：**Agent 通用长期记忆层**（英文 General-purpose long-term memory layer for AI agents）。
 
 ## 颜色
 

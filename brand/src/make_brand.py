@@ -17,7 +17,7 @@ import make_anim as A
 OUT = A.BRAND
 NAVY, MINT, TEAL = A.NAVY, A.MINT, (0x12, 0xA0, 0x7F)
 NAVY_RGB = (0x0F, 0x1B, 0x2D)
-TAGLINE_ZH = "通用 Agent 长期记忆层"
+TAGLINE_ZH = "Agent 通用长期记忆层"
 TAGLINE_EN = "General-purpose long-term memory layer for AI agents"
 REPO_URL = "github.com/tinqiao-oss/engramory"
 
@@ -93,7 +93,7 @@ def text_paths(ttf, text, size, cx, baseline, fill):
 
 
 def social():
-    """GitHub social preview, 1280x640. Tagline decided 2026-10-31: 通用 Agent 长期记忆层."""
+    """GitHub social preview, 1280x640. Tagline decided 2026-10-31: Agent 通用长期记忆层."""
     s = 820 / (LOCK_X1 - LOCK_X0)
     cx, cy = (LOCK_X0 + LOCK_X1) / 2, 32
     body = (f'<rect width="1280" height="640" fill="{NAVY}"/>'

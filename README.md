@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-**通用 Agent 长期记忆层。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw、Kiro 等都能用；一个工具负责写，别的工具可以只读同一个库。
+**Agent 通用长期记忆层。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw、Kiro 等都能用；一个工具负责写，别的工具可以只读同一个库。
 
 **dsh 有专用插件** `dsh-engramory`：装上就能用，每轮自动带上索引，把索引写超上限的写入大多在落盘前就被拦下，侧栏还多一个记忆页。Claude Code 用 hook 拦超限写入；其他工具靠规则加校验脚本。
 
