@@ -1,12 +1,14 @@
 [简体中文](README.md) | **English**
 
+<p align="center"><img src="brand/anim/engramory-merged.gif" alt="Engramory logo animation: a book opens to the right and engramory is typed at the cursor" width="640"></p>
+
 # Engramory
 
 [![CI](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml/badge.svg)](https://github.com/tinqiao-oss/engramory/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-**Long-term memory for AI agents.** What the AI remembers is kept as small markdown
+**A general-purpose long-term memory layer for AI agents.** What the AI remembers is kept as small markdown
 files, one per memory, with a pointer-only index (`MEMORY.md`) that is read at the start
 of every session; a note is opened when its details are needed. No database,
 embeddings, or server; you can read and edit every file yourself. It works with Claude
@@ -24,7 +26,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.0.3.** The store format, the tools and the index caps now change
+> **Status: 1.0.4.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like

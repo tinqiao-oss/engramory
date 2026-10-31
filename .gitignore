@@ -15,3 +15,7 @@ Thumbs.db
 # MEMORY.md at the repo root; the templates/ scaffolds are intentionally kept.
 MEMORY.md
 !templates/MEMORY.md
+
+# brand/src: fonts are downloaded on first run, frames and the Chrome profile are scratch
+brand/src/.fonts/
+brand/src/.cache/

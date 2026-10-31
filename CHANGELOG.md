@@ -6,6 +6,22 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.0.4 — 2026-10-31
+
+A logo and a new first line. How memory is stored, recalled and guarded does not change.
+Most visible first.
+
+- **dsh: the plugin has a new icon** — `[[ ]]` around a cursor, mint on navy, on its card,
+  its page and its component row in dsh's Plugins page. An installed copy shows it after a
+  reinstall; by default the desktop app installs a version only once it has been published
+  for 24 hours, unless you ask for `dsh-engramory@1.0.4`.
+- **README: a new tagline and an animated header** — *A general-purpose long-term memory
+  layer for AI agents* (通用 Agent 长期记忆层), with the logo animation on top.
+- **`brand/`: the logo kit** — the icon (SVG, PNG 16–1024, favicon), the mark and the
+  `[[engramory]]` wordmark for dark and light grounds, a README banner, the GitHub social
+  preview and the animations (GIF + MP4), with the scripts that draw them (`brand/src/`)
+  and the rules for using them (`brand/README.md`).
+
 ## 1.0.3 — 2026-10-31
 
 The rest of the 1.0.2 audit, and one change for chat bridges, each reviewed by GPT and
