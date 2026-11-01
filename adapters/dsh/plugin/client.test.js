@@ -439,7 +439,7 @@ test('client: the memory page lists each store and its notes, a row each by type
   assert.match(textOf(view.tree), new RegExp(zh.listing))
   await view.settle()
   const text = textOf(view.tree)
-  for (const shown of [zh.memoryIntro, zh.storeUser, 'repo · src', '索引 12 / 200 行 · 2.0 KB / 25.0 KB',
+  for (const shown of [zh.panelTitle, zh.storeUser, 'repo · src', '索引 12 / 200 行 · 2.0 KB / 25.0 KB',
     '索引 29.3 KB / 25.0 KB，超出上限', '归档 1 份', zh.stripNote]) {
     assert.ok(text.includes(shown), shown)
   }
@@ -584,7 +584,6 @@ test('client: where dsh cannot open files, the names are text and the page says 
   assert.equal(button(view.tree, 'openIndex'), undefined)
   assert.equal(button(view.tree, 'openFolder'), undefined)
   const text = textOf(view.tree)
-  assert.match(text, /memoryIntroNoOpen/)
   assert.match(text, /openUnavailable/)
   assert.match(text, /E:\\repo\\\.engramory-memory/)
 })

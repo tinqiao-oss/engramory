@@ -78,8 +78,6 @@ window.__ModuleLoader__.load({
       failed: '保存失败：',
       panel: '记忆',
       panelTitle: 'Engramory 记忆',
-      memoryIntro: 'AI 自己记下的东西，这里只看不改。点名字用电脑上的默认程序打开。',
-      memoryIntroNoOpen: 'AI 自己记下的东西，这里只看不改。',
       refresh: '刷新',
       stripNote: '说明和索引上限在「插件 → Engramory 记忆」。',
       stripReadOnly: '这里改不了，见「插件 → Engramory 记忆」。',
@@ -204,8 +202,6 @@ window.__ModuleLoader__.load({
       failed: 'Saving failed: ',
       panel: 'Memory',
       panelTitle: 'Engramory memory',
-      memoryIntro: 'What the AI has noted down for itself — to look at, not to edit. Click a name to open it in your computer\'s default app.',
-      memoryIntroNoOpen: 'What the AI has noted down for itself — to look at, not to edit.',
       refresh: 'Refresh',
       stripNote: 'Explanations and the index cap: Plugins → Engramory memory.',
       stripReadOnly: 'Cannot be changed here; see Plugins → Engramory memory.',
@@ -334,38 +330,41 @@ window.__ModuleLoader__.load({
 .eng-btn-ghost{border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;}
 .eng-btn-small{padding:1px 8px;font-size:11.5px;}
 .eng-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-.eng-memory{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px clamp(24px,4vw,48px) 40px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;}
-[data-platform=darwin] .eng-memory{padding-top:calc(24px + var(--dsh-frame-top-clearance,0px));}
+.eng-memory{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:20px;padding:28px clamp(24px,4vw,48px) 48px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;}
+[data-platform=darwin] .eng-memory{padding-top:calc(28px + var(--dsh-frame-top-clearance,0px));}
 .eng-memory>*{box-sizing:border-box;width:100%;max-width:960px;flex:none;}
 .eng-memory svg{display:block;flex:none;}
-.eng-hero{display:flex;justify-content:space-between;align-items:stretch;flex-wrap:wrap;gap:20px 24px;padding:22px 24px;border-radius:24px;color:#e8f3f0;background:radial-gradient(120% 140% at 100% 0%,#1f4a5a 0%,rgba(31,74,90,0) 55%),linear-gradient(135deg,#0f1b2d 0%,#14263f 100%);box-shadow:0 12px 32px rgba(15,27,45,.18);}
-.eng-hero-main{display:flex;flex-direction:column;gap:18px;flex:1 1 320px;min-width:0;}
-.eng-brand{display:flex;align-items:center;gap:12px;}
-.eng-logo{border-radius:10px;box-shadow:0 0 0 1px rgba(110,231,200,.35);}
-.eng-hero-title{margin:0;font-size:16px;font-weight:600;line-height:22px;}
-.eng-hero-intro{margin:0;font-size:12px;line-height:18px;color:rgba(232,243,240,.62);}
+.eng-hero{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:24px 40px;padding:30px 32px;border-radius:24px;color:#e8f3f0;background:radial-gradient(120% 140% at 100% 0%,#1f4a5a 0%,rgba(31,74,90,0) 55%),linear-gradient(135deg,#0f1b2d 0%,#14263f 100%);box-shadow:0 12px 32px rgba(15,27,45,.18);}
+.eng-hero-main{display:flex;flex-direction:column;gap:24px;flex:1 1 340px;min-width:0;}
+.eng-brand{display:flex;align-items:center;gap:14px;}
+.eng-logo{border-radius:12px;box-shadow:0 0 0 1px rgba(110,231,200,.35);}
+.eng-hero-title{margin:0;font-size:21px;font-weight:600;line-height:28px;letter-spacing:.01em;}
 .eng-stats{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 0;}
 .eng-stat{display:inline-flex;align-items:baseline;gap:6px;}
-.eng-stat+.eng-stat{margin-left:14px;padding-left:14px;border-left:1px solid rgba(232,243,240,.18);}
-.eng-stat b{font-size:36px;line-height:40px;font-weight:600;color:#6ee7c8;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+.eng-stat+.eng-stat{margin-left:18px;padding-left:18px;border-left:1px solid rgba(232,243,240,.18);}
+.eng-stat b{font-size:40px;line-height:44px;font-weight:600;color:#6ee7c8;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
 .eng-stat span{font-size:13px;color:rgba(232,243,240,.75);}
-.eng-hero-read{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:0;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px;line-height:18px;color:rgba(232,243,240,.62);}
-.eng-hero-side{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:10px;}
-.eng-hero .eng-strip{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
-.eng-hero .eng-strip-item{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0 6px 0 12px;border-radius:999px;background:rgba(255,255,255,.07);font-size:12px;}
-.eng-hero .eng-strip-note{margin:0;max-width:300px;text-align:right;font-size:11.5px;line-height:16px;color:rgba(232,243,240,.74);}
-.eng-hero .eng-switch{background:rgba(255,255,255,.24);}
+.eng-hero-foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;}
+.eng-hero-read{display:inline-flex;align-items:center;gap:6px;margin:0;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px;line-height:18px;color:rgba(232,243,240,.62);}
+.eng-hero-side{display:flex;flex-direction:column;flex:0 1 300px;min-width:260px;}
+.eng-hero .eng-strip{display:flex;flex-direction:column;gap:14px;padding:18px 20px;border-radius:18px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);}
+.eng-hero .eng-strip-item{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:30px;font-size:13px;color:rgba(232,243,240,.8);}
+.eng-hero .eng-strip-item:first-child{font-weight:600;color:#e8f3f0;}
+.eng-hero .eng-strip-note{margin:0;font-size:11.5px;line-height:17px;color:rgba(232,243,240,.74);}
+.eng-hero .eng-switch{width:46px;height:26px;background:rgba(255,255,255,.24);}
+.eng-hero .eng-switch::after{top:3px;left:3px;width:20px;height:20px;}
+.eng-hero .eng-switch[aria-checked="true"]::after{transform:translateX(20px);}
 .eng-hero .eng-switch[aria-checked="true"]{background:#6ee7c8;}
 .eng-hero .eng-switch[aria-checked="true"]::after{background:#0f1b2d;}
 .eng-hero .eng-segment{border:0;border-radius:999px;background:rgba(0,0,0,.25);}
-.eng-hero .eng-segment button{border-radius:999px;padding:2px 10px;color:rgba(232,243,240,.62);}
+.eng-hero .eng-segment button{border-radius:999px;padding:3px 14px;font-size:12.5px;line-height:18px;color:rgba(232,243,240,.62);}
 .eng-hero .eng-segment button[aria-pressed="true"]{background:#6ee7c8;color:#0f1b2d;box-shadow:none;}
 .eng-hero .eng-btn,.eng-hero-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid rgba(232,243,240,.22);border-radius:999px;background:transparent;color:#e8f3f0;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;}
 .eng-hero .eng-btn:hover:not(:disabled),.eng-hero-btn:hover{background:rgba(255,255,255,.08);}
 .eng-hero :focus-visible{outline:2px solid #6ee7c8;outline-offset:2px;}
 .eng-caveat{display:flex;align-items:flex-start;gap:8px;margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
 .eng-caveat svg{margin-top:2px;color:var(--dsw-alias-state-warn-label);}
-.eng-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:4px;}
+.eng-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:6px;}
 .eng-tabs{display:flex;flex-wrap:wrap;gap:2px;flex:1 1 auto;min-width:0;}
 .eng-tab{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;cursor:pointer;}
 .eng-tab:hover{background:var(--dsw-alias-interactive-bg-hover);}
@@ -375,7 +374,7 @@ window.__ModuleLoader__.load({
 .eng-search svg{position:absolute;left:10px;pointer-events:none;}
 .eng-search .eng-input{width:100%;height:34px;padding-left:32px;border-radius:10px;font-size:13px;}
 .eng-filter-count,.eng-filter-none{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
-.eng-store{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
+.eng-store{display:flex;flex-direction:column;gap:10px;margin-top:10px;}
 .eng-store-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;}
 .eng-store-title{margin:0;font-size:15px;font-weight:600;line-height:22px;}
 .eng-store-count{font-size:12px;color:var(--dsw-alias-label-tertiary);}
@@ -385,7 +384,7 @@ window.__ModuleLoader__.load({
 .eng-usage{font-size:11.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;}
 .eng-usage[data-over="true"]{color:var(--dsw-alias-state-error-primary);}
 .eng-store-actions{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:2px;}
-.eng-path{margin:-6px 0 0;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}
+.eng-path{margin:-8px 0 0;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}
 .eng-store-ok{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
 .eng-store-ok svg{color:#2bb894;color:color-mix(in srgb,#2bb894 76%,var(--dsw-alias-label-primary));}
 .eng-attn{display:flex;align-items:flex-start;gap:10px;padding:10px 10px 10px 14px;border-radius:14px;background:var(--dsw-alias-state-warn-tertiary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 11%,transparent);}
@@ -823,7 +822,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
 
     /** The project's mark, [[▮]] in mint on its dark tile, as in its icon. */
     function Logo() {
-      return h('svg', { className: 'eng-logo', width: 36, height: 36, viewBox: '0 0 64 64', 'aria-hidden': true, focusable: 'false' },
+      return h('svg', { className: 'eng-logo', width: 44, height: 44, viewBox: '0 0 64 64', 'aria-hidden': true, focusable: 'false' },
         h('rect', { width: 64, height: 64, rx: 14, fill: '#0F1B2D' }),
         h('path', { d: 'M13 17.5H9v29h4M22 17.5h-4v29h4M42 17.5h4v29h-4M51 17.5h4v29h-4', fill: 'none', stroke: '#6EE7C8',
           strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
@@ -835,31 +834,28 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       minute: '2-digit' })
 
     /**
-     * The banner atop the memory page, in the project's own colours on any theme: what the page
-     * is, the listing in three numbers as read at `at`, the two settings that matter most, and
-     * a refresh. Numbers only once there is a listing with something to count.
+     * The banner atop the memory page, in the project's own colours on any theme: its name, the
+     * listing in three numbers as read at `at` with a refresh beside the time, and the two
+     * settings that matter most in a panel of their own. Numbers only once there is a listing
+     * with something to count.
      */
-    function Hero({ data, at, canOpen, refresh, t }) {
+    function Hero({ data, at, refresh, t }) {
       const counted = data !== undefined && (data.stores.length > 0 || data.unreadable > 0)
       const sum = (of) => data.stores.reduce((total, store) => total + of(store), 0)
       const notes = counted ? sum((store) => store.notes.length) : 0
       const stat = (n, label) => h('div', { className: 'eng-stat', key: label }, h('b', null, String(n)), h('span', null, label))
       return h('header', { className: 'eng-hero' },
         h('div', { className: 'eng-hero-main' },
-          h('div', { className: 'eng-brand' },
-            h(Logo),
-            h('div', null,
-              h('h1', { className: 'eng-hero-title' }, t('panelTitle')),
-              h('p', { className: 'eng-hero-intro' }, t(data !== undefined && !canOpen ? 'memoryIntroNoOpen' : 'memoryIntro')))),
+          h('div', { className: 'eng-brand' }, h(Logo), h('h1', { className: 'eng-hero-title' }, t('panelTitle'))),
           counted ? h('div', { className: 'eng-stats' },
             stat(notes, t(notes === 1 ? 'statNote' : 'statNotes')),
             stat(data.stores.length, t(data.stores.length === 1 ? 'statStore' : 'statStores')),
             stat(sum((store) => store.archive.length), t('statArchive'))) : null,
-          data === undefined ? null : h('p', { className: 'eng-hero-read' },
-            icon('clock', 13), t('statsReadAt', { time: timeOf(at) }))),
-        h('div', { className: 'eng-hero-side' },
-          h(SettingsStrip, { t }),
-          h('button', { type: 'button', className: 'eng-hero-btn', onClick: refresh }, icon('refresh', 14), t('refresh'))))
+          h('div', { className: 'eng-hero-foot' },
+            data === undefined ? null : h('p', { className: 'eng-hero-read' },
+              icon('clock', 13), t('statsReadAt', { time: timeOf(at) })),
+            h('button', { type: 'button', className: 'eng-hero-btn', onClick: refresh }, icon('refresh', 14), t('refresh')))),
+        h('div', { className: 'eng-hero-side' }, h(SettingsStrip, { t })))
     }
 
     /** What the numbers leave out — a listing cut short, files or stores it could not read — since
@@ -1149,7 +1145,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         ]
       }
       return h('div', { className: 'eng-memory' },
-        h(Hero, { data, at: state.at, canOpen, refresh: () => { setStatus(undefined); load() }, t }),
+        h(Hero, { data, at: state.at, refresh: () => { setStatus(undefined); load() }, t }),
         data === undefined ? null : h(Caveats, { data, t }),
         status ? h('div', { className: 'eng-banner', 'data-tone': status.tone, role: 'status' }, status.text) : null,
         data !== undefined && !canOpen && data.stores.length > 0 ? h('p', { className: 'eng-note' }, t('openUnavailable')) : null,

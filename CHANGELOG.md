@@ -12,10 +12,11 @@ dsh's memory page is laid out anew: a banner, a tab for each note type, and a ro
 note. What it lists, and how memory is stored, recalled and guarded, do not change; the
 page still reads no note's text.
 
-- **dsh: a banner** in the project's navy and mint, on any theme: how many notes, stores
-  and archived files are listed and when they were read, the two switches (companion
-  mode, and memory access once it is on) and a refresh. What the numbers leave out — a
-  listing cut short, a store or a file that could not be read — is said under it.
+- **dsh: a banner** in the project's navy and mint, on any theme: the project's name and
+  mark; how many notes, stores and archived files are listed and when they were read,
+  with a refresh beside the time; and the two switches (companion mode, and memory access
+  once it is on) in a panel of their own. What the numbers leave out — a listing cut
+  short, a store or a file that could not be read — is said under it.
 - **dsh: a row for each note** — a mark for its type (a line icon in a muted colour of
   the type's own), its name, its type and size, and what stands out: a plan's day (date
   passed and outcome to confirm, today, so many days ahead, no date yet; with its year
