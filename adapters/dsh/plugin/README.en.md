@@ -140,29 +140,30 @@ owner, so a program forwarding other people's messages must leave it out.
   mode, memory access and the index cap. Saving goes through dsh's own profile editor,
   which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
   in, can call it, so an agent cannot use it to switch social mode off.
-- **Memory page:** *Memory* in the sidebar. It lists the global store and each
-  workspace's project store (with an absolute `indexPath`, that store alone; with a
-  relative one, none), with each index's size against the cap, its notes' names
-  by type, and its archive. Each store comes with a check-up: the index's links to
-  files that are not there, the notes not in the index (recall starts from the index, so
-  the AI will not find them unless another note links to them), and notes with no type.
-  It goes by file names and the index's links alone, never through a symbolic link, and
-  is skipped when the index is over the cap, there is too much to check, or a file cannot
-  be read; `engramory_doctor.py` still does the full check.
-  Read-only, never a note's text; a name, *Open the index* and
-  *Open the folder* open on the machine dsh runs on; a machine with no desktop (a
-  headless server, a session over SSH) shows none of them. The switches at the top
-  (companion mode, and memory access once it is on) save as you flip them. Below them
-  is a short *How to use it*, open while there is no memory yet; then an overview (notes
-  by type, archived files, plans, notes past 12 KB, when it was read; it says when the
-  listing was cut short or a store could not be read, rather than counting that as
-  nothing), the plans by where they stand (date passed and outcome to confirm, today,
-  days ahead, undated; a reminder, nothing is archived), and a filter by name. Each
-  store's index fill is a bar (to the nearer of its two caps), and *Copy tidy-up
-  instructions* copies a request for the AI to paste into a conversation; the plugin
-  itself changes no file. Notes past 12 KB are listed as worth splitting. At the foot, where to
-  send feedback: a new GitHub issue (its body pre-filled with the plugin's version and the
-  OS family, no path and no note), or an email, with a button that copies the address.
+- **Memory page:** *Memory* in the sidebar. A banner at the top says how many notes,
+  stores and archived files are listed and when they were read, with the switches
+  (companion mode, and memory access once it is on) that save as you flip them. Below it,
+  tabs by note type and a filter by name, over the global store and each workspace's
+  project store (with an absolute `indexPath`, that store alone; with a relative one,
+  none). Each note is a row: a mark for its type, its name, its type and size; a plan's
+  row gives its day and how far off it is (a passed date is an outcome to confirm, as a
+  reminder: nothing is archived), and a note past 12 KB or one the index leaves out is
+  marked. Beside each store's name: its index fill as a bar (to the nearer of its two
+  caps), *Open the index* and *Open the folder*. What its check-up finds is listed under
+  it: the index's links to files that are not there, the notes not in the index (recall
+  starts from the index, so the AI will not find them unless another note links to
+  them), notes with no type, notes past 12 KB, an index over the cap; *Copy tidy-up
+  instructions* copies a request for the AI to paste into a conversation, and the plugin
+  itself changes no file. The check-up goes by file names and the index's links alone,
+  never through a symbolic link, and is skipped when the index is over the cap, there is
+  too much to check, or a file cannot be read; `engramory_doctor.py` still does the full
+  check. Where the listing was cut short or a store could not be read, the page says so,
+  rather than counting that as nothing. Read-only, never a note's text; a name, *Open
+  the index* and *Open the folder* open on the machine dsh runs on; a machine with no
+  desktop (a headless server, a session over SSH) shows none of them. A short *How to use
+  it* follows, open while there is no memory yet. At the foot, where to send feedback: a
+  new GitHub issue (its body pre-filled with the plugin's version and the OS family, no
+  path and no note), or an email, with a button that copies the address.
 
 ## Configuration
 

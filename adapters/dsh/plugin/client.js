@@ -8,8 +8,11 @@
  *
  * Plain script, no build step, like index.js: React comes from the page's module table,
  * no Harness client package is loaded as a module (dsh's guidance — they change without
- * notice), and every colour is a host theme token, so light, dark and third-party themes
- * follow. Visible text goes through the locale service.
+ * notice), and the colours are the host's theme tokens, so light, dark and third-party themes
+ * follow — but for the memory page's banner, in the project's own navy and mint on any theme,
+ * that mint again in an index's fill bar and a clean check-up's tick, and the note types'
+ * marks, each a muted colour of its own leaned toward the theme's text.
+ * Visible text goes through the locale service.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-engramory',
@@ -27,7 +30,7 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.1.0'
+    const VERSION = '1.2.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -87,9 +90,9 @@ window.__ModuleLoader__.load({
       pinnedRelative: '配置里固定的索引（indexPath）是相对路径，跟着每个会话的目录走，这里列不出来。改成绝对路径就能在这里看到。',
       storeUser: '全局记忆',
       storePinned: '固定的记忆库',
-      usage: '{lines} / {maxLines} 行 · {size} / {maxSize}',
-      usageOver: '{size} / {maxSize}，超出上限',
-      usageSize: '{size} / {maxSize}',
+      usage: '索引 {lines} / {maxLines} 行 · {size} / {maxSize}',
+      usageOver: '索引 {size} / {maxSize}，超出上限',
+      usageSize: '索引 {size} / {maxSize}',
       sizeBytes: '{n} B',
       sizeKB: '{n} KB',
       overHint: '超出上限了，AI 只读得到前面一部分，该压缩了。',
@@ -109,17 +112,15 @@ window.__ModuleLoader__.load({
       typeUpcoming: '约定',
       typeSelf: '我自己',
       typeOther: '其他',
-      group: '{type} · {count}',
-      archive: '归档（{count}）',
+      archive: '归档 {count} 份',
       more: '文件太多，这里只列出了一部分。',
-      healthTitle: '体检',
       healthOk: '体检：没发现问题。',
       healthBroken: '索引里指向不存在的文件（{count}）',
       healthBrokenMore: '索引里指向不存在的文件（{count} 个以上）',
       healthBrokenUnlisted: '索引里有指向不存在的文件，太多了，这里没列出。',
       healthUnindexed: '不在索引里（{count}）：AI 回忆从索引开始，这些它通常找不到，除非别的笔记链到它们。',
       healthUntyped: '没写类型或类型不认识（{count}），列在「其他」里。',
-      healthFix: '可以点上面的「复制整理指令」，粘贴进对话让 AI 整理。完整检查用 engramory_doctor.py。',
+      healthFix: '完整检查可以用 engramory_doctor.py。',
       healthLarge: '要核对的太多，没做体检。',
       healthUnreadable: '有文件读不了，没做体检。',
       healthPartial: '文件太多没列全，没做体检。',
@@ -137,26 +138,37 @@ window.__ModuleLoader__.load({
       copyFailed: '复制不了，请手动选中上面的地址。',
       feedbackNote: '邮件会由 AI 助手协助整理，issue 是公开的，两处都别把记忆内容原样贴上去。插件版本 {version}。',
       issueBody: '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：',
-      overview: '概览',
-      statsNotes: '笔记 {notes} 条 · 归档文件 {archive} 个',
-      listSep: '，',
-      statsUpcoming: '约定：日期已过、结果待确认 {past} · 今天及以后 {ahead} · 未定日期 {undated}',
-      statsLarge: '超过 12 KB 的笔记 {count} 篇，建议拆分',
-      statsReadAt: '读取于 {time}，约定按那时的日期算，点刷新更新。',
+      statNote: '条记忆',
+      statNotes: '条记忆',
+      statStore: '个记忆库',
+      statStores: '个记忆库',
+      statArchive: '份归档',
+      statsReadAt: '读取于 {time}，约定的天数按这时算',
       statsPartial: '列表太长，只列出了一部分，这些数字偏少。',
       statsUnreadable: '有 {count} 处可能存放记忆库的位置没读到（读不了或查不了），没算在内。',
       statsIncomplete: '有的库里有文件读不了，这些数字可能偏少。',
-      upcomingTitle: '约定',
-      upcomingPast: '日期已过，结果待确认',
-      upcomingToday: '就是今天',
-      upcomingTomorrow: '明天',
-      upcomingSoon: '还有 {days} 天',
-      upcomingUndated: '未定日期',
+      typeAll: '全部',
+      typeLabel: '按类型筛选',
+      storeCount: '{count} 条',
+      storeCountOne: '{count} 条',
+      noteMeta: '{type} · {size}',
+      noteUnread: '读不了',
+      archived: '已归档',
+      monthDay: '{m}月{d}日',
+      yearMonthDay: '{y}年{m}月{d}日',
+      badgePast: '{date} · 日期已过，待确认',
+      badgeToday: '就是今天',
+      badgeTomorrow: '{date} · 明天',
+      badgeSoon: '{date} · 还有 {days} 天',
+      badgeUndated: '未定日期',
+      badgeLarge: '偏大，建议拆分',
+      badgeUnindexed: '不在索引里',
+      attnTitle: '可以整理一下',
+      attnLarge: '超过 12 KB 的笔记 {count} 篇：一条笔记该只记一件事，可以让 AI 拆成几篇。',
       filterLabel: '筛选笔记',
       filterPlaceholder: '按名字筛选',
       filterCount: '匹配 {count} 条（只在已列出的笔记里找）',
       filterNone: '这个库里没有匹配的笔记。',
-      largeNotes: '超过 12 KB 的笔记（{count}）：一条笔记该只记一件事，可以让 AI 拆成几篇。',
       tidyCopy: '复制整理指令',
       tidyCopied: '已复制，粘贴进对话发给 AI',
       tidyFailed: '复制不了，请手动选中下面的指令：',
@@ -204,9 +216,9 @@ window.__ModuleLoader__.load({
       pinnedRelative: 'The pinned index (indexPath) is a relative path, which follows each conversation\'s directory, so it cannot be listed here. Pin an absolute path to see it here.',
       storeUser: 'Global memory',
       storePinned: 'Pinned store',
-      usage: '{lines} / {maxLines} lines · {size} / {maxSize}',
-      usageOver: '{size} / {maxSize}, over the cap',
-      usageSize: '{size} / {maxSize}',
+      usage: 'Index {lines} / {maxLines} lines · {size} / {maxSize}',
+      usageOver: 'Index {size} / {maxSize}, over the cap',
+      usageSize: 'Index {size} / {maxSize}',
       sizeBytes: '{n} B',
       sizeKB: '{n} KB',
       overHint: 'Over the cap: the AI reads only the first part. Time to compact it.',
@@ -226,17 +238,15 @@ window.__ModuleLoader__.load({
       typeUpcoming: 'Coming up',
       typeSelf: 'Myself',
       typeOther: 'Other',
-      group: '{type} · {count}',
       archive: 'Archive ({count})',
       more: 'Too many files: only some are listed here.',
-      healthTitle: 'Check-up',
       healthOk: 'Check-up: nothing to fix.',
       healthBroken: 'The index points to files that are not there ({count})',
       healthBrokenMore: 'The index points to files that are not there (over {count})',
       healthBrokenUnlisted: 'The index points to files that are not there: too many to list here.',
       healthUnindexed: 'Not in the index ({count}): recall starts from the index, so the AI will not find these unless another note links to them.',
       healthUntyped: 'No type, or one it does not know ({count}), listed under Other.',
-      healthFix: 'Copy the tidy-up instructions above and paste them into a conversation for the AI to tidy this up. For a full check, run engramory_doctor.py.',
+      healthFix: 'For a full check, run engramory_doctor.py.',
       healthLarge: 'Too much to check here, so no check-up.',
       healthUnreadable: 'Some files could not be read, so no check-up.',
       healthPartial: 'Too many files to list them all, so no check-up here.',
@@ -254,26 +264,37 @@ window.__ModuleLoader__.load({
       copyFailed: 'Could not copy; select the address above by hand.',
       feedbackNote: 'Emails are sorted with the help of an AI assistant, and issues are public: do not paste your memory notes into either. Plugin version {version}.',
       issueBody: '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ',
-      overview: 'Overview',
-      statsNotes: '{notes} notes · {archive} archived files',
-      listSep: ', ',
-      statsUpcoming: 'Coming up: date passed, outcome to confirm {past} · today or ahead {ahead} · no date yet {undated}',
-      statsLarge: '{count} notes past 12 KB, worth splitting',
-      statsReadAt: 'Read at {time}; plans stand as of that day. Refresh to update.',
+      statNote: 'note',
+      statNotes: 'notes',
+      statStore: 'store',
+      statStores: 'stores',
+      statArchive: 'archived',
+      statsReadAt: 'Read at {time}; days to a plan count from then',
       statsPartial: 'The listing was too long to finish, so these numbers fall short.',
       statsUnreadable: '{count} places that may hold a memory store could not be read and are not counted.',
       statsIncomplete: 'Some files in a store could not be read, so these numbers may fall short.',
-      upcomingTitle: 'Coming up',
-      upcomingPast: 'Date passed, outcome to confirm',
-      upcomingToday: 'Today',
-      upcomingTomorrow: 'Tomorrow',
-      upcomingSoon: 'In {days} days',
-      upcomingUndated: 'No date yet',
+      typeAll: 'All',
+      typeLabel: 'Filter by type',
+      storeCount: '{count} notes',
+      storeCountOne: '{count} note',
+      noteMeta: '{type} · {size}',
+      noteUnread: 'Could not be read',
+      archived: 'Archived',
+      monthDay: '{m}/{d}',
+      yearMonthDay: '{y}/{m}/{d}',
+      badgePast: '{date} · passed, outcome to confirm',
+      badgeToday: 'Today',
+      badgeTomorrow: '{date} · tomorrow',
+      badgeSoon: '{date} · in {days} days',
+      badgeUndated: 'No date yet',
+      badgeLarge: 'Large: worth splitting',
+      badgeUnindexed: 'Not in the index',
+      attnTitle: 'Worth tidying up',
+      attnLarge: 'Notes past 12 KB: {count}. A note should hold one fact, and the AI can split these.',
       filterLabel: 'Filter notes',
       filterPlaceholder: 'Filter by name',
       filterCount: '{count} matching (among the notes listed)',
       filterNone: 'No matching notes in this store.',
-      largeNotes: 'Notes past 12 KB ({count}): a note should hold one fact; the AI can split these.',
       tidyCopy: 'Copy tidy-up instructions',
       tidyCopied: 'Copied; paste it into a conversation',
       tidyFailed: 'Could not copy; select the instructions below by hand:',
@@ -305,67 +326,119 @@ window.__ModuleLoader__.load({
 .eng-cap{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .eng-cap label{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;}
 .eng-cap input{width:110px;}
-.eng-btn{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;}
+.eng-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap;}
 .eng-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}
 .eng-btn:disabled{opacity:.5;cursor:default;}
 .eng-btn-primary{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));border-color:transparent;color:var(--dsw-alias-label-primary-foreground,#fff);}
 .eng-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));opacity:.9;}
+.eng-btn-ghost{border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;}
+.eng-btn-small{padding:1px 8px;font-size:11.5px;}
 .eng-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-.eng-memory{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:24px;padding:0 clamp(24px,4vw,48px) 48px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;}
-.eng-memory>*{box-sizing:border-box;width:100%;max-width:960px;}
-.eng-memory-head{box-sizing:border-box;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;padding-top:28px;}
-[data-platform=darwin] .eng-memory-head{padding-top:calc(28px + var(--dsh-frame-top-clearance,0px));}
-.eng-memory-title{margin:0;font-size:20px;font-weight:500;line-height:28px;}
-.eng-memory-intro{margin:4px 0 0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;}
-.eng-strip{box-sizing:border-box;display:flex;align-items:center;flex-wrap:wrap;gap:8px 20px;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg,10px);}
-.eng-strip-item{display:inline-flex;align-items:center;gap:8px;}
-.eng-strip-note{flex:1 1 200px;margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary);}
-.eng-store{display:flex;flex-direction:column;gap:12px;padding-top:20px;border-top:.5px solid var(--dsw-alias-border-l2);}
-.eng-store-head{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;}
-.eng-store-title{margin:0;font-size:14px;font-weight:500;line-height:22px;}
-.eng-usage{font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;}
+.eng-memory{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px clamp(24px,4vw,48px) 40px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;}
+[data-platform=darwin] .eng-memory{padding-top:calc(24px + var(--dsh-frame-top-clearance,0px));}
+.eng-memory>*{box-sizing:border-box;width:100%;max-width:960px;flex:none;}
+.eng-memory svg{display:block;flex:none;}
+.eng-hero{display:flex;justify-content:space-between;align-items:stretch;flex-wrap:wrap;gap:20px 24px;padding:22px 24px;border-radius:24px;color:#e8f3f0;background:radial-gradient(120% 140% at 100% 0%,#1f4a5a 0%,rgba(31,74,90,0) 55%),linear-gradient(135deg,#0f1b2d 0%,#14263f 100%);box-shadow:0 12px 32px rgba(15,27,45,.18);}
+.eng-hero-main{display:flex;flex-direction:column;gap:18px;flex:1 1 320px;min-width:0;}
+.eng-brand{display:flex;align-items:center;gap:12px;}
+.eng-logo{border-radius:10px;box-shadow:0 0 0 1px rgba(110,231,200,.35);}
+.eng-hero-title{margin:0;font-size:16px;font-weight:600;line-height:22px;}
+.eng-hero-intro{margin:0;font-size:12px;line-height:18px;color:rgba(232,243,240,.62);}
+.eng-stats{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 0;}
+.eng-stat{display:inline-flex;align-items:baseline;gap:6px;}
+.eng-stat+.eng-stat{margin-left:14px;padding-left:14px;border-left:1px solid rgba(232,243,240,.18);}
+.eng-stat b{font-size:36px;line-height:40px;font-weight:600;color:#6ee7c8;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+.eng-stat span{font-size:13px;color:rgba(232,243,240,.75);}
+.eng-hero-read{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:0;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px;line-height:18px;color:rgba(232,243,240,.62);}
+.eng-hero-side{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:10px;}
+.eng-hero .eng-strip{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+.eng-hero .eng-strip-item{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0 6px 0 12px;border-radius:999px;background:rgba(255,255,255,.07);font-size:12px;}
+.eng-hero .eng-strip-note{margin:0;max-width:300px;text-align:right;font-size:11.5px;line-height:16px;color:rgba(232,243,240,.74);}
+.eng-hero .eng-switch{background:rgba(255,255,255,.24);}
+.eng-hero .eng-switch[aria-checked="true"]{background:#6ee7c8;}
+.eng-hero .eng-switch[aria-checked="true"]::after{background:#0f1b2d;}
+.eng-hero .eng-segment{border:0;border-radius:999px;background:rgba(0,0,0,.25);}
+.eng-hero .eng-segment button{border-radius:999px;padding:2px 10px;color:rgba(232,243,240,.62);}
+.eng-hero .eng-segment button[aria-pressed="true"]{background:#6ee7c8;color:#0f1b2d;box-shadow:none;}
+.eng-hero .eng-btn,.eng-hero-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid rgba(232,243,240,.22);border-radius:999px;background:transparent;color:#e8f3f0;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;}
+.eng-hero .eng-btn:hover:not(:disabled),.eng-hero-btn:hover{background:rgba(255,255,255,.08);}
+.eng-hero :focus-visible{outline:2px solid #6ee7c8;outline-offset:2px;}
+.eng-caveat{display:flex;align-items:flex-start;gap:8px;margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-caveat svg{margin-top:2px;color:var(--dsw-alias-state-warn-label);}
+.eng-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:4px;}
+.eng-tabs{display:flex;flex-wrap:wrap;gap:2px;flex:1 1 auto;min-width:0;}
+.eng-tab{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;cursor:pointer;}
+.eng-tab:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.eng-tab[aria-pressed="true"]{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary);font-weight:500;}
+.eng-tab-count{font-size:11.5px;font-weight:400;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;}
+.eng-search{position:relative;display:flex;align-items:center;flex:0 1 240px;min-width:160px;color:var(--dsw-alias-label-caption);}
+.eng-search svg{position:absolute;left:10px;pointer-events:none;}
+.eng-search .eng-input{width:100%;height:34px;padding-left:32px;border-radius:10px;font-size:13px;}
+.eng-filter-count,.eng-filter-none{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
+.eng-store{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
+.eng-store-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;}
+.eng-store-title{margin:0;font-size:15px;font-weight:600;line-height:22px;}
+.eng-store-count{font-size:12px;color:var(--dsw-alias-label-tertiary);}
+.eng-meter{display:inline-block;width:56px;height:4px;margin-left:4px;border-radius:999px;background:var(--dsw-alias-border-l2);overflow:hidden;}
+.eng-meter-fill{display:block;height:100%;border-radius:999px;background:#2bb894;background:color-mix(in srgb,#2bb894 76%,var(--dsw-alias-label-primary));}
+.eng-meter[data-over="true"] .eng-meter-fill{background:var(--dsw-alias-state-error-primary);}
+.eng-usage{font-size:11.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;}
 .eng-usage[data-over="true"]{color:var(--dsw-alias-state-error-primary);}
-.eng-store-actions{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:8px;}
-.eng-path{margin:-8px 0 0;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11.5px;line-height:18px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}
-.eng-group{display:flex;flex-direction:column;gap:2px;}
-.eng-group-title{margin:0;font-size:12px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-secondary);}
-.eng-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0 12px;margin:0 -8px;padding:0;list-style:none;}
-.eng-name{display:block;box-sizing:border-box;width:100%;text-align:left;border:0;background:transparent;color:inherit;font:inherit;font-size:13px;line-height:20px;padding:3px 8px;border-radius:var(--dsw-radius-sm,6px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-button.eng-name{cursor:pointer;}
-button.eng-name:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}
-button.eng-name:disabled{cursor:default;opacity:.6;}
-.eng-name:focus-visible,.eng-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
-.eng-archive>summary{cursor:pointer;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
-.eng-archive[open]>summary{margin-bottom:2px;}
-.eng-health{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg,10px);background:var(--dsw-alias-bg-layer-1);}
-.eng-health-item{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
-.eng-howto{box-sizing:border-box;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg,10px);}
-.eng-howto>summary{cursor:pointer;font-size:13px;font-weight:500;line-height:20px;}
-.eng-howto ul{display:flex;flex-direction:column;gap:4px;margin:8px 0 2px;padding-left:18px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
-.eng-feedback{display:flex;flex-direction:column;gap:2px;padding-top:16px;border-top:.5px solid var(--dsw-alias-border-l2);font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary);}
-.eng-feedback p{margin:0;}
+.eng-store-actions{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:2px;}
+.eng-path{margin:-6px 0 0;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}
+.eng-store-ok{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
+.eng-store-ok svg{color:#2bb894;color:color-mix(in srgb,#2bb894 76%,var(--dsw-alias-label-primary));}
+.eng-attn{display:flex;align-items:flex-start;gap:10px;padding:10px 10px 10px 14px;border-radius:14px;background:var(--dsw-alias-state-warn-tertiary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 11%,transparent);}
+.eng-attn>svg{margin-top:2px;color:var(--dsw-alias-state-warn-label);}
+.eng-attn-body{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+.eng-attn-title{margin:0;font-size:12.5px;font-weight:600;line-height:20px;color:var(--dsw-alias-state-warn-label);}
+.eng-attn-item{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-broken{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 0;padding:0;list-style:none;}
+.eng-broken code{padding:0 6px;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover);font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:18px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;}
+.eng-attn>.eng-btn{flex:none;}
+.eng-tidy{display:flex;flex-direction:column;gap:6px;}
+.eng-tidy p{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-tidy textarea{box-sizing:border-box;width:100%;min-height:150px;resize:vertical;font:inherit;font-size:12px;line-height:18px;}
+.eng-list{display:flex;flex-direction:column;padding:4px;border:.5px solid var(--dsw-alias-border-l3);border-radius:16px;}
+.eng-rows{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;}
+.eng-row{box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:6px 10px;border:0;border-radius:12px;background:transparent;color:inherit;font:inherit;text-align:left;}
+button.eng-row{cursor:pointer;}
+button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}
+.eng-row[data-type="user"]{--eng-type:#6f86c6;}
+.eng-row[data-type="feedback"]{--eng-type:#b39a45;}
+.eng-row[data-type="project"]{--eng-type:#4e9a78;}
+.eng-row[data-type="reference"]{--eng-type:#8b78c4;}
+.eng-row[data-type="moment"]{--eng-type:#c07193;}
+.eng-row[data-type="upcoming"]{--eng-type:#c9735c;}
+.eng-row[data-type="self"]{--eng-type:#3f9aa6;}
+.eng-mark{display:grid;place-items:center;width:32px;height:32px;flex:none;border-radius:10px;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l4);color:var(--eng-type,var(--dsw-alias-label-tertiary));color:color-mix(in srgb,var(--eng-type,var(--dsw-alias-label-tertiary)) 80%,var(--dsw-alias-label-primary));}
+.eng-row-text{display:flex;flex-direction:column;flex:1;min-width:0;}
+.eng-name{font-size:13.5px;font-weight:500;line-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.eng-row-meta{font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.eng-badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;max-width:55%;}
+.eng-badge{padding:0 8px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:11.5px;line-height:20px;white-space:nowrap;}
+.eng-badge[data-tone="warn"]{background:var(--dsw-alias-state-warn-tertiary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 14%,transparent);color:var(--dsw-alias-state-warn-label);}
+.eng-badge[data-tone="quiet"]{background:transparent;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l3);color:var(--dsw-alias-label-tertiary);}
+.eng-row-go{color:var(--dsw-alias-label-caption);}
+.eng-archive{border-top:.5px dashed var(--dsw-alias-border-l2);margin-top:4px;padding-top:4px;}
+.eng-list>.eng-archive:first-child{border-top:0;margin-top:0;padding-top:0;}
+.eng-archive>summary{display:flex;align-items:center;gap:12px;min-height:44px;padding:4px 14px 4px 18px;border-radius:12px;cursor:pointer;font-size:12.5px;color:var(--dsw-alias-label-secondary);list-style:none;}
+.eng-archive>summary::-webkit-details-marker{display:none;}
+.eng-archive>summary::after,.eng-howto>summary::after{content:"";margin-left:auto;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);opacity:.55;}
+.eng-archive[open]>summary::after,.eng-howto[open]>summary::after{transform:rotate(45deg);}
+.eng-archive>summary:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.eng-howto{box-sizing:border-box;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:14px;}
+.eng-howto>summary{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;line-height:20px;list-style:none;}
+.eng-howto>summary::-webkit-details-marker{display:none;}
+.eng-howto ul{display:flex;flex-direction:column;gap:4px;margin:10px 0 2px;padding-left:18px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);}
+.eng-feedback{display:flex;flex-direction:column;gap:2px;padding-top:14px;border-top:.5px solid var(--dsw-alias-border-l2);font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary);}
+.eng-feedback p{display:flex;align-items:center;flex-wrap:wrap;margin:0;}
+.eng-feedback p svg{margin-right:6px;color:var(--dsw-alias-label-tertiary);}
 .eng-link{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:2px;}
 .eng-link:hover{opacity:.8;}
 .eng-email{margin:0 8px 0 2px;font-family:var(--ds-font-family-code,ui-monospace,monospace);user-select:all;color:var(--dsw-alias-label-primary);}
-.eng-btn-small{padding:1px 8px;font-size:11.5px;}
 .eng-feedback-note{color:var(--dsw-alias-label-tertiary);}
-.eng-overview,.eng-upcoming{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg,10px);}
-.eng-overview-line{margin:0;font-size:13px;line-height:20px;}
-.eng-overview-note{margin:2px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
-.eng-upcoming-list{display:flex;flex-direction:column;gap:0;margin:4px -8px 0;padding:0;list-style:none;}
-.eng-upcoming-list li{display:flex;align-items:center;gap:12px;}
-.eng-upcoming-list .eng-name{width:auto;max-width:60%;}
-.eng-upcoming-status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap;}
-.eng-upcoming-list li[data-status="past"] .eng-upcoming-status{color:var(--dsw-alias-label-primary);font-weight:600;}
-.eng-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
-.eng-filter input{width:240px;}
-.eng-filter-count,.eng-filter-none{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}
-.eng-meter{display:inline-block;width:96px;height:6px;border-radius:999px;background:var(--dsw-alias-border-l2);overflow:hidden;}
-.eng-meter-fill{display:block;height:100%;border-radius:999px;background:var(--dsw-alias-label-secondary);}
-.eng-meter[data-over="true"] .eng-meter-fill{background:var(--dsw-alias-state-error-primary);}
-.eng-tidy{display:flex;flex-direction:column;gap:6px;}
-.eng-tidy textarea{box-sizing:border-box;width:100%;min-height:150px;resize:vertical;font:inherit;font-size:12px;line-height:18px;}
-.eng-link:focus-visible,.eng-howto>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
+.eng-name:focus-visible,.eng-row:focus-visible,.eng-btn:focus-visible,.eng-tab:focus-visible,.eng-link:focus-visible,.eng-howto>summary:focus-visible,.eng-archive>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
 `
 
     /** The settings the page edits, in the order the host computes its revision from. */
@@ -657,6 +730,8 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     const typeKey = (type) => `type${type[0].toUpperCase()}${type.slice(1)}`
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
     const byName = (a, b) => collator.compare(a, b)
+    /** Notes in the protocol's order of types, then by name. */
+    const byTypeThenName = (a, b) => TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || byName(a.name, b.name)
 
     /** Put `text` on the clipboard; false where there is none (a page over plain http) or it is refused. */
     async function copyText(text) {
@@ -687,25 +762,23 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     }
 
     /**
-     * Every `upcoming` note listed, against today on this computer: a date passed only says
+     * Where an `upcoming` note stands against today on this computer: a date passed only says
      * the outcome is yet to be asked about (SKILL.md §2.2 keeps the note until it is known),
-     * so nothing here is called late or stale. Passed first, then the nearest, then undated.
+     * so nothing here is called late or stale. No date, or no real one, is undated.
      */
-    function upcomingOf(stores, now) {
-      const today = dayNumber(todayOf(now))
-      const items = []
-      for (const store of stores) {
-        for (const note of store.notes) {
-          if (note.type !== 'upcoming') continue
-          const date = dateOf(note.name)
-          const days = date === undefined ? undefined : dayNumber(date) - today
-          const status = days === undefined ? 'undated' : days < 0 ? 'past' : days === 0 ? 'today' : 'ahead'
-          items.push({ store, name: note.name, days, status })
-        }
-      }
-      const rank = { past: 0, today: 1, ahead: 2, undated: 3 }
-      return items.sort((a, b) => rank[a.status] - rank[b.status] || (a.days ?? 0) - (b.days ?? 0) ||
-        byName(a.name, b.name))
+    function planOf(file, now) {
+      const date = dateOf(file)
+      if (date === undefined) return { status: 'undated' }
+      const days = dayNumber(date) - dayNumber(todayOf(now))
+      return { status: days < 0 ? 'past' : days === 0 ? 'today' : 'ahead', days, date }
+    }
+
+    /** A note's name as listed: a plan's date is in its badge, so it is not said again before the name. */
+    function shownName(file, plan) {
+      const name = nameOf(file)
+      if (plan?.date === undefined) return name
+      const rest = name.slice(10).replace(/^[\s_-]+/, '')
+      return rest === '' ? name : rest
     }
 
     /** How full an index is, the nearer of its two caps; its lines only when they were counted. */
@@ -714,54 +787,105 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       return Math.max(lines, index.bytes / cap.maxBytes)
     }
 
-    /** A name, to open where dsh can, as text where it cannot. */
-    function noteName(store, file, archived, canOpen, open) {
-      return canOpen
-        ? h('button', { type: 'button', className: 'eng-name', title: file,
-          onClick: () => open(store, file, archived) }, nameOf(file))
-        : h('span', { className: 'eng-name', title: file }, nameOf(file))
+    /** Line icons on a 24-unit grid, in the current colour: [element, attributes] each. One per
+     * note type (TYPES), drawn alike, so the type's colour tells them apart before the shape does. */
+    const ICONS = {
+      refresh: [['path', { d: 'M20 11a8 8 0 1 0-2.3 5.7' }], ['path', { d: 'M20 4v7h-7' }]],
+      search: [['circle', { cx: 11, cy: 11, r: 7 }], ['path', { d: 'm20 20-3.5-3.5' }]],
+      copy: [['rect', { x: 9, y: 9, width: 11, height: 11, rx: 2 }], ['path', { d: 'M5 15V5a2 2 0 0 1 2-2h8' }]],
+      folder: [['path', { d: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }]],
+      index: [['path', { d: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01' }]],
+      tidy: [['path', { d: 'm4 20 11-11M14 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM19 11l.7 1.3L21 13l-1.3.7L19 15l-.7-1.3L17 13l1.3-.7z' }]],
+      archive: [['rect', { x: 3, y: 4, width: 18, height: 5, rx: 1 }], ['path', { d: 'M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4' }]],
+      alert: [['path', { d: 'M12 4 2.5 20h19z' }], ['path', { d: 'M12 10v4M12 17h.01' }]],
+      clock: [['circle', { cx: 12, cy: 12, r: 8.5 }], ['path', { d: 'M12 7.5V12l3 2' }]],
+      check: [['path', { d: 'm5 12 5 5 9-10' }]],
+      chevron: [['path', { d: 'm9 6 6 6-6 6' }]],
+      book: [['path', { d: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z' }], ['path', { d: 'M4 19V5' }]],
+      issue: [['path', { d: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z' }]],
+      mail: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['path', { d: 'm3 7 9 6 9-6' }]],
+      user: [['circle', { cx: 12, cy: 8.6, r: 3.6 }], ['path', { d: 'M5 19.5c1.2-3.3 3.9-5 7-5s5.8 1.7 7 5z' }]],
+      feedback: [['path', { d: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4 3v-3h-.5a2 2 0 0 1-2-2z' }],
+        ['path', { d: 'm9 10.3 2 2 4-4' }]],
+      project: [['path', { d: 'M12 4 3.5 8.5 12 13l8.5-4.5z' }], ['path', { d: 'm3.5 12.5 8.5 4.5 8.5-4.5M3.5 16.3 12 20.8l8.5-4.5' }]],
+      reference: [['path', { d: 'M7 3.5h10a1 1 0 0 1 1 1v16l-6-3.8-6 3.8v-16a1 1 0 0 1 1-1z' }]],
+      moment: [['path', { d: 'M10 3.5l1.6 4.4L16 9.5l-4.4 1.6L10 15.5l-1.6-4.4L4 9.5l4.4-1.6z' }],
+        ['path', { d: 'M17.5 14v5.5M14.75 16.75h5.5' }]],
+      upcoming: [['rect', { x: 4, y: 5.5, width: 16, height: 14.5, rx: 2.5 }], ['path', { d: 'M4 10h16M8.5 3.5v4M15.5 3.5v4' }],
+        ['circle', { cx: 15.3, cy: 15, r: 1.3, fill: 'currentColor', stroke: 'none' }]],
+      self: [['path', { d: 'M12 19.5s-7-4.3-7-9.6A3.9 3.9 0 0 1 12 7.6a3.9 3.9 0 0 1 7 2.3c0 5.3-7 9.6-7 9.6z' }]],
+      other: [['path', { d: 'M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z' }], ['path', { d: 'M13.5 3.5V9H19' }]],
+    }
+    const icon = (name, size = 16, weight = 1.8) => h('svg', {
+      width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: weight,
+      strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: 'false',
+    }, ...ICONS[name].map(([tag, attributes], i) => h(tag, { key: i, ...attributes })))
+
+    /** The project's mark, [[▮]] in mint on its dark tile, as in its icon. */
+    function Logo() {
+      return h('svg', { className: 'eng-logo', width: 36, height: 36, viewBox: '0 0 64 64', 'aria-hidden': true, focusable: 'false' },
+        h('rect', { width: 64, height: 64, rx: 14, fill: '#0F1B2D' }),
+        h('path', { d: 'M13 17.5H9v29h4M22 17.5h-4v29h4M42 17.5h4v29h-4M51 17.5h4v29h-4', fill: 'none', stroke: '#6EE7C8',
+          strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        h('rect', { x: 27.5, y: 23, width: 9, height: 18, rx: 2.4, fill: '#6EE7C8' }))
+    }
+
+    /** When a listing was read, its day with its time, as this computer shows them. */
+    const timeOf = (at) => new Date(at).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit',
+      minute: '2-digit' })
+
+    /**
+     * The banner atop the memory page, in the project's own colours on any theme: what the page
+     * is, the listing in three numbers as read at `at`, the two settings that matter most, and
+     * a refresh. Numbers only once there is a listing with something to count.
+     */
+    function Hero({ data, at, canOpen, refresh, t }) {
+      const counted = data !== undefined && (data.stores.length > 0 || data.unreadable > 0)
+      const sum = (of) => data.stores.reduce((total, store) => total + of(store), 0)
+      const notes = counted ? sum((store) => store.notes.length) : 0
+      const stat = (n, label) => h('div', { className: 'eng-stat', key: label }, h('b', null, String(n)), h('span', null, label))
+      return h('header', { className: 'eng-hero' },
+        h('div', { className: 'eng-hero-main' },
+          h('div', { className: 'eng-brand' },
+            h(Logo),
+            h('div', null,
+              h('h1', { className: 'eng-hero-title' }, t('panelTitle')),
+              h('p', { className: 'eng-hero-intro' }, t(data !== undefined && !canOpen ? 'memoryIntroNoOpen' : 'memoryIntro')))),
+          counted ? h('div', { className: 'eng-stats' },
+            stat(notes, t(notes === 1 ? 'statNote' : 'statNotes')),
+            stat(data.stores.length, t(data.stores.length === 1 ? 'statStore' : 'statStores')),
+            stat(sum((store) => store.archive.length), t('statArchive'))) : null,
+          data === undefined ? null : h('p', { className: 'eng-hero-read' },
+            icon('clock', 13), t('statsReadAt', { time: timeOf(at) }))),
+        h('div', { className: 'eng-hero-side' },
+          h(SettingsStrip, { t }),
+          h('button', { type: 'button', className: 'eng-hero-btn', onClick: refresh }, icon('refresh', 14), t('refresh'))))
+    }
+
+    /** What the numbers leave out — a listing cut short, files or stores it could not read — since
+     * what was not listed is not counted as nothing. */
+    function Caveats({ data, t }) {
+      const partial = data.more === true || data.stores.some((store) => store.more)
+      // a note or a folder it could not read: the store's check-up says so too
+      const incomplete = data.stores.some((store) => store.health?.checked === false &&
+        store.health.reason === 'unreadable')
+      const lines = [
+        partial ? t('statsPartial') : null,
+        incomplete ? t('statsIncomplete') : null,
+        data.unreadable > 0 ? t('statsUnreadable', { count: data.unreadable }) : null,
+      ].filter((line) => line !== null)
+      return lines.length === 0 ? null
+        : h('p', { className: 'eng-caveat' }, icon('alert', 14), h('span', null, lines.join(' ')))
     }
 
     /**
-     * A store's check-up (index.js checkUp): that nothing was found, what was, or why it
-     * did not run. An index over the cap is not checked, and the page already says so.
+     * One store: where it is, how full its index is (a bar to the nearer of its two caps), what
+     * its check-up (index.js checkUp) found for the AI to tidy up — with the tidy-up instructions
+     * to copy, or to select where there is no clipboard — and its notes, a row each: the type's
+     * mark, the name, the type and size, and what stands out (a plan's day, a note grown past one
+     * fact, one the index leaves out). While the page filters, the rows that match and no more.
      */
-    function Health({ store, names, t }) {
-      const check = store.health
-      if (check === undefined || check === null) return null
-      if (!check.checked) {
-        const reason = { large: 'healthLarge', partial: 'healthPartial', unreadable: 'healthUnreadable' }[check.reason]
-        return reason === undefined ? null : h('p', { className: 'eng-note' }, t(reason))
-      }
-      const untyped = store.notes.filter((note) => note.type === 'other').length
-      // pointers to nothing past what the page is told of are still pointers to nothing
-      const broken = check.broken.length > 0 || check.brokenMore
-      if (!broken && check.unindexed.length === 0 && untyped === 0) {
-        return h('p', { className: 'eng-note' }, t('healthOk'))
-      }
-      return h('section', { className: 'eng-health', 'aria-label': t('healthTitle') },
-        h('h3', { className: 'eng-group-title' }, t('healthTitle')),
-        broken ? h('div', { className: 'eng-group' },
-          h('p', { className: 'eng-health-item' },
-            check.broken.length === 0 ? t('healthBrokenUnlisted')
-              : t(check.brokenMore ? 'healthBrokenMore' : 'healthBroken', { count: check.broken.length })),
-          // what the index says, as it says it: there is no file to open
-          check.broken.length > 0 ? h('ul', { className: 'eng-names' }, check.broken.map((target) => h('li', { key: target },
-            h('span', { className: 'eng-name', title: target }, target)))) : null) : null,
-        check.unindexed.length > 0 ? h('div', { className: 'eng-group' },
-          h('p', { className: 'eng-health-item' }, t('healthUnindexed', { count: check.unindexed.length })),
-          names(check.unindexed, false)) : null,
-        untyped > 0 ? h('p', { className: 'eng-health-item' }, t('healthUntyped', { count: untyped })) : null,
-        h('p', { className: 'eng-note' }, t('healthFix')))
-    }
-
-    /**
-     * One store: where it is, how full its index is (as a bar, the nearer of its two caps), its
-     * check-up, its notes grown past what one fact needs, and its notes' names by type — those
-     * `match` keeps while the page is filtering. Its tidy-up instructions are copied for the
-     * user to hand the AI in a conversation; where there is no clipboard, shown to select.
-     */
-    function StoreSection({ store, cap, canOpen, open, match, t }) {
+    function StoreSection({ store, cap, canOpen, open, match, kind, now, t }) {
       const [tidy, setTidy] = useState('idle')
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
@@ -775,106 +899,128 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         : index.lines !== undefined ? t('usage', { lines: index.lines, maxLines: cap.maxLines, ...sizes })
           : t(index.over ? 'usageOver' : 'usageSize', sizes)
       const fill = index === null ? undefined : fillOf(index, cap)
-      const names = (list, archive) => h('ul', { className: 'eng-names' },
-        [...list].sort(byName).map((file) => h('li', { key: file }, noteName(store, file, archive, canOpen, open))))
+      const filtering = match !== undefined || kind !== undefined
       const keep = (file) => match === undefined || match(file)
-      const groups = TYPES.map((type) => [type, store.notes.filter((note) => note.type === type && keep(note.name))
-        .map((note) => note.name)]).filter(([, list]) => list.length > 0)
-      const archived = store.archive.filter(keep)
-      const large = store.notes.filter((note) => note.bytes > LARGE_NOTE).map((note) => note.name)
+      const notes = store.notes.filter((note) => (kind === undefined || note.type === kind) && keep(note.name))
+        .sort(byTypeThenName)
+      const archived = kind === undefined ? store.archive.filter(keep).sort(byName) : []
+
+      const check = store.health ?? undefined
+      const checked = check?.checked === true
+      const unindexed = new Set(checked ? check.unindexed : [])
+      const untyped = store.notes.filter((note) => note.type === 'other').length
+      const large = store.notes.filter((note) => note.bytes > LARGE_NOTE).length
+      // pointers to nothing past what the page is told of are still pointers to nothing
+      const broken = checked && (check.broken.length > 0 || check.brokenMore)
+      const findings = [
+        index?.over ? h('p', { className: 'eng-attn-item', key: 'over' }, t('overHint')) : null,
+        broken ? h('div', { className: 'eng-attn-item', key: 'broken' },
+          check.broken.length === 0 ? t('healthBrokenUnlisted')
+            : t(check.brokenMore ? 'healthBrokenMore' : 'healthBroken', { count: check.broken.length }),
+          // what the index says, as it says it: there is no file to open
+          check.broken.length > 0 ? h('ul', { className: 'eng-broken' },
+            check.broken.map((target) => h('li', { key: target }, h('code', null, target)))) : null) : null,
+        checked && check.unindexed.length > 0
+          ? h('p', { className: 'eng-attn-item', key: 'unindexed' }, t('healthUnindexed', { count: check.unindexed.length })) : null,
+        checked && untyped > 0 ? h('p', { className: 'eng-attn-item', key: 'untyped' }, t('healthUntyped', { count: untyped })) : null,
+        large > 0 ? h('p', { className: 'eng-attn-item', key: 'large' }, t('attnLarge', { count: large })) : null,
+      ].filter((finding) => finding !== null)
+      // while filtering, the names that match and nothing else: the findings come back after
+      const attention = !filtering && findings.length > 0
+      // a check-up that did not run says why, except past the cap, which the findings say already
+      const unchecked = check === undefined || check === null || check.checked ? undefined
+        : { large: 'healthLarge', partial: 'healthPartial', unreadable: 'healthUnreadable' }[check.reason]
+
       const prompt = t('tidyPrompt', { dir: store.dir })
       const copyTidy = async () => {
         const done = await copyText(prompt)
         if (alive.current) setTidy(done ? 'copied' : 'failed')
       }
-      return h('section', { className: 'eng-store' },
+      // one per store: in the findings where there are any, else among the store's own actions
+      const tidyButton = (className) => h('button', { type: 'button', className, onClick: copyTidy },
+        icon('tidy', 14), t(tidy === 'copied' ? 'tidyCopied' : 'tidyCopy'))
+
+      const planText = (plan) => {
+        if (plan.status === 'undated') return t('badgeUndated')
+        if (plan.status === 'today') return t('badgeToday')
+        // the year where it is not this one, so last year's plan is not taken for this year's
+        const year = Number(plan.date.slice(0, 4))
+        const day = { m: Number(plan.date.slice(5, 7)), d: Number(plan.date.slice(8, 10)) }
+        const date = year === new Date(now).getFullYear() ? t('monthDay', day) : t('yearMonthDay', { y: year, ...day })
+        return plan.status === 'past' ? t('badgePast', { date })
+          : plan.days === 1 ? t('badgeTomorrow', { date }) : t('badgeSoon', { date, days: plan.days })
+      }
+      /** A note's row, or an archived file's (no note given): to open where dsh can, else text. */
+      const row = (file, note) => {
+        const type = note === undefined ? 'archive' : note.type
+        const plan = type === 'upcoming' ? planOf(file, now) : undefined
+        const meta = note === undefined ? t('archived')
+          : note.unread ? t('noteUnread')
+            : note.bytes === undefined ? t(typeKey(type))
+              : t('noteMeta', { type: t(typeKey(type)), size: sizeOf(t, note.bytes) })
+        const badges = [
+          plan === undefined ? null : h('span', { className: 'eng-badge', key: 'plan',
+            'data-tone': plan.status === 'past' ? 'warn' : plan.status === 'undated' ? 'quiet' : undefined }, planText(plan)),
+          note?.bytes > LARGE_NOTE ? h('span', { className: 'eng-badge', 'data-tone': 'warn', key: 'large' }, t('badgeLarge')) : null,
+          note !== undefined && unindexed.has(file) ? h('span', { className: 'eng-badge', key: 'unindexed' }, t('badgeUnindexed')) : null,
+        ].filter((badge) => badge !== null)
+        const parts = [
+          h('span', { className: 'eng-mark', key: 'mark' }, icon(Object.hasOwn(ICONS, type) ? type : 'other', 18, 1.6)),
+          h('span', { className: 'eng-row-text', key: 'text' },
+            h('span', { className: 'eng-name' }, shownName(file, plan)),
+            h('span', { className: 'eng-row-meta' }, meta)),
+          badges.length > 0 ? h('span', { className: 'eng-badges', key: 'badges' }, badges) : null,
+          canOpen ? h('span', { className: 'eng-row-go', key: 'go' }, icon('chevron', 14)) : null,
+        ]
+        const props = { className: 'eng-row', 'data-type': type, title: file }
+        return h('li', { key: file }, canOpen
+          ? h('button', { type: 'button', ...props, onClick: () => open(store, file, note === undefined) }, ...parts)
+          : h('div', props, ...parts))
+      }
+      const archive = archived.length === 0 ? null
+        : h('details', { className: 'eng-archive', open: match === undefined ? undefined : true },
+          h('summary', null, icon('archive', 16), h('span', null, t('archive', { count: archived.length }))),
+          h('ul', { className: 'eng-rows' }, archived.map((file) => row(file, undefined))))
+
+      return h('section', { className: 'eng-store', 'aria-label': title },
         h('div', { className: 'eng-store-head' },
           h('h2', { className: 'eng-store-title' }, title),
+          h('span', { className: 'eng-store-count' },
+            t(store.notes.length === 1 ? 'storeCountOne' : 'storeCount', { count: store.notes.length })),
           // the nearer cap, whichever it is; over it, full and marked, not a bar that stops at the edge
           fill === undefined ? null : h('span', { className: 'eng-meter', 'data-over': index.over === true || fill > 1,
             'aria-hidden': true },
           h('span', { className: 'eng-meter-fill', style: { width: `${Math.min(100, Math.floor(fill * 100))}%` } })),
           h('span', { className: 'eng-usage', 'data-over': index?.over === true, title: index?.over ? t('overHint') : undefined }, usage),
           h('div', { className: 'eng-store-actions' },
-            h('button', { type: 'button', className: 'eng-btn', onClick: copyTidy },
-              t(tidy === 'copied' ? 'tidyCopied' : 'tidyCopy')),
+            attention ? null : tidyButton('eng-btn eng-btn-ghost'),
             // the folder is shown with its index selected: no index, no folder to show
             ...(canOpen && index !== null ? [
-              h('button', { type: 'button', className: 'eng-btn', key: 'index',
-                onClick: () => open(store, index.name, false) }, t('openIndex')),
-              h('button', { type: 'button', className: 'eng-btn', key: 'folder',
-                onClick: () => open(store, undefined, false) }, t('openFolder'))] : []))),
+              h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', key: 'index',
+                onClick: () => open(store, index.name, false) }, icon('index', 14), t('openIndex')),
+              h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', key: 'folder',
+                onClick: () => open(store, undefined, false) }, icon('folder', 14), t('openFolder'))] : []))),
         h('p', { className: 'eng-path' }, store.dir),
+        !filtering && checked && findings.length === 0
+          ? h('p', { className: 'eng-store-ok' }, icon('check', 13), t('healthOk')) : null,
+        attention ? h('div', { className: 'eng-attn', role: 'note' },
+          icon('alert', 16),
+          h('div', { className: 'eng-attn-body' },
+            h('h3', { className: 'eng-attn-title' }, t('attnTitle')),
+            ...findings,
+            h('p', { className: 'eng-attn-item', key: 'doctor' }, t('healthFix'))),
+          tidyButton('eng-btn')) : null,
         tidy === 'failed' ? h('div', { className: 'eng-tidy', role: 'status' },
-          h('p', { className: 'eng-health-item' }, t('tidyFailed')),
+          h('p', null, t('tidyFailed')),
           h('textarea', { readOnly: true, value: prompt, 'aria-label': t('tidyCopy'),
             onFocus: (event) => event.target.select() })) : null,
-        index?.over ? h('p', { className: 'eng-note' }, t('overHint')) : null,
-        // while filtering, the names that match and nothing else: the check-up comes back after
-        match === undefined ? h(Health, { store, names, t }) : null,
-        match === undefined && large.length > 0 ? h('div', { className: 'eng-group' },
-          h('p', { className: 'eng-health-item' }, t('largeNotes', { count: large.length })),
-          names(large, false)) : null,
-        ...groups.map(([type, list]) => h('div', { className: 'eng-group', key: type },
-          h('h3', { className: 'eng-group-title' }, t('group', { type: t(typeKey(type)), count: list.length })),
-          names(list, false))),
-        archived.length > 0 ? h('details', { className: 'eng-archive', open: match === undefined ? undefined : true },
-          h('summary', null, t('archive', { count: archived.length })),
-          names(archived, true)) : null,
-        match !== undefined && groups.length === 0 && archived.length === 0
+        !filtering && unchecked !== undefined ? h('p', { className: 'eng-note' }, t(unchecked)) : null,
+        notes.length > 0 || archive !== null ? h('div', { className: 'eng-list' },
+          notes.length > 0 ? h('ul', { className: 'eng-rows' }, notes.map((note) => row(note.name, note))) : null,
+          archive) : null,
+        filtering && notes.length === 0 && archived.length === 0
           ? h('p', { className: 'eng-filter-none' }, t('filterNone')) : null,
         store.more ? h('p', { className: 'eng-note' }, t('more')) : null)
-    }
-
-    /** When a listing was read, its day with its time, as this computer shows them. */
-    const timeOf = (at) => new Date(at).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit',
-      minute: '2-digit' })
-
-    /**
-     * The listing in numbers, as read at `at`: notes by type, archived files, plans, notes past
-     * the size one fact needs — and whether that is all there is (a listing cut short, stores
-     * that could not be read), since what was not listed is not counted as nothing.
-     */
-    function Overview({ data, at, upcoming, t }) {
-      const notes = data.stores.flatMap((store) => store.notes)
-      const archive = data.stores.reduce((sum, store) => sum + store.archive.length, 0)
-      // a note it could not read has no type to count: the counts say the store was read in part
-      const types = TYPES.map((type) => [type, notes.filter((note) => note.type === type && !note.unread).length])
-        .filter(([, count]) => count > 0)
-      const large = notes.filter((note) => note.bytes > LARGE_NOTE).length
-      const partial = data.more === true || data.stores.some((store) => store.more)
-      // a note or a folder it could not read: the check-up says so, and the counts may fall short
-      const incomplete = data.stores.some((store) => store.health?.checked === false &&
-        store.health.reason === 'unreadable')
-      const count = (...statuses) => upcoming.filter((item) => statuses.includes(item.status)).length
-      return h('section', { className: 'eng-overview', 'aria-label': t('overview') },
-        h('h2', { className: 'eng-store-title' }, t('overview')),
-        h('p', { className: 'eng-overview-line' }, t('statsNotes', { notes: notes.length, archive })),
-        types.length > 0 ? h('p', { className: 'eng-overview-line' },
-          types.map(([type, n]) => t('group', { type: t(typeKey(type)), count: n })).join(t('listSep'))) : null,
-        upcoming.length > 0 ? h('p', { className: 'eng-overview-line' },
-          t('statsUpcoming', { past: count('past'), ahead: count('today', 'ahead'), undated: count('undated') })) : null,
-        large > 0 ? h('p', { className: 'eng-overview-line' }, t('statsLarge', { count: large })) : null,
-        h('p', { className: 'eng-overview-note' }, [
-          t('statsReadAt', { time: timeOf(at) }),
-          partial ? t('statsPartial') : null,
-          incomplete ? t('statsIncomplete') : null,
-          data.unreadable > 0 ? t('statsUnreadable', { count: data.unreadable }) : null,
-        ].filter((text) => text !== null).join(' ')))
-    }
-
-    /** The plans listed, by where they stand against today, names to open as everywhere else. */
-    function UpcomingBoard({ items, canOpen, open, t }) {
-      const status = (item) => (item.status === 'past' ? t('upcomingPast')
-        : item.status === 'today' ? t('upcomingToday')
-          : item.status === 'undated' ? t('upcomingUndated')
-            : item.days === 1 ? t('upcomingTomorrow') : t('upcomingSoon', { days: item.days }))
-      return h('section', { className: 'eng-upcoming', 'aria-label': t('upcomingTitle') },
-        h('h2', { className: 'eng-store-title' }, t('upcomingTitle')),
-        h('ul', { className: 'eng-upcoming-list' }, items.map((item) => h('li', { key: `${item.store.id}/${item.name}`,
-          'data-status': item.status },
-        noteName(item.store, item.name, false, canOpen, open),
-        h('span', { className: 'eng-upcoming-status' }, status(item))))))
     }
 
     /** A store with anything in it: an index with text, a note, an archived note. A folder or an
@@ -889,7 +1035,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
     /** How to use it, in a few lines: open while there is no memory yet, folded once there is. */
     function HowTo({ open, t }) {
       return h('details', { className: 'eng-howto', open },
-        h('summary', null, t('howTo')),
+        h('summary', null, icon('book', 15), t('howTo')),
         h('ul', null, HOW_TO.map((key) => h('li', { key }, t(key)))))
     }
 
@@ -916,6 +1062,7 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       const href = `${ISSUES}?body=${encodeURIComponent(t('issueBody', { version: VERSION, os: osName() }))}`
       return h('footer', { className: 'eng-feedback' },
         h('p', null,
+          icon('issue', 14),
           t('feedbackLead'),
           h('a', { className: 'eng-link', href, target: '_blank', rel: 'noopener noreferrer' }, t('feedbackIssue')),
           t('feedbackMail'),
@@ -926,11 +1073,15 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
         h('p', { className: 'eng-feedback-note' }, t('feedbackNote', { version: VERSION })))
     }
 
-    /** The sidebar's Memory page: the stores recall can use, by name, and two settings. */
+    /**
+     * The sidebar's Memory page: a banner with the listing's numbers and two settings, then the
+     * stores recall can use, their notes a row each, by type and by name as the user filters.
+     */
     function MemoryPage({ t }) {
       const { state, load } = useMemory()
       const [status, setStatus] = useState(undefined)
       const [query, setQuery] = useState('')
+      const [kind, setKind] = useState(undefined)
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
 
@@ -955,6 +1106,10 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
 
       const data = state.phase === 'ready' ? state.data : undefined
       const canOpen = data?.canOpen === true
+      // a type a refresh left with nothing is no longer a filter, nor one again when it returns
+      const present = data === undefined || kind === undefined ||
+        data.stores.some((store) => store.notes.some((note) => note.type === kind))
+      useEffect(() => { if (!present) setKind(undefined) }, [present])
       // a name filter over what was listed: case- and width-insensitive, the .md left out
       const needle = query.trim().normalize('NFKC').toLowerCase()
       const match = needle === '' ? undefined
@@ -963,39 +1118,44 @@ button.eng-name:disabled{cursor:default;opacity:.6;}
       if (state.phase === 'loading') body = h('p', { className: 'eng-note' }, t('listing'))
       else if (state.phase === 'error') body = h('div', { className: 'eng-banner', 'data-tone': 'error' }, t(state.reason))
       else {
-        const upcoming = upcomingOf(data.stores, state.at)
-        const listed = data.stores.some((store) => store.notes.length + store.archive.length > 0)
-        const matched = match === undefined ? 0 : data.stores.reduce((sum, store) =>
-          sum + store.notes.filter((note) => match(note.name)).length + store.archive.filter(match).length, 0)
+        const notes = data.stores.flatMap((store) => store.notes)
+        const archived = data.stores.reduce((sum, store) => sum + store.archive.length, 0)
+        const counts = TYPES.map((type) => [type, notes.filter((note) => note.type === type).length])
+          .filter(([, count]) => count > 0)
+        const shown = present ? kind : undefined
+        const tab = (type, label, count) => h('button', { type: 'button', className: 'eng-tab', key: type ?? 'all',
+          'data-type': type ?? 'all', 'aria-pressed': shown === type, onClick: () => setKind(type) },
+        label, h('span', { className: 'eng-tab-count' }, String(count)))
+        const matched = match === undefined ? 0 : data.stores.reduce((sum, store) => sum +
+          store.notes.filter((note) => (shown === undefined || note.type === shown) && match(note.name)).length +
+          (shown === undefined ? store.archive.filter(match).length : 0), 0)
         body = [
           data.pinned === 'relative' ? h('p', { className: 'eng-note', key: 'pinned' }, t('pinnedRelative')) : null,
           data.stores.length === 0 && data.pinned === undefined && !(data.unreadable > 0) && data.more !== true
             ? h('p', { className: 'eng-note', key: 'empty' }, t('empty')) : null,
-          data.stores.length > 0 || data.unreadable > 0
-            ? h(Overview, { key: 'overview', data, at: state.at, upcoming, t }) : null,
-          upcoming.length > 0 ? h(UpcomingBoard, { key: 'upcoming', items: upcoming, canOpen, open, t }) : null,
-          listed ? h('div', { className: 'eng-filter', key: 'filter' },
-            h('input', { type: 'search', className: 'eng-input', value: query, placeholder: t('filterPlaceholder'),
-              'aria-label': t('filterLabel'), onChange: (event) => setQuery(event.target.value) }),
-            match === undefined ? null : h('p', { className: 'eng-filter-count', role: 'status', 'aria-live': 'polite' },
-              t('filterCount', { count: matched })))
-            : null,
-          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, match, t })),
+          notes.length + archived > 0 ? h('div', { className: 'eng-toolbar', key: 'toolbar' },
+            h('div', { className: 'eng-tabs', role: 'group', 'aria-label': t('typeLabel') },
+              tab(undefined, t('typeAll'), notes.length),
+              ...counts.map(([type, count]) => tab(type, t(typeKey(type)), count))),
+            h('label', { className: 'eng-search' },
+              icon('search', 15),
+              h('input', { type: 'search', className: 'eng-input', value: query, placeholder: t('filterPlaceholder'),
+                'aria-label': t('filterLabel'), onChange: (event) => setQuery(event.target.value) }))) : null,
+          match === undefined ? null : h('p', { className: 'eng-filter-count', key: 'count', role: 'status',
+            'aria-live': 'polite' }, t('filterCount', { count: matched })),
+          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, match,
+            kind: shown, now: state.at, t })),
           data.more ? h('p', { className: 'eng-note', key: 'more' }, t('more')) : null,
         ]
       }
       return h('div', { className: 'eng-memory' },
-        h('header', { className: 'eng-memory-head' },
-          h('div', null,
-            h('h1', { className: 'eng-memory-title' }, t('panelTitle')),
-            h('p', { className: 'eng-memory-intro' }, t(data !== undefined && !canOpen ? 'memoryIntroNoOpen' : 'memoryIntro'))),
-          h('button', { type: 'button', className: 'eng-btn', onClick: () => { setStatus(undefined); load() } }, t('refresh'))),
-        h(SettingsStrip, { t }),
+        h(Hero, { data, at: state.at, canOpen, refresh: () => { setStatus(undefined); load() }, t }),
+        data === undefined ? null : h(Caveats, { data, t }),
         status ? h('div', { className: 'eng-banner', 'data-tone': status.tone, role: 'status' }, status.text) : null,
         data !== undefined && !canOpen && data.stores.length > 0 ? h('p', { className: 'eng-note' }, t('openUnavailable')) : null,
+        body,
         h(HowTo, { open: data !== undefined && data.pinned !== 'relative' && data.more !== true &&
           !(data.unreadable > 0) && !data.stores.some((store) => hasMemory(store) || readInPart(store)), t }),
-        body,
         h(Feedback, { t }))
     }
 

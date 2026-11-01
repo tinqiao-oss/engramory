@@ -6,6 +6,31 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.2.0 — 2026-11-01
+
+dsh's memory page is laid out anew: a banner, a tab for each note type, and a row for each
+note. What it lists, and how memory is stored, recalled and guarded, do not change; the
+page still reads no note's text.
+
+- **dsh: a banner** in the project's navy and mint, on any theme: how many notes, stores
+  and archived files are listed and when they were read, the two switches (companion
+  mode, and memory access once it is on) and a refresh. What the numbers leave out — a
+  listing cut short, a store or a file that could not be read — is said under it.
+- **dsh: a row for each note** — a mark for its type (a line icon in a muted colour of
+  the type's own), its name, its type and size, and what stands out: a plan's day (date
+  passed and outcome to confirm, today, so many days ahead, no date yet; with its year
+  when not this one, and no longer repeated before its name), a note past 12 KB, a note
+  the index leaves out, a note that could not be read. Archived files fold under their
+  store's list.
+- **dsh: tabs by note type** beside the name filter, each with its count; the two
+  together keep what matches both.
+- **dsh: what to tidy up, by store** — links to nothing, notes out of the index, untyped
+  notes, notes past 12 KB and an index over its cap are listed together, with the
+  store's *Copy tidy-up instructions* beside them; a clean check-up is one line. The
+  overview and the plans board of 1.1.0 give way to the banner and the rows.
+  By default the desktop app installs a version only once it has been published for 24
+  hours, unless you ask for `dsh-engramory@1.2.0`.
+
 ## 1.1.0 — 2026-11-01
 
 dsh's memory page counts what it lists, shows the plans, and copies tidy-up instructions
