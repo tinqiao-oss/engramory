@@ -30,7 +30,7 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.2.0'
+    const VERSION = '1.3.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */

@@ -16,7 +16,7 @@ Code, Codex, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 OpenClaw, Kiro and others; one agent writes a store, and others can read it.
 
 **dsh has a dedicated plugin**, `dsh-engramory`: it works once installed, brings the
-index into context on every step, refuses most writes that would grow the index past
+index into the conversation, refuses most writes that would grow the index past
 its cap before they land, and adds a Memory page to the sidebar. On Claude Code a hook
 refuses those writes; other tools rely on the rules plus a checker.
 
@@ -26,7 +26,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.2.0.** The store format, the tools and the index caps now change
+> **Status: 1.3.0.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like

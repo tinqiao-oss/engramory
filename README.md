@@ -10,13 +10,13 @@
 
 **Agent 通用长期记忆层。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw、Kiro 等都能用；一个工具负责写，别的工具可以只读同一个库。
 
-**dsh 有专用插件** `dsh-engramory`：装上就能用，每轮自动带上索引，把索引写超上限的写入大多在落盘前就被拦下，侧栏还多一个记忆页。Claude Code 用 hook 拦超限写入；其他工具靠规则加校验脚本。
+**dsh 有专用插件** `dsh-engramory`：装上就能用，自动带上索引，把索引写超上限的写入大多在落盘前就被拦下，侧栏还多一个记忆页。Claude Code 用 hook 拦超限写入；其他工具靠规则加校验脚本。
 
 > 名字来自 *engram*（记忆痕迹）+ *memory*。本项目是 `tinqiao-oss/engramory`（dsh 插件的 npm 包叫 `dsh-engramory`），与其他所有者名下的同名仓库无关。
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.2.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
+> **状态:1.3.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ## 长什么样
 

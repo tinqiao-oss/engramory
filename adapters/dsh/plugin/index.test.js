@@ -58,11 +58,40 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt,
     name: 'engramory fiber',
     ...(rowId === undefined ? {} : { entry: { id: `include:${rowId}`, options: { id: rowId } } }),
   }
+  // Cordis' event listeners: `prepend` puts one ahead of those already there.
+  const listeners = new Map()
+  const on = (event, listener, options) => {
+    const list = listeners.get(event) ?? []
+    if (options?.prepend === true) list.unshift(listener)
+    else list.push(listener)
+    listeners.set(event, list)
+    return () => { if (list.includes(listener)) list.splice(list.indexOf(listener), 1) }
+  }
+  // A dsh waterfall: each listener gets the payload and the rest of the chain; at its end,
+  // what dsh does on its own.
+  const waterfall = (event, args, end) => {
+    const list = [...(listeners.get(event) ?? [])]
+    const run = (i) => (i < list.length ? list[i](...args, () => run(i + 1)) : Promise.resolve(end()))
+    return run(0)
+  }
+  const signal = new AbortController().signal
+  // `system-prompt/assemble`: over the assembly of the runtime contexts dsh will use.
+  const assemble = (assembly, context) => waterfall('system-prompt/assemble', [assembly, context], () => assembly)
+  // `agent/pre-step`: the step goes ahead with the messages it has queued.
+  const preStep = (agent, queued = []) => waterfall('agent/pre-step', [{ agent, turn: 1, step: 1, messages: queued, signal }],
+    () => ({ kind: 'enter', messages: [...queued] }))
+  // `agent/request-error`: what dsh does about a failed request — `action` from its own
+  // listeners (a compaction's retry), none by default.
+  const requestError = (agent, action) => waterfall('agent/request-error',
+    [{ agent, turn: 1, step: 1, failure: { code: 'CONTEXT_WINDOW_EXCEEDED' }, signal }], () => action)
+  const host = { assemble, preStep, requestError }
+  if (systemPrompt !== null && typeof systemPrompt === 'object') Object.assign(systemPrompt, host)
   const makeCtx = (declared) => new Proxy({}, {
     get(_, prop) {
       if (prop === 'fiber') return fiber
       if (prop === 'get') return (name) => services[name]
       if (prop === 'effect') return (fn) => fn()
+      if (prop === 'on') return on
       if (prop === 'inject') {
         return (deps, callback) => {
           const attempt = () => {
@@ -83,12 +112,13 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt,
   // order between unrelated providers is not guaranteed on a real boot.
   const mountLate = (name, service) => {
     services[name] = service
+    if (name === 'systemPrompt' && service !== null && typeof service === 'object') Object.assign(service, host)
     for (let i = pending.length - 1; i >= 0; i--) {
       if (pending[i]()) pending.splice(i, 1)
     }
   }
   const mountSkillsLate = () => mountLate('skills', skillRegistry)
-  return { guard, skills, mountSkillsLate, mountLate, fiber, projections }
+  return { guard, skills, mountSkillsLate, mountLate, fiber, projections, listeners, ...host }
 }
 
 /**
@@ -112,28 +142,81 @@ function projectionRegistry() {
 /** dsh 0.2's per-session directory owner: `get(session)` is its synchronous read. */
 const sessionDirs = () => ({ get: (session) => session.cwd })
 
-/** dsh's prompt registry, keeping every runtime context registered on it. */
+/**
+ * dsh's prompt registry, keeping every runtime context registered on it — and, once the
+ * plugin is mounted with it, a step as dsh takes one (`preStep`, set by mount()).
+ */
 const promptRegistry = () => {
   const contexts = []
-  // What reaches the model: every non-empty context in order; with `optionalOff`, as under
-  // a persona preset that turns optional runtime context off, only the required ones.
+  // The runtime context as dsh renders it: every non-empty context in order; with
+  // `optionalOff`, as under a persona preset that turns optional runtime context off, only
+  // the required ones (dsh resolves no other).
   const render = (context, { optionalOff = false } = {}) => contexts
     .filter((spec) => !optionalOff || spec.required === true)
     .map((spec) => spec.text(context)).filter(Boolean).join('\n\n')
-  return { contexts, render, context: (spec) => { contexts.push(spec); return () => {} } }
+  const registry = { contexts, render, context: (spec) => { contexts.push(spec); return () => {} } }
+  // A step's assembly as dsh makes it: the runtime contexts it will use, resolved, through
+  // the `system-prompt/assemble` waterfall.
+  registry.assembleFor = (context, { optionalOff = false } = {}) => registry.assemble({
+    contexts: contexts.filter((spec) => !optionalOff || spec.required === true)
+      .map((spec) => ({ name: spec.name, text: spec.text(context) })),
+  }, context)
+  // One step: its assembly, the `agent/pre-step` waterfall, then the refresh of the
+  // runtime context dsh makes before the request (no waterfall). The plugin's index
+  // messages the step delivers; with `commit`, every message it delivers joins the
+  // session's events as dsh commits it, for the projections to fold next step.
+  registry.sent = async (context, { optionalOff = false, commit = false } = {}) => {
+    await registry.assembleFor(context, { optionalOff })
+    const decision = await registry.preStep(context?.agent)
+    render(context, { optionalOff })
+    const messages = decision?.kind === 'enter' ? decision.messages : []
+    if (commit) for (const message of messages) committed(context.agent.session, message)
+    return messages.filter((m) => m?.source?.kind === 'engramory')
+  }
+  // The index the step sends, without the message's head ('' for none).
+  registry.recall = async (context, options) => (await registry.sent(context, options))
+    .map((m) => withoutHead(m.content[0].text)).join('\n\n')
+  // All the plugin puts before the model on a step: the runtime context, then the message.
+  registry.seen = async (context, options) => {
+    const shown = render(context, options)
+    const sent = (await registry.sent(context, options)).map((m) => m.content[0].text)
+    return [shown, ...sent].filter(Boolean).join('\n\n')
+  }
+  return registry
 }
 
-/** Run `fn` with `$DSH_HOME` set to `home` (or unset), then put it back. */
+/** The index message's head, which says it replaces earlier ones, in either language. */
+const RECALL_HEADS = ['Engramory memory index, as it stands now', 'Engramory 记忆索引，现在的样子']
+const withoutHead = (text) => (RECALL_HEADS.some((h) => text.startsWith(h))
+  ? text.slice(text.indexOf('\n\n') + 2)
+  : text)
+
+/** One message dsh commits for a step: a `user/message` event appended to the session's log. */
+function committed(session, message) {
+  session.events ??= []
+  const seq = session.events.reduce((last, e) => Math.max(last, e.seq ?? -1), -1) + 1
+  session.events.push({ type: 'user/message', seq, data: message, surfaceOp: 'append' })
+}
+
+/** Run `fn` with `$DSH_HOME` set to `home` (or unset), then put it back — once it settles. */
 function withDshHome(home, fn) {
   const before = process.env.DSH_HOME
   if (home === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = home
-  try {
-    return fn()
-  } finally {
+  const restore = () => {
     if (before === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = before
   }
+  let result
+  try {
+    result = fn()
+  } catch (error) {
+    restore()
+    throw error
+  }
+  if (typeof result?.then === 'function') return result.finally(restore)
+  restore()
+  return result
 }
 
 const INDEX = 'MEMORY.md'
@@ -160,12 +243,23 @@ function sharesTouched(fn) {
   for (const n of names) fs[n] = watch(saved[n])
   fs.realpathSync.native = watch(saved.realpathSync.native)
   syncBuiltinESMExports()
-  try {
-    return { result: fn(), touched }
-  } finally {
+  const restore = () => {
     Object.assign(fs, saved)
     syncBuiltinESMExports()
   }
+  let result
+  try {
+    result = fn()
+  } catch (error) {
+    restore()
+    throw error
+  }
+  // a step resolves its index after dsh's other listeners: watched until it settles
+  if (typeof result?.then === 'function') {
+    return result.then((value) => ({ result: value, touched })).finally(restore)
+  }
+  restore()
+  return { result, touched }
 }
 
 test('plugin metadata is what the loader expects', () => {
@@ -613,7 +707,7 @@ test('an indexName that is not a plain file name falls back too', () => {
   assert.match(mount({ indexName: 'INDEX.md' }).guard(write('/s/INDEX.md', big(300))), /300 lines/)
 })
 
-test('a relative pinned index is the one in the session\'s directory, as recall reads it', () => {
+test('a relative pinned index is the one in the session\'s directory, as recall reads it', async () => {
   // The guard keyed it once, against the process's directory: the file recall read in
   // each session went uncapped, and a file nobody used was guarded instead.
   const a = realpathSync.native(scratch('pin-a'))
@@ -629,7 +723,7 @@ test('a relative pinned index is the one in the session\'s directory, as recall 
   const prompt = promptRegistry()
   mount({ indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   writeFileSync(join(a, 'notes', 'INDEX.md'), '- [a](a.md) - pinned here\n', 'utf8')
-  assert.match(prompt.contexts[0].text(at(a)), /pinned here/)
+  assert.match(await prompt.recall(at(a)), /pinned here/)
 })
 
 test('a write through an 8.3 short name is a write to the file it stands for', (t) => {
@@ -648,7 +742,7 @@ test('a write through an 8.3 short name is a write to the file it stands for', (
   assert.equal(mount({ indexPath: long }).guard(write(short, '- y\n')), undefined)
 })
 
-test('where the OS will not resolve a path, Node\'s walk does, and a link out of a project stays out', (t) => {
+test('where the OS will not resolve a path, Node\'s walk does, and a link out of a project stays out', async (t) => {
   if (process.platform !== 'win32') return t.skip('the fallback is Windows-only; POSIX resolves natively as before')
   // C:\Recovery and some volumes refuse the OS's realpath (EPERM) where Node's walk works;
   // a spelling fallback would make a junction out of the project read as in it
@@ -666,8 +760,8 @@ test('where the OS will not resolve a path, Node\'s walk does, and a link out of
     const prompt = promptRegistry()
     mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
     const home = scratch('native-fails-home')
-    assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /in the project/)
-    assert.doesNotMatch(withDshHome(home, () => prompt.contexts[0].text(at(linked))), /secret line/)
+    assert.match(await withDshHome(home, () => prompt.recall(at(project))), /in the project/)
+    assert.doesNotMatch(await withDshHome(home, () => prompt.recall(at(linked))), /secret line/)
     // and the cap still knows a pinned index through it
     const pin = join(project, '.engramory-memory', INDEX)
     assert.match(mount({ indexPath: pin }).guard(write(pin, big(300))), /300 lines/)
@@ -849,7 +943,7 @@ function guardInChild(calls, nodeArgs = []) {
   const script = `
     import { apply } from ${JSON.stringify(new URL('./index.js', import.meta.url).href)}
     let guard
-    apply({ tools: { guard: (g) => { guard = g } }, inject: () => {} })
+    apply({ tools: { guard: (g) => { guard = g } }, inject: () => {}, on: () => () => {} })
     console.log((${calls}).map((exec) => guard(exec) === undefined ? 'allow' : 'deny').join(','))`
   const run = spawnSync(process.execPath, [...nodeArgs, '--input-type=module', '-e', script],
     { encoding: 'utf8', timeout: 15_000 })
@@ -999,67 +1093,286 @@ function store(root, text) {
 const at = (cwd) => ({ agent: { session: { cwd } } })
 const scratch = (tag) => mkdtempSync(join(tmpdir(), `engramory-${tag}-`))
 
-test('the index is injected as literal runtime context, from the session\'s project store', () => {
+test('the index is sent as a message of its own, from the session\'s project store', async () => {
   const project = scratch('inject')
   store(project, '- [a](a.md) - first {{not-a-variable\n- [b](b.md) - second\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  // the index, then the reminder before compaction (empty here: no pressure to read)
+  // in the runtime context: a probe with no text, then the reminder before compaction
+  // (empty here: no pressure to read) — no index there, which dsh would send again with
+  // every change to any part of it
   assert.deepEqual(prompt.contexts.map((c) => c.name), ['engramory:memory-index', 'engramory:compaction'])
-  const [spec] = prompt.contexts
-  assert.equal(spec.name, 'engramory:memory-index')
-  assert.equal(spec.interpolate, false, 'a {{ in a note title must never reach dsh interpolation')
-  const text = withDshHome(scratch('home'), () => spec.text(at(project)))
-  assert.match(text, /^Project memory index \(`.*MEMORY\.md`\), loaded for you by dsh-engramory/)
+  assert.equal(prompt.contexts[0].interpolate, false)
+  const [message] = await withDshHome(scratch('home'), () => prompt.sent(at(project)))
+  assert.equal(prompt.render(at(project)), '')
+  // as dsh's createUserMessage makes one: a user message of its own id, frozen, under a
+  // producer kind of the plugin's own, written by nobody; its text taken literally (no
+  // `{{` interpolation reaches a message)
+  assert.equal(message.role, 'user')
+  assert.match(message.id, /^[0-9a-f-]{36}$/)
+  assert.ok(Object.isFrozen(message) && Object.isFrozen(message.content) && Object.isFrozen(message.source))
+  assert.deepEqual(message.source, { kind: 'engramory', speaker: { role: 'none' } })
+  assert.equal(message.content.length, 1)
+  const { text } = message.content[0]
+  assert.match(text, /^Engramory memory index, as it stands now: it replaces any earlier Engramory index message in this conversation\.\n\nProject memory index \(`.*MEMORY\.md`\), loaded for you by dsh-engramory/)
   assert.match(text, /first \{\{not-a-variable\n- \[b\]\(b\.md\) - second$/)
   assert.doesNotMatch(text, /User memory index/)
 })
 
-test('the global store under $DSH_HOME is injected too, and one file only once', () => {
+test('the index is sent once, and again only when what the session should see changes', async () => {
+  const repo = scratch('once')
+  mkdirSync(join(repo, '.git'))
+  mkdirSync(join(repo, 'src'))
+  const path = store(repo, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: repo }
+  const step = () => withDshHome(home, () => prompt.recall({ agent: { session } }, { commit: true }))
+  assert.match(await step(), /- first$/)
+  assert.equal(await step(), '', 'held already: nothing more')
+  session.cwd = join(repo, 'src') // a cd within the project: the same index
+  assert.equal(await step(), '', 'a cd that changes nothing the index shows sends nothing')
+  writeFileSync(path, '- [a](a.md) - first\n- [b](b.md) - saved since\n', 'utf8')
+  assert.match(await step(), /- saved since$/, 'a save: the index again, whole')
+  assert.equal(await step(), '')
+  assert.equal(session.events.filter((e) => e.data.source.kind === 'engramory').length, 2)
+  // a session of its own is sent its own copy
+  assert.match(await withDshHome(home, () => prompt.recall(at(repo))), /- saved since$/)
+})
+
+test('an index taken out of the conversation by a compaction is sent again', async () => {
+  const project = scratch('compacted')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: project }
+  const step = () => withDshHome(home, () => prompt.recall({ agent: { session } }, { commit: true }))
+  const replace = (fields) => session.events.push({
+    type: 'user/message', seq: session.events.length,
+    data: { role: 'user', id: `c-${session.events.length}`, source: { kind: 'compact-checkpoint' } }, ...fields,
+  })
+  assert.match(await step(), /- first$/)
+  const seq = session.events.at(-1).seq
+  // dsh-compaction-basic's checkpoint names what it shadows, and its range
+  replace({ sourceEventSeqs: [seq + 100], surfaceOp: { op: 'replace', startSeq: seq + 50, endSeq: seq + 60 } })
+  assert.equal(await step(), '', 'a replacement elsewhere leaves it where it is')
+  replace({ sourceEventSeqs: [0, seq], surfaceOp: { op: 'replace', startSeq: 0, endSeq: seq } })
+  assert.match(await step(), /- first$/, 'shadowed: sent again')
+  assert.equal(await step(), '')
+  // a range runs in the conversation's order, not in seq order (a replaced tool result is a
+  // newer seq in an older place): one that spans the message's seq says nothing about it
+  const held = session.events.at(-1).seq
+  replace({ sourceEventSeqs: [held - 1], surfaceOp: { op: 'replace', startSeq: 0, endSeq: held + 5 } })
+  assert.equal(await step(), '', 'only what the replacement names is gone')
+  replace({ surfaceOp: 'append', sourceEventSeqs: [held] }) // an append replaces nothing
+  assert.equal(await step(), '')
+})
+
+test('each assembly says whether the coming step may carry the index, and a refresh carries no yes over', async () => {
+  // dsh refreshes the runtime context it accepted before the request; a preset that turns
+  // optional runtime context off for the next assembly must still keep the index out of it
+  const project = scratch('gate')
+  const path = store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: project }
+  const step = (options) => withDshHome(home, () => prompt.recall({ agent: { session } }, { commit: true, ...options }))
+  assert.match(await step(), /- first$/)
+  writeFileSync(path, '- [a](a.md) - changed\n', 'utf8')
+  assert.equal(await step({ optionalOff: true }), '', 'that assembly left the memory context out')
+  assert.match(await step(), /- changed$/)
+})
+
+test('a request retried after a compaction for its length gets back the copy the compaction took', async () => {
+  // dsh-compaction-basic compacts on `agent/request-error` and retries within the step,
+  // with no pre-step; the copy goes back in as its summary does, appended to the session
+  const project = scratch('overflow')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  const { requestError } = mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: project, append: (type, data, options) => session.events.push({ type, data, seq: session.events.length, ...options }) }
+  const context = { agent: { session } }
+  const failed = (action) => withDshHome(home, () => requestError(context.agent, action))
+  assert.match(await withDshHome(home, () => prompt.recall(context, { commit: true })), /- first$/)
+  const seq = session.events.at(-1).seq
+  assert.deepEqual(await failed({ kind: 'retry' }), { kind: 'retry' })
+  assert.equal(session.events.length, 1, 'a retry that took nothing out adds nothing')
+  session.events.push({ type: 'user/message', seq: session.events.length, surfaceOp: { op: 'replace', startSeq: 0, endSeq: seq },
+    sourceEventSeqs: [seq], data: { role: 'user', id: 'cp', source: { kind: 'compact-checkpoint' }, content: [] } })
+  assert.equal(await failed(undefined), undefined, 'no retry: nothing to put back')
+  assert.equal(session.events.length, 2)
+  assert.deepEqual(await failed({ kind: 'retry' }), { kind: 'retry' })
+  const back = session.events.at(-1)
+  assert.equal(back.type, 'user/message')
+  assert.equal(back.surfaceOp, 'append')
+  assert.equal(back.data.source.kind, 'engramory')
+  assert.match(back.data.content[0].text, /- first$/)
+  assert.equal(await withDshHome(home, () => prompt.recall(context, { commit: true })), '', 'held again')
+  // a session it cannot append to keeps the retry going
+  let tried = 0
+  const stuck = { cwd: project, events: session.events.slice(0, 2), append: () => { tried++; throw new Error('closed') } }
+  await withDshHome(home, () => prompt.assembleFor({ agent: { session: stuck } }))
+  assert.deepEqual(await withDshHome(home, () => requestError({ session: stuck }, { kind: 'retry' })), { kind: 'retry' })
+  assert.equal(tried, 1)
+})
+
+test('a step dsh rejects, or one aborted, carries no index; what dsh queued comes first', async () => {
+  const project = scratch('reject')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  const { listeners } = mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const steps = listeners.get('agent/pre-step')
+  assert.equal(steps.length, 1)
+  const [recall] = steps
+  const run = (decision, signal = new AbortController().signal) => withDshHome(home, async () => {
+    const context = at(project)
+    await prompt.assembleFor(context)
+    return recall({ agent: context.agent, signal }, () => Promise.resolve(decision))
+  })
+  assert.deepEqual(await run({ kind: 'reject', reason: 'no' }), { kind: 'reject', reason: 'no' })
+  const aborted = new AbortController()
+  aborted.abort()
+  assert.deepEqual(await run({ kind: 'enter', messages: [] }, aborted.signal), { kind: 'enter', messages: [] })
+  assert.deepEqual(await run({ kind: 'enter' }), { kind: 'enter' }, 'a decision without messages is left alone')
+  const queued = { role: 'user', id: 'q', source: { kind: 'user' }, content: [] }
+  const entered = await run({ kind: 'enter', messages: [queued] })
+  assert.equal(entered.messages[0], queued, 'what dsh queued comes first, untouched')
+  assert.equal(entered.messages[1].source.kind, 'engramory')
+})
+
+test('a persona preset that turns optional runtime context off gets no index; companion mode still does', async () => {
+  const project = scratch('optional')
+  store(project, '- [a](a.md) - first\n')
+  const home = scratch('home')
+  const plain = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: plain })
+  assert.equal(await withDshHome(home, () => plain.recall(at(project), { optionalOff: true })), '',
+    'as the index was optional runtime context before')
+  assert.match(await withDshHome(home, () => plain.recall(at(project))), /- first$/)
+  const companion = promptRegistry()
+  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: companion })
+  assert.match(await withDshHome(home, () => companion.recall(at(project), { optionalOff: true })), /- first$/)
+  // a step whose context dsh never resolved (no prompt registry): nothing to go by, nothing sent
+  const { preStep } = mount({}, { workingDirectory: sessionDirs() })
+  const decision = await withDshHome(home, () => preStep(at(project).agent))
+  assert.deepEqual(decision.messages, [])
+})
+
+test('without its projection the index is not sent, rather than sent on every step', async () => {
+  const project = scratch('noproj')
+  store(project, '- [a](a.md) - first\n')
+  const home = scratch('home')
+  const refusing = projectionRegistry()
+  refusing.register = (unit) => { throw new Error(`${unit.key} is taken`) }
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt, projections: refusing })
+  assert.equal(await withDshHome(home, () => prompt.recall(at(project))), '')
+  const none = promptRegistry()
+  const late = mount({}, { workingDirectory: sessionDirs(), systemPrompt: none, projections: null })
+  assert.equal(await withDshHome(home, () => none.recall(at(project))), '')
+  late.mountLate('sessionProjections', projectionRegistry())
+  assert.match(await withDshHome(home, () => none.recall(at(project))), /- first$/, 'a registry that comes up late')
+})
+
+test('an index the session should no longer see is withdrawn once, by a note', async () => {
+  const project = scratch('withdrawn')
+  const path = store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({ language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: project }
+  const step = () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+  assert.equal((await step()).length, 1)
+  rmSync(path)
+  const [note] = await step()
+  assert.equal(note.content[0].text,
+    'Engramory: no memory index is loaded now; earlier Engramory index messages in this conversation no longer apply.')
+  assert.deepEqual(note.source, { kind: 'engramory', speaker: { role: 'none' }, cleared: true })
+  assert.deepEqual(await step(), [], 'said once')
+  store(project, '- [a](a.md) - back\n')
+  assert.match((await step())[0].content[0].text, /- back$/)
+  // a session never sent an index is told nothing
+  assert.deepEqual(await withDshHome(home, () => prompt.sent(at(scratch('empty')))), [])
+})
+
+test('the index projection folds only its own messages, and refuses a state that is not one', () => {
+  const projections = projectionRegistry()
+  mount({}, { projections })
+  const unit = projections.units.get('engramory:recall')
+  assert.equal(unit.stateVersion, 1)
+  const init = unit.init({}, 0)
+  assert.deepEqual(init, { seq: null, digest: null })
+  const ours = (seq, text, extra = {}) => ({ type: 'user/message', seq, surfaceOp: 'append',
+    data: { role: 'user', id: `r-${seq}`, content: [{ type: 'text', text }], source: { kind: 'engramory', ...extra } } })
+  const one = unit.apply(init, ours(3, 'index'))
+  assert.equal(one.seq, 3)
+  assert.match(one.digest, /^[0-9a-f]{64}$/)
+  assert.equal(unit.apply(one, { type: 'user/message', seq: 4, surfaceOp: 'append',
+    data: { role: 'user', id: 'u', source: { kind: 'user' }, content: [] } }), one, 'anyone else\'s message changes nothing')
+  assert.equal(unit.apply(one, { type: 'assistant/message', seq: 4, surfaceOp: 'append', data: {} }), one)
+  assert.equal(unit.apply(one, { type: 'step/start', data: {} }), one, 'an event off the surface')
+  assert.deepEqual(unit.apply(one, ours(5, 'x', { cleared: true })), { seq: 5, digest: '' })
+  assert.deepEqual(unit.apply(one, { type: 'tool/result', seq: 6, surfaceOp: { op: 'replace' }, sourceEventSeqs: [3] }), init)
+  for (const bad of [null, {}, { seq: 1, digest: null }, { seq: null, digest: 'x' }, { seq: -1, digest: '' },
+    { seq: 1.5, digest: '' }, { seq: 1, digest: '', more: true }]) {
+    assert.throws(() => unit.stateSchema.parse(bad), /not a state of this unit/, JSON.stringify(bad))
+  }
+  assert.deepEqual(unit.stateSchema.parse(one), one)
+  const off = projectionRegistry()
+  mount({ injectIndex: false }, { projections: off })
+  assert.equal(off.units.size, 0, 'nothing to fold when no index is sent')
+})
+
+test('the global store under $DSH_HOME is injected too, and one file only once', async () => {
   const project = scratch('inject')
   const home = scratch('home')
   store(project, '- [p](p.md) - project\n')
   store(home, '- [u](u.md) - user\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const both = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  const both = await withDshHome(home, () => prompt.recall(at(project)))
   assert.match(both, /Project memory index[\s\S]*- project[\s\S]*User memory index[\s\S]*- user/)
-  const once = withDshHome(home, () => prompt.contexts[0].text(at(home)))
+  const once = await withDshHome(home, () => prompt.recall(at(home)))
   assert.equal(once.match(/memory index \(/g).length, 1, 'a session in $DSH_HOME itself sees it once')
 })
 
-test('no store means no injection, and a pinned indexPath is the only index injected', () => {
+test('no store means no injection, and a pinned indexPath is the only index injected', async () => {
   const empty = scratch('inject')
   const home = scratch('home')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(empty))), '')
+  assert.equal(await withDshHome(home, () => prompt.recall(at(empty))), '')
 
   store(empty, '- [p](p.md) - project\n')
   const pinned = join(scratch('pinned'), INDEX)
   writeFileSync(pinned, '- [x](x.md) - pinned\n', 'utf8')
   const pinnedPrompt = promptRegistry()
   mount({ indexPath: pinned }, { workingDirectory: sessionDirs(), systemPrompt: pinnedPrompt })
-  const text = withDshHome(home, () => pinnedPrompt.contexts[0].text(at(empty)))
+  const text = await withDshHome(home, () => pinnedPrompt.recall(at(empty)))
   assert.match(text, /^Memory index/)
   assert.match(text, /- pinned$/)
   assert.doesNotMatch(text, /- project/)
 })
 
-test('recall does not look into a session directory on another machine', (t) => {
+test('recall does not look into a session directory on another machine', async (t) => {
   if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
   const home = scratch('home')
   store(home, '- [u](u.md) - user\n')
   const unc = '\\\\no-such-host.invalid\\share\\repo'
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const seen = sharesTouched(() => withDshHome(home, () => prompt.contexts[0].text(at(unc))))
+  const seen = await sharesTouched(() => withDshHome(home, () => prompt.recall(at(unc))))
   assert.deepEqual(seen.touched, [], 'no lookup on the share')
   assert.match(seen.result, /^User memory index[\s\S]*- user$/, 'the store the user placed by name still is')
   // nor a pin relative to it
   const pinPrompt = promptRegistry()
   mount({ indexPath: 'notes/MEMORY.md' }, { workingDirectory: sessionDirs(), systemPrompt: pinPrompt })
-  const pinned = sharesTouched(() => withDshHome(home, () => pinPrompt.contexts[0].text(at(unc))))
+  const pinned = await sharesTouched(() => withDshHome(home, () => pinPrompt.recall(at(unc))))
   assert.deepEqual(pinned, { result: '', touched: [] })
   // a pin naming a local drive without its directory lands on that drive, not on the share
   const file = join(scratch('drive-pin'), INDEX)
@@ -1069,10 +1382,10 @@ test('recall does not look into a session directory on another machine', (t) => 
   const drivePrompt = promptRegistry()
   mount({ indexPath: `${drive}${relative(resolve(drive), file)}` },
     { workingDirectory: sessionDirs(), systemPrompt: drivePrompt })
-  assert.match(withDshHome(home, () => drivePrompt.contexts[0].text(at(unc))), /- on the local drive$/)
+  assert.match(await withDshHome(home, () => drivePrompt.recall(at(unc))), /- on the local drive$/)
 })
 
-test('a session in a subdirectory finds its project store the way dsh finds AGENTS.md', () => {
+test('a session in a subdirectory finds its project store the way dsh finds AGENTS.md', async () => {
   // dsh's project root is the nearest ancestor holding `.git`, else the session's own
   // directory; the store nearest the session between the two is the project's.
   const base = scratch('walk')
@@ -1084,68 +1397,68 @@ test('a session in a subdirectory finds its project store the way dsh finds AGEN
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const home = scratch('home')
-  const fromSrc = withDshHome(home, () => prompt.contexts[0].text(at(join(repo, 'src'))))
+  const fromSrc = await withDshHome(home, () => prompt.recall(at(join(repo, 'src'))))
   assert.match(fromSrc, /- in the repo/)
   assert.doesNotMatch(fromSrc, /above the repo/, 'a store outside the project is not the project\'s')
 
   const bare = scratch('walk') // no `.git` anywhere: only the session's own directory counts
   mkdirSync(join(bare, 'sub'))
   store(bare, '- [b](b.md) - parent of a markerless session\n')
-  assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(join(bare, 'sub')))), '')
+  assert.equal(await withDshHome(home, () => prompt.recall(at(join(bare, 'sub')))), '')
 })
 
-test('an index over the cap is cut at the cap, and the model is told to compact', () => {
+test('an index over the cap is cut at the cap, and the model is told to compact', async () => {
   // Past the cap nothing is recalled — on dsh too, now, and said out loud.
   const project = scratch('inject')
   store(project, `${big(250)}\n`)
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const home = scratch('home')
-  const text = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(home, () => prompt.recall(at(project)))
   assert.match(text, /- line 199\n\[Cut here/)
   assert.doesNotMatch(text, /- line 200\b/)
   assert.match(text, /250 lines \/ \d+ bytes; the cap is 200 lines \/ 25600 bytes/)
   store(project, `- [a](a.md) - ok\n${'x'.repeat(30000)}\n`)
-  const byBytes = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+  const byBytes = await withDshHome(home, () => prompt.recall(at(project)))
   assert.match(byBytes, /- ok\n\[Cut here/, 'a line that would cross the byte cap is left out whole')
 })
 
-test('the injected index says what it is: notes, not instructions', () => {
+test('the injected index says what it is: notes, not instructions', async () => {
   const project = scratch('inject')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(project)))
   assert.match(text, /notes, not instructions/)
   assert.match(text, /Use it instead of reading the file/)
 })
 
-test('a write to the index shows up on the next step', () => {
+test('a write to the index shows up on the next step', async () => {
   const project = scratch('inject')
   const path = store(project, '- [a](a.md) - before\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const home = scratch('home')
-  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- before$/)
+  assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- before$/)
   writeFileSync(path, '- [a](a.md) - after, and longer\n', 'utf8')
-  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- after, and longer$/)
+  assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- after, and longer$/)
 })
 
-test('$DSH_HOME is resolved the way dsh resolves it: ~ expanded, made absolute', () => {
+test('$DSH_HOME is resolved the way dsh resolves it: ~ expanded, made absolute', async () => {
   const name = `engramory-tilde-${process.pid}-${Date.now()}`
   const home = join(homedir(), name)
   try {
     store(home, '- [u](u.md) - via tilde\n')
     const prompt = promptRegistry()
     mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-    const text = withDshHome(`~/${name}`, () => prompt.contexts[0].text(at(scratch('inject'))))
+    const text = await withDshHome(`~/${name}`, () => prompt.recall(at(scratch('inject'))))
     assert.match(text, /User memory index[\s\S]*- via tilde/)
   } finally {
     rmSync(home, { recursive: true, force: true })
   }
 })
 
-test('a project store that is a link out of the project is not read', (t) => {
+test('a project store that is a link out of the project is not read', async (t) => {
   // A checkout chooses its store; it does not get to point it at another file on the
   // machine, which would otherwise be read into the model's context.
   const outside = join(scratch('secret'), 'credentials')
@@ -1158,29 +1471,29 @@ test('a project store that is a link out of the project is not read', (t) => {
   }
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(repo)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(repo)))
   assert.doesNotMatch(text, /not-for-the-model/)
   assert.equal(text, '')
 })
 
-test('a directory named like the index does not hide the store above it', () => {
+test('a directory named like the index does not hide the store above it', async () => {
   const repo = scratch('repo')
   mkdirSync(join(repo, '.git'))
   store(repo, '- [r](r.md) - the real one\n')
   mkdirSync(join(repo, 'src', '.engramory-memory', INDEX), { recursive: true })
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(join(repo, 'src'))))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(join(repo, 'src'))))
   assert.match(text, /- the real one$/)
 })
 
-test('an index past the byte cap is read only as far as the cap, BOM included', () => {
+test('an index past the byte cap is read only as far as the cap, BOM included', async () => {
   const project = scratch('inject')
   const lines = Array.from({ length: 150 }, (_, i) => `- [n${i}](n${i}.md) - ${'x'.repeat(240)}`)
   store(project, `\uFEFF${lines.join('\n')}\n`)
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(project)))
   assert.match(text, /\[Cut here: the index is over the Engramory cap \(\d+ bytes; the cap is 200 lines \/ 25600 bytes\)/)
   const body = text.slice(text.indexOf('\n\n') + 2, text.lastIndexOf('\n['))
   assert.ok(Buffer.byteLength(body) + 3 <= 25600, 'what is shown fits the cap with the BOM counted')
@@ -1195,7 +1508,7 @@ test('the skill only says the index is in context when it is', () => {
   assert.match(flat, /"Memory index"/)
 })
 
-test('a project index that is itself a symlink is not read, even into the project', (t) => {
+test('a project index that is itself a symlink is not read, even into the project', async (t) => {
   // `.engramory-memory/MEMORY.md -> ../.env` stays inside the checkout and would pass a
   // containment check alone; SKILL.md never reads an index that is a symlink.
   const repo = scratch('repo')
@@ -1207,10 +1520,10 @@ test('a project index that is itself a symlink is not read, even into the projec
   }
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  assert.equal(withDshHome(scratch('home'), () => prompt.contexts[0].text(at(repo))), '')
+  assert.equal(await withDshHome(scratch('home'), () => prompt.recall(at(repo))), '')
 })
 
-test('a project store refused as a link does not hide the user store it points at', (t) => {
+test('a project store refused as a link does not hide the user store it points at', async (t) => {
   const home = scratch('home')
   const user = store(home, '- [u](u.md) - the user store\n')
   const repo = scratch('repo')
@@ -1221,26 +1534,26 @@ test('a project store refused as a link does not hide the user store it points a
   }
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(home, () => prompt.contexts[0].text(at(repo)))
+  const text = await withDshHome(home, () => prompt.recall(at(repo)))
   assert.match(text, /^User memory index[\s\S]*- the user store$/)
 })
 
-test('an index replaced by a same-sized file with the same mtime is still re-read', () => {
+test('an index replaced by a same-sized file with the same mtime is still re-read', async () => {
   const project = scratch('inject')
   const path = store(project, '- [a](a.md) - before\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const home = scratch('home')
-  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- before$/)
+  assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- before$/)
   const { mtime } = statSync(path)
   const next = `${path}.next`
   writeFileSync(next, '- [a](a.md) - after!\n', 'utf8') // same length as "before"
   utimesSync(next, mtime, mtime)
   renameSync(next, path)
-  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- after!$/)
+  assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- after!$/)
 })
 
-test('a read that failed once is tried again on the next step', (t) => {
+test('a read that failed once is tried again on the next step', async (t) => {
   if (process.platform === 'win32' || process.getuid?.() === 0) {
     return t.skip('needs POSIX permissions that bind this user')
   }
@@ -1251,41 +1564,41 @@ test('a read that failed once is tried again on the next step', (t) => {
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const home = scratch('home')
   try {
-    assert.equal(withDshHome(home, () => prompt.contexts[0].text(at(project))), '')
+    assert.equal(await withDshHome(home, () => prompt.recall(at(project))), '')
   } finally {
     chmodSync(path, 0o644)
   }
-  assert.match(withDshHome(home, () => prompt.contexts[0].text(at(project))), /- readable again$/)
+  assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- readable again$/)
 })
 
-test('recall reads no further than the read ceiling, whatever the configured cap', () => {
+test('recall reads no further than the read ceiling, whatever the configured cap', async () => {
   const project = scratch('inject')
   const row = `- [n](n.md) - ${'x'.repeat(1000)}\n`
   store(project, row.repeat(17 * 1024)) // ~17 MiB, past the 16 MiB ceiling
   const prompt = promptRegistry()
   mount({ maxBytes: 64 * 1024 * 1024, maxLines: 1e6 }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(project)))
   assert.match(text, /\[Cut here: only the first part of this \d+-byte index is shown\.\]$/)
   assert.ok(Buffer.byteLength(text) < 17 * 1024 * 1024)
 })
 
-test('past the read ceiling, a line-cap breach is still reported as one', () => {
+test('past the read ceiling, a line-cap breach is still reported as one', async () => {
   const project = scratch('inject')
   const row = `- [n](n.md) - ${'x'.repeat(1000)}\n`
   store(project, row.repeat(17 * 1024)) // ~17 MiB and 17408 lines
   const prompt = promptRegistry()
   mount({ maxBytes: 64 * 1024 * 1024 }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(project)))
   assert.match(text, /over the Engramory cap \(more than 200 lines, \d+ bytes; the cap is 200 lines/)
   assert.match(text, /compact the index\.\]$/)
 })
 
-test('$DSH_HOME padded with spaces is taken as dsh takes it, not trimmed', () => {
+test('$DSH_HOME padded with spaces is taken as dsh takes it, not trimmed', async () => {
   const home = scratch('home')
   store(home, '- [u](u.md) - user\n')
   const prompt = promptRegistry()
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(` ${home} `, () => prompt.contexts[0].text(at(scratch('inject'))))
+  const text = await withDshHome(` ${home} `, () => prompt.recall(at(scratch('inject'))))
   assert.doesNotMatch(text, /User memory index/)
 })
 
@@ -1309,13 +1622,13 @@ test('a prompt registry that mounts after the plugin still gets the index', () =
   assert.equal(prompt.contexts[0].name, 'engramory:memory-index')
 })
 
-test('recall never fails a request', () => {
+test('recall never fails a request', async () => {
   const prompt = promptRegistry()
   mount({}, { workingDirectory: { get: () => { throw new Error('boom') } }, systemPrompt: prompt })
   const real = process.cwd
   process.cwd = () => { throw new Error('ENOENT: uv_cwd') }
   try {
-    assert.equal(prompt.contexts[0].text(at('/nowhere')), '')
+    assert.equal(await prompt.recall(at('/nowhere')), '')
   } finally {
     process.cwd = real
   }
@@ -1431,46 +1744,56 @@ test('the skill says where the store is: the global one the AI creates, a projec
     assert.ok(blind.includes(flat(language === 'en'
       ? 'Look for its index there, nearest first, and nowhere else, and skip an index that is a link or leads out of the project'
       : '只在这一段里找它的索引，离工作目录近的优先，别处都不找；索引是链接、或指到项目外面的，跳过')), language)
-    assert.ok(!blind.includes(flat(language === 'en' ? 'runtime context shows its index' : '运行时上下文里会出现它的「项目记忆索引」')), language)
+    assert.ok(!blind.includes(flat(language === 'en' ? 'context shows its index' : '上下文里会出现它的「项目记忆索引」')), language)
+    // with the index in context, a pointer line is added without reading the index whole
+    // again: dsh 0.2 asks only that the file was read once before an edit
+    const rereadNot = language === 'en'
+      ? 'add that line without reading the whole index again: before an edit dsh needs the file read once since this conversation was last opened or resumed — a few lines (`limit`) will do — and not again after your own edit'
+      : '加这一行不必再把整个索引读一遍：dsh 只要求这段对话这次打开或恢复以来、改之前读过一次这个文件——用 `limit` 读几行就够——你自己改过之后也不用再读'
+    assert.ok(content.includes(flat(rereadNot)), language)
+    assert.ok(!blind.includes(flat(rereadNot)), language)
     // another index name is the one named, everywhere
     const named = withDshHome(home, () => mount({ language, indexName: 'INDEX.md' })).skills[0].content
     assert.ok(named.includes('`INDEX.md`') && !named.includes('MEMORY.md'), language)
   }
 })
 
-test('in social mode the skill, which every conversation reads, names no store; the user\'s own learn it', () => {
+test('in social mode the skill, which every conversation reads, names no store; the user\'s own learn it', async () => {
   const home = scratch('socialhome')
   const global = join(home, '.engramory-memory')
   const prompt = promptRegistry()
   const { skills } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt }))
   const skill = skills[0].content.replace(/\s+/g, ' ')
   assert.ok(!skill.includes(global), 'no path a stranger could be told')
-  assert.match(skill, /in the user's own conversations your runtime context gives its full path/)
+  assert.match(skill, /in the user's own conversations your context gives its full path/)
   assert.match(skill, /If your runtime context says a conversation is not the user's own, the store is closed to it: do not read, create, write or name a store there/)
   const project = scratch('socialws')
   // no store yet: the user's own conversation is told where it will be
-  const mine = withDshHome(home, () => prompt.render(as(own('own-store', project))))
+  const mine = await withDshHome(home, () => prompt.seen(as(own('own-store', project))))
   assert.ok(mine.includes(`Engramory: your memory store is \`${global}\`, its index \`MEMORY.md\``), mine)
   // anyone else's: the note that the store is closed, and no path
-  const theirsText = withDshHome(home, () => prompt.render(as(theirs('qq-store', project))))
+  const theirsText = await withDshHome(home, () => prompt.seen(as(theirs('qq-store', project))))
   assert.ok(!theirsText.includes(global), theirsText)
   assert.match(theirsText, /not the user's own/)
   // only a project's index shown: the global store, where the rest goes, is still named
   // (another project: recall remembers for a few seconds that the first one has no store)
   const withStore = scratch('socialws2')
   store(withStore, '- [p](p.md) - project\n')
-  const partly = withDshHome(home, () => prompt.render(as(own('own-store-3', withStore))))
-  assert.match(partly, /^Project memory index/)
+  const partly = await withDshHome(home, () => prompt.seen(as(own('own-store-3', withStore))))
+  assert.match(partly, /Project memory index/)
   assert.ok(partly.includes(`your memory store is \`${global}\``), partly)
   // with the global store, its index shows the path as before, and the line is not repeated
+  // — both in the runtime context, which social mode keeps the index in (judged again as
+  // dsh admits a step's messages: no message of the plugin's own is sent at all)
   store(home, '- [u](u.md) - user\n')
   const shown = withDshHome(home, () => prompt.render(as(own('own-store-2', project))))
   assert.match(shown, /User memory index/)
   assert.doesNotMatch(shown, /your memory store is/)
+  assert.deepEqual(await withDshHome(home, () => prompt.sent(as(own('own-store-2', project)))), [])
   // a pin relative to the working directory is named as this session resolves it
   const pinPrompt = promptRegistry()
   mount({ ...COMPANION, indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: pinPrompt })
-  const pinned = withDshHome(home, () => pinPrompt.render(as(own('own-pin', project))))
+  const pinned = await withDshHome(home, () => pinPrompt.seen(as(own('own-pin', project))))
   assert.ok(pinned.includes(`your memory store is \`${join(project, 'notes')}\`, its index \`INDEX.md\``), pinned)
 })
 
@@ -1480,7 +1803,7 @@ test('a store path with backticks in it stays one code span', () => {
   assert.ok(content.includes(`\`\`${join(home, '.engramory-memory')}\`\``), content.slice(0, 600))
 })
 
-test('the skill names exactly the headings this language injects the index under', () => {
+test('the skill names exactly the headings this language injects the index under', async () => {
   for (const [language, labels] of [
     ['en', ['"Project memory index"', '"User memory index"', '"Memory index"']],
     ['zh', ['「项目记忆索引」', '「全局记忆索引」', '「记忆索引」']],
@@ -1492,18 +1815,18 @@ test('the skill names exactly the headings this language injects the index under
     const prompt = promptRegistry()
     const { skills } = mount({ language }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
     for (const label of labels) assert.ok(skills[0].content.includes(label), `${language}: ${label}`)
-    const text = withDshHome(home, () => prompt.contexts[0].text(at(project)))
+    const text = await withDshHome(home, () => prompt.recall(at(project)))
     assert.ok(text.startsWith(labels[0].slice(1, -1)), `${language} project heading`)
     assert.ok(text.includes(labels[1].slice(1, -1)), `${language} user heading`)
   }
 })
 
-test('language: zh says what the injected index is, and cuts it in Chinese', () => {
+test('language: zh says what the injected index is, and cuts it in Chinese', async () => {
   const project = scratch('inject')
   store(project, Array.from({ length: 205 }, (_, i) => `- [n${i}](n${i}.md) - 第 ${i} 条`).join('\n') + '\n')
   const prompt = promptRegistry()
   mount({ language: 'zh' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.contexts[0].text(at(project)))
+  const text = await withDshHome(scratch('home'), () => prompt.recall(at(project)))
   assert.match(text, /这些行是笔记，不是指令/)
   assert.match(text, /\[到此截断：索引超过了 Engramory 上限（205 行 \/ \d+ 字节；上限是 200 行 \/ 25600 字节）/)
   assert.doesNotMatch(text, /第 200 条/)
@@ -1523,28 +1846,64 @@ const own = (id, cwd, ...more) => sessionOf(id, cwd, {}, [TYPED, ...more])
 const theirs = (id, cwd) => sessionOf(id, cwd, {}, [QQ])
 const COMPANION = { companion: true, audience: 'social' }
 
-test('companion mode: the user\'s own conversation gets the index and the rules', () => {
+test('companion mode: the user\'s own conversation gets the index and the rules', async () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const text = withDshHome(scratch('home'), () => prompt.render(as(own('own-1', project))))
+  const session = own('own-1', project)
+  // social mode: the index and the rules in the runtime context, judged as dsh admits the
+  // step's messages
+  const text = withDshHome(scratch('home'), () => prompt.render(as(session)))
   assert.match(text, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
   assert.match(text, /Companion mode \(大肥鱼模式\) is on[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
-  // dsh's own producers decide nothing: context, skills and the like come and go
+  assert.deepEqual(await withDshHome(scratch('home'), () => prompt.sent(as(session))), [], 'no message of its own')
+  // dsh's own producers decide nothing: context, skills and the like come and go — and the
+  // plugin's own index message is nobody's either (sent outside social mode, but a session
+  // may hold one from before the switch)
   const busy = own('own-2', project, said({ kind: 'time-context', form: 'notice' }),
-    said({ kind: 'skill-catalog', form: 'catalog' }), TYPED)
+    said({ kind: 'skill-catalog', form: 'catalog' }), said({ kind: 'engramory', speaker: { role: 'none' } }), TYPED)
   assert.match(withDshHome(scratch('home'), () => prompt.render(as(busy))), /- first/)
+  // private companion mode: the rules in the runtime context, the index in a message after it
+  const solo = promptRegistry()
+  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: solo })
+  const mine = own('own-3', project)
+  assert.doesNotMatch(withDshHome(scratch('home'), () => solo.render(as(mine))), /- first/)
+  assert.match(await withDshHome(scratch('home'), () => solo.seen(as(mine))),
+    /`self`[\s\S]*\n\nEngramory memory index, as it stands now[\s\S]*Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
 })
 
-test('companion mode: anyone else\'s conversation gets no memory, only a note', () => {
+test('social mode judges the index as dsh admits a step, so an outsider queued meanwhile gets none', async () => {
+  // a bridge queues someone else's message while the step's request is being prepared: dsh
+  // refreshes the runtime context just before it commits the step's messages, and social
+  // mode keeps the index there, so the step that commits already carries the note instead
+  const project = scratch('race')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  const { listeners, projections } = mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  // social mode sends no message of its own: nothing of the message path is there
+  for (const event of ['agent/pre-step', 'agent/request-error', 'system-prompt/assemble']) {
+    assert.equal(listeners.get(event), undefined, event)
+  }
+  assert.deepEqual([...projections.units.keys()], ['engramory:speakers'])
+  const session = own('first-turn', project)
+  const home = scratch('home')
+  await withDshHome(home, () => prompt.assembleFor(as(session)))
+  assert.match(withDshHome(home, () => prompt.render(as(session))), /- first/, 'the user\'s own at the start of the step')
+  session.events.push(QQ) // queued while the request is prepared
+  const admitted = withDshHome(home, () => prompt.render(as(session)))
+  assert.doesNotMatch(admitted, /- first/)
+  assert.match(admitted, /not the user's own/)
+})
+
+test('companion mode: anyone else\'s conversation gets no memory, only a note', async () => {
   const project = scratch('companion')
   const home = scratch('home')
   store(project, '- [a](a.md) - first\n')
   store(home, '- [u](u.md) - user\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (context) => withDshHome(home, () => prompt.render(context))
+  const see = (context) => withDshHome(home, () => prompt.seen(context))
   for (const context of [
     as(theirs('onebot-private-42', project)),
     as(sessionOf('quiet', project)), // nobody has written yet
@@ -1555,10 +1914,33 @@ test('companion mode: anyone else\'s conversation gets no memory, only a note', 
     {}, // no session to tell by: fails closed
     as({ cwd: project, header: {}, events: [TYPED] }),
   ]) {
-    const text = see(context)
+    const text = await see(context)
     assert.doesNotMatch(text, /- first|- user|memory index/)
     assert.match(text, /not the user's own/)
   }
+  // the user's own until someone else writes in it, then the note in place of the index
+  const session = own('turned', project)
+  assert.match(withDshHome(home, () => prompt.render(as(session))), /- first/)
+  session.events.push(QQ)
+  assert.doesNotMatch(withDshHome(home, () => prompt.render(as(session))), /- first|- user/)
+})
+
+test('outside social mode, an index the session should no longer see is withdrawn by a note', async () => {
+  // private companion mode: every conversation is the user's; the store going away is what
+  // takes the index from it
+  const project = scratch('companion')
+  const path = store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = theirs('qq-private', project)
+  const step = () => withDshHome(home, () => prompt.sent(as(session), { commit: true }))
+  assert.match((await step())[0].content[0].text, /- first/)
+  rmSync(path)
+  const [withdrawn] = await step()
+  assert.equal(withdrawn.source.cleared, true)
+  assert.deepEqual(await step(), [])
+  assert.match(prompt.render(as(session)), /Companion mode/, 'its own message made nobody a stranger')
 })
 
 test('companion mode: who wrote a message is read from the source dsh stamped on it', () => {
@@ -1566,7 +1948,7 @@ test('companion mode: who wrote a message is read from the source dsh stamped on
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
     () => prompt.render(as(sessionOf('s', project, {}, events)))))
   assert.equal(owner(TYPED), true)
   for (const [source, why] of [
@@ -1610,6 +1992,15 @@ test('companion mode: who wrote a message is read from the source dsh stamped on
     assert.equal(owner(TYPED, said({ kind })), true, kind)
     assert.equal(owner(said({ kind })), false, `${kind} alone`)
   }
+  // dsh 0.1's producers wrote `{ kind: 'plugin', plugin: <name> }` — its clock on every step
+  // of a conversation — lifted as dsh 0.2's migration lifts them; a bridge's stays theirs
+  for (const plugin of ['time-context', 'compact', 'dsh-compaction-basic', 'agent-instructions', 'schedule']) {
+    assert.equal(owner(TYPED, said({ kind: 'plugin', plugin, form: 'snapshot' })), true, `0.1 ${plugin}`)
+  }
+  for (const source of [{ kind: 'plugin', plugin: 'dsh-onebot' }, { kind: 'plugin', plugin: 'webhook' },
+    { kind: 'plugin' }, { kind: 'plugin', plugin: 42 }, { kind: 'plugin', plugin: 'constructor' }]) {
+    assert.equal(owner(TYPED, said(source)), false, JSON.stringify(source))
+  }
   // only the user's messages count: replies and other events are not judged
   assert.equal(owner(TYPED, { type: 'assistant/message', data: { role: 'assistant', source: { kind: 'model' } } },
     { type: 'session/title-llm-request', data: { messages: [{ role: 'user', source: { kind: 'user' } }] } }), true)
@@ -1625,7 +2016,7 @@ test('companion mode: a message counts from the moment it is queued, before dsh 
   const queued = (...messages) => ({ type: 'agent/inbox/spliced',
     data: { target: 'next-turn', start: 0, removedCount: 0, inserted: messages.map((m) => m.data) } })
   const claimed = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } }
-  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
     () => prompt.render(as(sessionOf('s', project, {}, events)))))
   assert.equal(owner(queued(TYPED), claimed), true, 'the user\'s first message, before it is committed')
   assert.equal(owner(TYPED, queued(QQ), claimed), false, 'an outsider\'s first message, before it is committed')
@@ -1640,7 +2031,7 @@ test('companion mode: a message a slash command adds is dsh\'s own, and only whi
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const owner = (...events) => /- first/.test(withDshHome(scratch('home'),
+  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
     () => prompt.render(as(sessionOf('s', project, {}, events)))))
   const run =(commandId) => ({ type: 'command/run', data: { commandId, name: 'plan', source: { kind: 'user' } } })
   const done = (commandId) => ({ type: 'command/done', data: { commandId, kind: 'success' } })
@@ -1667,6 +2058,10 @@ test('companion mode: the speakers unit is one dsh can fold, checkpoint and rest
   assert.ok(unit, 'registered with dsh\'s session projections')
   assert.equal(unit.wire, undefined, 'host-only: nothing of it reaches a client')
   assert.ok(Number.isInteger(unit.stateVersion) && unit.stateVersion >= 0)
+  // dsh seeds a session from a checkpoint of the same version without refolding: 4 is the
+  // fold that reads dsh 0.1's `{ kind: 'plugin' }` messages as nobody's, and a checkpoint
+  // folded before it (the owner marked an outsider by the clock) must be refolded
+  assert.equal(unit.stateVersion, 4)
   const start = unit.init({}, 0)
   assert.deepEqual(start, { owner: false, other: false })
   // an event that changes nothing returns the same state, as dsh requires
@@ -1693,7 +2088,8 @@ test('companion mode: the speakers unit is one dsh can fold, checkpoint and rest
     { owner: false, other: false, byDsh: [''] },
     { owner: false, other: false, extra: 1 },
   ]) assert.throws(() => unit.stateSchema.parse(bad), JSON.stringify(bad))
-  assert.equal(mount({}).projections.units.size, 0, 'nothing registered with companion mode off')
+  assert.equal(mount({}).projections.units.has('engramory:speakers'), false, 'not registered with companion mode off')
+  assert.equal(mount({ companion: true }).projections.units.has('engramory:speakers'), false, 'nor in private companion mode')
 })
 
 test('companion mode: a stranger\'s conversation cannot read, search or write a store', () => {
@@ -2035,7 +2431,7 @@ test('the memory language follows dsh: the config first, then dsh\'s own choice,
   assert.equal(chinese(mount({ language: 'zh' }).skills[0]), true)
 })
 
-test('a profile editor that comes up after the plugin still sets the language, skill and index alike', () => {
+test('a profile editor that comes up after the plugin still sets the language, skill and index alike', async () => {
   // dsh activates services in no fixed order: the editor that holds dsh's language may
   // arrive after this plugin has registered its skill in the system's language
   const project = scratch('lang')
@@ -2048,14 +2444,18 @@ test('a profile editor that comes up after the plugin still sets the language, s
     assert.ok(m.skills[0].content.startsWith('# Engramory — 策展式文件记忆'))
     // the index already shown, and its project store remembered, before the editor arrives
     const home = scratch('home')
-    assert.match(withDshHome(home, () => prompt.render(at(project))), /^项目记忆索引/)
+    const session = { cwd: project }
+    const step = () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+    const [zh] = await step()
+    assert.match(zh.content[0].text, /^Engramory 记忆索引，现在的样子[\s\S]*\n\n项目记忆索引/)
     m.mountLate('configEditor', { entries: () => [
       { options: { id: 'locale', name: '@deepseek-ai/dsh-client-locale', config: { preference: 'en' } } },
     ] })
     assert.equal(m.skills.length, 1, 'registered again, not twice')
     assert.ok(m.skills[0].content.startsWith('# Engramory — curated file-based memory'))
-    const text = withDshHome(home, () => prompt.render(at(project)))
-    assert.match(text, /^Project memory index/)
+    // the conversation that holds the Chinese index is sent the English one
+    const [en] = await step()
+    assert.match(withoutHead(en.content[0].text), /^Project memory index/)
   } finally {
     systemLocale = 'en-US'
   }
@@ -2091,7 +2491,7 @@ test('a skill registry that activates after the plugin still gets the skill', ()
 })
 
 
-test('companion context is required, so a persona preset with optional context off keeps it', () => {
+test('companion context is required, so a persona preset with optional context off keeps it', async () => {
   // dsh-persona `includeRuntimeContext: false` (the shipped `minimal` preset) drops
   // optional contexts; seen on a real dsh, the owner then got no memory at all
   const project = scratch('companion')
@@ -2099,11 +2499,11 @@ test('companion context is required, so a persona preset with optional context o
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const off = (session) => withDshHome(scratch('home'),
-    () => prompt.render(as(session), { optionalOff: true }))
-  const owner = off(own('own-1', project))
+    () => prompt.seen(as(session), { optionalOff: true }))
+  const owner = await off(own('own-1', project))
   assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
   assert.match(owner, /Companion mode \(大肥鱼模式\)/)
-  assert.match(off(theirs('douyin-1', project)), /not the user's own/)
+  assert.match(await off(theirs('douyin-1', project)), /not the user's own/)
   assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]),
     [['engramory:memory', true], ['engramory:compaction', true]])
 
@@ -2297,7 +2697,7 @@ test('in social mode only the user\'s own conversations are reminded to save', (
   assert.equal(reminder.text(as({ ...theirs('qq-r', project), requestHeader: header })), '')
 })
 
-test('memory access is a choice inside companion mode: private by default, social only with companion mode on', () => {
+test('memory access is a choice inside companion mode: private by default, social only with companion mode on', async () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const home = scratch('home')
@@ -2306,30 +2706,30 @@ test('memory access is a choice inside companion mode: private by default, socia
     const prompt = promptRegistry()
     const { guard, projections } = mount(config, { workingDirectory: sessionDirs(), systemPrompt: prompt })
     return {
-      text: (session) => withDshHome(home, () => prompt.render(as(session))),
+      text: (session) => withDshHome(home, () => prompt.seen(as(session))),
       read: (session) => withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) })),
-      units: projections.units.size,
+      speakers: projections.units.has('engramory:speakers'),
     }
   }
   // companion mode, private: every conversation is the user's — a bridge's too
   const solo = view({ companion: true })
   for (const session of [own('own-1', project), theirs('qq-1', project), sessionOf('sched', project, {}, [said({ kind: 'schedule' })])]) {
-    assert.match(solo.text(session), /- first[\s\S]*Companion mode \(大肥鱼模式\) is on/)
+    assert.match(await solo.text(session), /Companion mode \(大肥鱼模式\) is on[\s\S]*- first/)
     assert.equal(solo.read(session), undefined)
   }
-  assert.equal(solo.units, 0, 'private: nothing folds who wrote what')
+  assert.equal(solo.speakers, false, 'private: nothing folds who wrote what')
   // social without companion mode changes nothing: the plain index, for everyone
   const alone = view({ audience: 'social' })
-  assert.match(alone.text(theirs('qq-1', project)), /- first/)
-  assert.doesNotMatch(alone.text(own('own-1', project)), /Companion mode|not the user's own/)
+  assert.match(await alone.text(theirs('qq-1', project)), /- first/)
+  assert.doesNotMatch(await alone.text(own('own-1', project)), /Companion mode|not the user's own/)
   assert.equal(alone.read(theirs('qq-1', project)), undefined)
-  assert.equal(alone.units, 0)
+  assert.equal(alone.speakers, false)
   // social inside companion mode: the user's own get the memory and the rules, others the note
   const social = view({ companion: true, audience: 'social' })
-  assert.match(social.text(own('own-1', project)), /- first[\s\S]*Companion mode/)
-  assert.match(social.text(theirs('qq-1', project)), /not the user's own/)
+  assert.match(await social.text(own('own-1', project)), /- first[\s\S]*Companion mode/) // all in the runtime context
+  assert.match(await social.text(theirs('qq-1', project)), /not the user's own/)
   assert.match(social.read(theirs('qq-1', project)), /closed to it/)
-  assert.equal(social.units, 1)
+  assert.equal(social.speakers, true)
   // only 'social' is social; anything else is the private default
   for (const audience of ['Social', 'public', true, 1]) {
     assert.equal(view({ companion: true, audience }).read(theirs('qq-1', project)), undefined, String(audience))

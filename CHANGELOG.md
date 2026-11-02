@@ -6,6 +6,39 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.3.0 — 2026-11-03
+
+On dsh the index reaches the model as a message of its own, sent again only when it
+changes, no longer in dsh's runtime context, which dsh sends whole again whenever any
+part of it changes. What is recalled, how memory is stored and how the cap guards it do
+not change.
+
+- **dsh: the index is sent once, and again only when it changes** — a write to it, a
+  session in another project, a compaction that took the last copy out of the
+  conversation (after the compaction dsh 0.2.2 makes on a switch of model, from the next
+  step), a change of language. Until now every `cd`, approval or sandbox switch,
+  and the reminder before compaction coming on, sent the runtime context again, index
+  and all, and every copy stayed in the conversation until it was compacted. Measured on
+  dsh 0.2.1-rc.5 with a 20 KB index, a 13-step conversation with two `cd`s and two saves
+  held six copies; it now holds three, one for each version of the index. dsh's chat
+  shows the message as a folded context row. Outside companion mode a persona preset
+  that turns optional runtime context off still gets no index; in companion mode it
+  still does (on dsh 0.2). A conversation whose store has gone is told once that the
+  earlier copies no longer apply. Social mode keeps the index in the runtime context, as
+  before: there who is on the other end can change while a step is being prepared, and
+  dsh judges only the runtime context again as it admits the step. A conversation under way when you upgrade is sent the index
+  once more on its next step; the copies already in it stay until it is compacted.
+- **dsh: the skill tells the AI it need not read the whole index again to add a line to
+  it**: dsh asks only that the file was read once since the conversation was opened or
+  resumed before an edit, and a few lines will do.
+- **dsh 0.1: social mode no longer takes dsh's own messages for someone else's.** dsh 0.1
+  marks the messages its own parts add (its clock, on every step, among them) in an older
+  form, which social mode read as an outsider's, closing the store to the user's own
+  conversation. The user's own conversations in social mode are now told where the store
+  is whenever dsh delivers runtime context.
+  By default the desktop app installs a version only once it has been published for 24
+  hours, unless you ask for `dsh-engramory@1.3.0`.
+
 ## 1.2.0 — 2026-11-01
 
 dsh's memory page is laid out anew: a banner, a tab for each note type, and a row for each

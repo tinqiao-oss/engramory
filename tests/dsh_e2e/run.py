@@ -65,7 +65,8 @@ DENIAL = "over the Engramory index cap"  # index.js verdict(): change both toget
 # plugin writes in dsh's language, else the system's (index.js memoryLanguage()).
 SKILL_MARKS = ("Curated file-based long-term memory", "策展式文件长期记忆")
 # A note line only the seeded project store holds: seen by the model only if the plugin
-# injected the index into its runtime context (index.js renderIndex()).
+# sent it the index unread — as a message of its own from 1.3.0, in its runtime context
+# before (index.js renderIndex()).
 RECALL_MARK = "- [e2e-recall-marker](e2e.md) - injected, never read"
 INDEX_HEADS = ("Project memory index (", "项目记忆索引（")  # index.js renderIndex(): change both together
 # The reminder to save before dsh compacts, in either language (index.js TEXT.compactionSoon),
@@ -77,6 +78,10 @@ QUIET_SHARE, REMIND_SHARE = 0.3, 0.7
 # The plugin release that brought the reminder (CHANGELOG 1.0.7): an older one, checked as
 # published, has none to look for.
 REMINDER_SINCE = (1, 0, 7)
+# The plugin release that sends the index as a message of its own (CHANGELOG 1.3.0), once
+# and again only when it changes. Before it the index was in dsh's runtime context, which
+# dsh sends whole again whenever any part of it changes — a cd, the reminder coming on.
+ONE_COPY_SINCE = (1, 3, 0)
 
 # Every tool dsh has offered in a passing run, and why it cannot put the index past the
 # cap behind the guard's back. A tool missing from this table fails the run until
@@ -304,6 +309,9 @@ def check_release(version, plugin, work, node, npm):
         os.makedirs(d, exist_ok=True)
     with open(seeded, "w", encoding="utf-8", newline="\n") as f:
         f.write("# Memory index\n" + RECALL_MARK + "\n")
+    # A project root (the nearest folder holding `.git`), so the cd below stays in the
+    # project and the store it sees does not change.
+    os.makedirs(os.path.join(ws, ".git"), exist_ok=True)
 
     code, out, err = run([npm, "install", "--prefix", prefix, "@deepseek-ai/dsh@" + version,
                           "--no-audit", "--no-fund"], cwd=work, env=dict(os.environ))
@@ -389,9 +397,10 @@ def check_release(version, plugin, work, node, npm):
     first = json.dumps(fake.main[0], ensure_ascii=False)
     check("the task reached the model", TASK in first)
     check("skill advertised to the model", "engramory" in first and any(m in first for m in SKILL_MARKS))
-    # Every release checked so far, 0.1.5 on, carries runtime context; one that stops
-    # doing so must fail here rather than quietly stop recalling.
-    check("index injected into the runtime context",
+    # Every release checked so far, 0.1.5 on, resolves runtime context and takes a message
+    # added to a step (from plugin 1.3.0 the index is one, before it was runtime context);
+    # one that stops doing either must fail here rather than quietly stop recalling.
+    check("index injected into the first request",
           any(h in first for h in INDEX_HEADS) and RECALL_MARK in first,
           "runtime context %s, head %s, marker %s" % (
               "Current runtime context" in first, any(h in first for h in INDEX_HEADS), RECALL_MARK in first))
@@ -450,6 +459,13 @@ def check_release(version, plugin, work, node, npm):
         check("refused relative edit left the file unchanged", disk(7, 0) == small, shown(7, 0))
     check("nothing else wrote the index afterwards",
           read_bytes(index) == small and read_bytes(crlf_index) == small_crlf)
+    # One copy of the seeded index in the conversation, though the cd (dsh 0.2) changed
+    # dsh's runtime context, which dsh then sent whole again.
+    copies = lambda body: sum(json.dumps(body, ensure_ascii=False).count(h) for h in INDEX_HEADS)  # noqa: E731
+    if (release_of(plugin["version"]) or ()) >= ONE_COPY_SINCE:
+        check("the index is sent once, not again with a runtime-context change",
+              copies(fake.main[-1]) == 1,
+              "%d copies in the last request (cd %s)" % (copies(fake.main[-1]), "made" if moved else "not offered"))
 
     # The reminder to save before dsh compacts (index.js compactionReminder), read through
     # dsh's own token meter, projections and compaction engine: one conversation whose model
@@ -470,6 +486,9 @@ def check_release(version, plugin, work, node, npm):
             check("reminded to save as the conversation nears compaction, not before",
                   code == 0 and reminded[:3] == [False, False, True],
                   "exit %s, reminder in requests: %s, window %s: %s" % (code, reminded, window, tail(err or out)))
+            if (release_of(plugin["version"]) or ()) >= ONE_COPY_SINCE and len(fake.main) >= 3:
+                check("the reminder coming on sends no second copy of the index",
+                      copies(fake.main[2]) == 1, "%d copies" % copies(fake.main[2]))
 
     code, out, err = run(dsh + ["plugin", "--profile", PROFILE, "remove", "dsh-engramory"],
                          cwd=work, env=quiet, timeout=600)

@@ -13,11 +13,14 @@ which is general-purpose agent memory: Claude Code, Codex and others can use the
 
 ## What it does
 
-- **The memory index rides along on every step.** The index, `MEMORY.md`, lists the
-  notes by name. The plugin puts it into dsh's context on every step, so the AI knows
+- **The memory index comes along by itself.** The index, `MEMORY.md`, lists the notes
+  by name. The plugin brings it into the conversation as a message, so the AI knows
   what it has saved without reading a file first, and opens a note when it needs the
-  detail. A write shows up on the next request; whatever is past the cap is left
-  out, and the AI is told to compact.
+  detail. It is sent again only when it changes (a write, another project, a
+  compacted conversation): a write shows up on the next request, and a long
+  conversation does not fill up with copies of it ([social mode](#social-mode) keeps it
+  in dsh's runtime context, as before). Whatever is past the cap is left out, and the AI
+  is told to compact.
 - **The index has a hard cap.** 200 lines / 25 KB by default. When the AI writes the
   index with dsh's file tools and the plugin can work out the result, a write that
   would grow it past the cap is refused before it happens, and the AI is told to
@@ -79,7 +82,8 @@ companion switch on the settings page, or set `companion: true`.
 - **Recall in character.** Even a greeting may call for recall, and what it remembered,
   or failed to save, is told in the character's voice, without naming files or tools.
 - **The persona preset needs the file tools.** The memory arrives even under a preset
-  that turns optional context off (dsh's `minimal`, for one). To save notes, though, the
+  that turns optional context off (dsh's `minimal`, for one; from dsh 0.2 — 0.1 then sends
+  no runtime context at all). To save notes, though, the
   preset needs dsh's file tools and the skill tool; a preset with only a shell reads the
   memory, and its writes go past the cap.
 
@@ -181,12 +185,12 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; putting the index into context needs the exact name on a case-sensitive filesystem (Linux, say). |
+| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; sending the index needs the exact name on a case-sensitive filesystem (Linux, say). |
 | `maxLines` | `200` | Line cap for the index. |
 | `maxBytes` | `25600` | UTF-8 byte cap for the index (25 KB). |
 | `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |
-| `registerSkill` | `true` | `false` skips the built-in rules; the cap and the index in context stay. |
-| `injectIndex` | `true` | `false` stops putting the index into context; the AI reads it instead. |
+| `registerSkill` | `true` | `false` skips the built-in rules; the cap and the index sent along stay. |
+| `injectIndex` | `true` | `false` stops sending the index; the AI reads it instead. |
 | `compactionReminder` | `true` | `false` stops the reminder to save before dsh compacts. The plugin works out where dsh will compact from dsh's own compaction settings (on dsh 0.2 with DeepSeek's defaults, about 69% of the window, not 80%) and reminds at 85% of that. A best effort: a conversation that grows past the gap in one step goes unreminded; with no compaction, or automatic compaction off, there is no reminder. |
 | `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other string is English; a value that is not a string, or is empty, counts as unset. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
 | `companion` | `false` | `true` turns companion mode on. |

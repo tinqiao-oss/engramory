@@ -44,7 +44,9 @@ printed the refusal and wrote the file is caught; results match steps by tool-ca
 
 The same run checks that the task and the skill reached the model; that a project store
 seeded in the session directory (`ws/.engramory-memory/MEMORY.md`) was injected into
-the first request without being read; and that **every tool dsh offers is in
+the first request without being read, and (plugin 1.3.0 on) only once — neither the cd
+within the project (`ws` holds a `.git`) nor the reminder coming on sends a second copy,
+as each did while the index was in dsh's runtime context; and that **every tool dsh offers is in
 `REVIEWED_TOOLS`** (guarded writes, read-only/state operations, delegated agents,
 documented shell bypasses). An unknown tool fails the run until reviewed, and a new
 direct file writer needs guard support; a reviewed shell tool can still bypass the cap.

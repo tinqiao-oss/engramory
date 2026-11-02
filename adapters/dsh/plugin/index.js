@@ -23,6 +23,7 @@
  *
  * Zero dependencies, no build step: plain ESM, node: builtins only.
  */
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, realpath,
   realpathSync, statSync,
@@ -114,8 +115,8 @@ export function apply(ctx, config = {}) {
     // only the user's own conversations get the memory (speakerOf). Private, the default:
     // every conversation does.
     social: config.companion === true && config.audience === 'social',
-    // Whether the index goes into the runtime context (below); the skill says where to look
-    // when it does not.
+    // Whether the index is sent to the model (below); the skill says where to look when it
+    // is not.
     injectIndex: config.injectIndex !== false,
   }
   settings.readLimit = Math.min(MAX_READ_LIMIT, Math.max(MIN_READ_LIMIT, 4 * settings.maxBytes))
@@ -146,10 +147,10 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // Social mode reads two more optional services, both possibly late: dsh's session
-  // projections, where the SPEAKERS unit registered here folds who has written in each
-  // session, and the live agents, where a subagent's parent is found (dsh only continues
-  // a subagent while its parent is live).
+  // Two more optional services, both possibly late. dsh's session projections fold, per
+  // session, who has written in it (SPEAKERS, social mode) and which index this plugin last
+  // sent it (RECALL, below). Social mode also reads the live agents, where a subagent's
+  // parent is found (dsh only continues a subagent while its parent is live).
   const live = {}
   if (settings.social) {
     ctx.inject(['agents'], (inner) => {
@@ -161,24 +162,34 @@ export function apply(ctx, config = {}) {
         }
       })
     })
-    // Read only where this plugin's own registration took: dsh keeps an earlier registrant
-    // of the key when it refuses ours, and that unit's state is not this one's. A registry
-    // that refuses it leaves every session a stranger's (companionRoles).
+  }
+  // Read only where this plugin's own registration took: dsh keeps an earlier registrant
+  // of the key when it refuses ours, and that unit's state is not this one's. A registry
+  // that refuses SPEAKERS leaves every session a stranger's (companionRoles); one that
+  // refuses RECALL leaves the index unsent, for the model to read (the skill says so).
+  // (Social mode keeps the index in the runtime context, below, and needs no RECALL.)
+  const units = [
+    ...(settings.social ? [['speakers', SPEAKERS]] : []),
+    ...(settings.injectIndex && !settings.social ? [['recall', RECALL]] : []),
+  ]
+  if (units.length > 0) {
     ctx.inject(['sessionProjections'], (inner) => {
-      inner.effect(() => {
-        const registry = inner.sessionProjections
-        let dispose
-        try {
-          dispose = registry.register(SPEAKERS)
-        } catch {
-          return () => {}
-        }
-        live.speakers = registry
-        return () => {
-          if (live.speakers === registry) live.speakers = undefined
-          if (typeof dispose === 'function') dispose()
-        }
-      })
+      for (const [slot, unit] of units) {
+        inner.effect(() => {
+          const registry = inner.sessionProjections
+          let dispose
+          try {
+            dispose = registry.register(unit)
+          } catch {
+            return () => {}
+          }
+          live[slot] = registry
+          return () => {
+            if (live[slot] === registry) live[slot] = undefined
+            if (typeof dispose === 'function') dispose()
+          }
+        })
+      }
     })
   }
   const roleOf = settings.social ? companionRoles(live) : () => 'owner'
@@ -247,42 +258,71 @@ export function apply(ctx, config = {}) {
     refreshSkill()
   })
 
-  // Recall without a read: the index goes into dsh's runtime context, and dsh carries a
-  // changed snapshot to the model on the next request. It is cut at the cap, as a host
-  // that loads only so much would cut it, and the model is told. Optional and possibly
-  // late, like the services above; a host whose prompt registry has no runtime context
-  // keeps the cap and the skill and simply goes without.
+  // Recall without a read: the index reaches the model as a message of this plugin's own,
+  // sent on a step when what the session should see differs from what it was last sent
+  // (recallMessage). It is cut at the cap, as a host that loads only so much would cut it,
+  // and the model is told.
   //
-  // With companion mode or social mode on, a context of its own carries more: companion
-  // mode adds the companion rules after the index; social mode tells who is on the other
-  // end — the user's own conversation gets the memory, any other gets no store at all,
-  // only a note saying so. The rules and the note still go in with `injectIndex: false`,
+  // Not in dsh's runtime context, where it was until 1.3.0: dsh joins every runtime context
+  // into one snapshot and sends the whole snapshot again whenever any part of it changes —
+  // a `cd`, an approval or sandbox switch, the compaction reminder — and every superseded
+  // copy stays in the conversation until it is compacted. With an index near the cap,
+  // that was most of a conversation's text (measured on dsh 0.2.1-rc.5: six copies of a
+  // 20 KB index in a 13-step session with two `cd`s and two saves). dsh's own clock
+  // (dsh-time-context) is sent the same way, as a message of its own.
+  //
+  // Social mode is the exception: there the index stays in the runtime context, as before.
+  // Who is on the other end can change while a step's request is being prepared — a bridge
+  // queues an outsider's message — and only the runtime context is judged again then, at
+  // the very moment dsh admits the step's messages (dsh 0.2's refresh): a message chosen
+  // for the user's own conversation at the start of the step would still be committed,
+  // into what is by then someone else's, on its first turn too. A character chatting with
+  // others seldom moves directory or switches approval, so little is lost.
+  //
+  // With companion mode or social mode on, a runtime context of this plugin's own carries
+  // what is small and settled: companion mode's rules; in social mode, who is on the other
+  // end — the user's own conversation gets the index and where the store is, any other
+  // gets no store at all, only a note saying so. They still go in with `injectIndex: false`,
   // which only turns the index off.
   //
   // That context is REQUIRED: a persona preset may turn optional runtime context off
   // (dsh-persona's `includeRuntimeContext: false`, as the shipped `minimal` preset does),
   // which would leave a companion without the memory and a stranger without the note that
-  // the store is closed — seen on a real dsh.
+  // the store is closed — seen on a real dsh 0.2 (dsh 0.1 drops required ones too). Without
+  // either mode the index stays optional, as every preset expects: a context that is only a
+  // probe, with no text.
+  //
+  // Either way the context says whether the index message may be sent. dsh assembles a
+  // step's prompt just before it asks for the step (`agent/pre-step`), and the assembly
+  // holds an optional runtime context only where the persona preset has not turned runtime
+  // context off; so the session's latest assembly, through dsh's own
+  // `system-prompt/assemble` waterfall (as dsh-working-directory reads it), says yes or no
+  // for the coming step — read outermost (prepended), as the other listeners leave it. Each
+  // assembly overwrites the answer: the refresh dsh makes of the runtime context before the
+  // request runs no waterfall, and cannot carry a yes over to a later step.
   const injectIndex = settings.injectIndex
   const guarded = settings.companion || settings.social
+  const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
+  const asMessage = injectIndex && !settings.social
+  const memoryContext = guarded ? 'engramory:memory' : 'engramory:memory-index'
+  const assembled = new WeakMap() // session -> did its latest assembly hold the memory context
   const contexts = []
-  if (injectIndex || guarded) {
-    const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
-    contexts.push(...guarded ? [{
-      name: 'engramory:memory',
+  if (guarded) {
+    contexts.push({
+      name: memoryContext,
       required: true,
       text: (context) => {
         if (roleOf(context?.agent) !== 'owner') return settings.text.strangerNotice
         let shown = ''
-        try {
-          shown = index(context)
-        } catch {
-          // an index that cannot be read must not take the companion rules with it
-        }
-        // In social mode the skill, which every conversation reads, names no path: the
-        // user's own conversations learn it here, where no index has shown it yet — a
-        // relative pin resolved against this session's directory, as recall resolves it.
         if (settings.social) {
+          try {
+            shown = index(context)
+          } catch {
+            // an index that cannot be read must not take the companion rules with it
+          }
+          // The skill, which every conversation reads, names no path: the user's own
+          // conversations learn it here, where no index has shown it yet — a relative pin
+          // resolved against this session's directory, as recall resolves it.
           const stores = storesOf(settings)
           if (stores.pinned !== undefined) stores.pinned = hostPath(sessionCwd(context), stores.pinned)
           // only a project's index shown, or none: the store the skill sends notes to is
@@ -294,16 +334,72 @@ export function apply(ctx, config = {}) {
         const rules = settings.companion ? settings.text.companion : ''
         return [shown, rules].filter(Boolean).join('\n\n')
       },
-    }] : [{ name: 'engramory:memory-index', text: index }])
+    })
+  } else if (injectIndex) {
+    contexts.push({ name: memoryContext, text: () => '' })
+  }
+
+  // The index message itself, added to what dsh is about to commit for the step (as
+  // dsh-time-context adds its clock): after the other listeners — a compaction among them
+  // (dsh-compaction-basic), which may just have taken the last copy out of the
+  // conversation — and only when the step goes ahead.
+  //
+  // A compaction on a request dsh's model refused as too long (dsh-compaction-basic on
+  // `agent/request-error`) retries the request within the step, with no pre-step: where it
+  // took the last copy out, the copy goes back in as that compaction puts its own summary
+  // in, appended to the session, before the retry. One compaction is not followed: dsh
+  // 0.2.2's on a switch of model, as the request is prepared (`agent/request`, by a listener
+  // outside this one) — the request it compacted goes without the index, and the next step
+  // sends it again.
+  if (asMessage) {
+    const recallMessage = recallFor(settings, live, roleOf, index, assembled)
+    ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+      const result = await next()
+      try {
+        const session = context?.agent?.session
+        if (session !== null && typeof session === 'object') {
+          assembled.set(session, Array.isArray(result?.contexts) &&
+            result.contexts.some((c) => c?.name === memoryContext))
+        }
+      } catch {
+        // never fail an assembly over recall
+      }
+      return result
+    }, { prepend: true })
+    ctx.on('agent/pre-step', async (step, next) => {
+      const decision = await next()
+      if (decision?.kind === 'reject' || step?.signal?.aborted || !Array.isArray(decision?.messages)) {
+        return decision
+      }
+      let message
+      try {
+        message = recallMessage(step.agent)
+      } catch {
+        return decision // never fail a step over recall
+      }
+      return message === undefined ? decision : { ...decision, messages: [...decision.messages, message] }
+    }, { prepend: true })
+    ctx.on('agent/request-error', async (failed, next) => {
+      const action = await next()
+      if (action?.kind !== 'retry' || failed?.signal?.aborted) return action
+      try {
+        const message = recallMessage(failed.agent)
+        if (message !== undefined) failed.agent.session.append('user/message', message, { surfaceOp: 'append' })
+      } catch {
+        // never fail a retry over recall
+      }
+      return action
+    }, { prepend: true })
   }
 
   // Before dsh compacts a conversation into a summary (dsh-compaction-basic, before the step's
   // request goes out; where, compactionReminder() works out), the model is told to save what
   // is worth keeping beyond it — the summary keeps what the conversation needs, not what
-  // memory would. The model, not the user, is told: saving is its part. A section of its
-  // own, so the index's text does not change with it; required where the memory context is
-  // (a persona preset may drop optional context), and in social mode only for the user's
-  // own conversations, the only ones that may save.
+  // memory would. The model, not the user, is told: saving is its part. A runtime context
+  // of its own (outside social mode the index is not in the runtime context, so its switching
+  // on sends no index again); required where the memory context is (a persona preset may drop optional
+  // context), and in social mode only for the user's own conversations, the only ones
+  // that may save.
   if (config.compactionReminder !== false) {
     const pressure = {}
     for (const [service, key] of [['tokenMeter', 'meter'], ['sessionProjections', 'projections'],
@@ -1325,13 +1421,37 @@ function speakerOf(source) {
   if (speaker?.chat !== undefined && speaker.chat !== 'private') return 'other'
   if (speaker?.role === 'owner') return 'owner'
   if (speaker?.role === 'guest') return 'other'
-  const kind = source.kind
+  const kind = source.kind === 'plugin' ? legacyKind(source.plugin) : source.kind
   if (kind === 'user') {
     return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
       source.principal === undefined ? 'owner' : 'other'
   }
   return typeof kind === 'string' && INERT_PRODUCERS.has(kind) ? undefined : 'other'
 }
+
+/**
+ * The kind dsh 0.2 gives a dsh 0.1 producer, which stamped `{ kind: 'plugin', plugin: <its
+ * name> }` (dsh-time-context's clock on 0.1.5–0.1.7, say): as dsh's own session migration
+ * (dsh-session-format-v3-to-v4, `producerKind`) lifts it — a few renamed, the rest of its
+ * own producers keeping their names, anything else `plugin:<name>`, someone else's.
+ */
+function legacyKind(plugin) {
+  if (typeof plugin !== 'string') return undefined
+  return Object.hasOwn(LEGACY_RENAMED, plugin) ? LEGACY_RENAMED[plugin]
+    : LEGACY_SAME_NAME.has(plugin) ? plugin
+      : `plugin:${plugin}`
+}
+const LEGACY_RENAMED = Object.freeze({
+  'compact': 'compact-checkpoint', 'tools-code-mode': 'ptc-mode', 'tools-ptc': 'ptc-mode',
+  'dsh-compaction-basic': 'compact-basic', '@deepseek-ai/dsh-system-prompt': 'runtime-context',
+})
+const LEGACY_SAME_NAME = new Set([
+  'agent-instructions', 'session-reference', 'team-message', 'goal', 'skill-invocation',
+  'skill-catalog', 'coordinator', 'subagent-report', 'subagent-settled', 'webhook',
+  'agent-message', 'model-selection', 'plan-mode', 'time-context', 'tmux-context',
+  'user-approval', 'repeat-tool-reminder', 'tool-cordis', 'cordis-host-runner', 'tool-goal',
+  'tool-jobs', 'hooks-codex', 'hooks-claude-code', 'schedule', 'dsh-session-title-llm',
+])
 
 /** A source that is dsh's `user` kind and nothing else: no request id, caller, zone or speaker. */
 const isBareUser = (source) => source !== null && typeof source === 'object' &&
@@ -1408,8 +1528,9 @@ const SPEAKERS = {
   key: SPEAKERS_KEY,
   // Bumped whenever the state's fields or the fold change, so dsh refolds a session from its
   // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes;
-  // 3: a message in a group chat is someone else's, the owner's included).
-  stateVersion: 3,
+  // 3: a message in a group chat is someone else's, the owner's included; 4: dsh 0.1's own
+  // `{ kind: 'plugin' }` messages are nobody's, no longer an outsider's).
+  stateVersion: 4,
   // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
   stateSchema: {
     parse(value) {
@@ -1710,7 +1831,7 @@ const COMPACT_RETAIN = 0.16
  * Where the reminder comes on, as a share of the point dsh will compact at — early enough
  * that a few large steps still leave the model a turn to save — and below which it goes:
  * the gap keeps a conversation hovering near one figure from switching it on and off, each
- * switch sending the runtime context, index and all, once more. After a compaction the
+ * switch sending dsh's whole runtime context once more. After a compaction the
  * conversation is far below either.
  */
 const REMIND_AT = 0.85
@@ -1819,15 +1940,127 @@ function compactionReminder(settings, pressure) {
 /** A whole number of tokens: an integer, not negative. */
 const count = (n) => Number.isInteger(n) && n >= 0
 
+/**
+ * The source of the index messages this plugin sends: a producer kind of its own, as dsh
+ * 0.2's session format requires of a message (it refuses the retired `plugin` kind) and
+ * dsh 0.1's accepts, and written by nobody (`speaker: { role: 'none' }`), so the SPEAKERS
+ * fold does not take the plugin's own message for an outsider's. dsh's chat shows a message
+ * of a kind other than `user` as a folded context row. No `sections` copy of the text,
+ * which dsh-time-context's clock carries: dsh stores, and by default uploads with its
+ * requests (dsh-session-log-deepseek), each event's data whole.
+ */
+const RECALL_KIND = 'engramory'
+const RECALL_KEY = 'engramory:recall'
+
+/**
+ * The RECALL projection's state: the seq of the latest index message and its text's digest
+ * ('' for the note that no index applies), while it is still in the conversation; both null
+ * when none is.
+ */
+const NOTHING_SENT = Object.freeze({ seq: null, digest: null })
+const isRecall = (value) => value !== null && typeof value === 'object' &&
+  Object.keys(value).length === 2 &&
+  (value.seq === null
+    ? value.digest === null
+    : Number.isSafeInteger(value.seq) && value.seq >= 0 && typeof value.digest === 'string')
+
+const digestOf = (text) => createHash('sha256').update(text).digest('hex')
+
+/** A message's text, its text blocks joined. */
+const textOf = (message) => (Array.isArray(message?.content) ? message.content : [])
+  .map((block) => (block?.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+  .join('')
+
+/**
+ * Does a committed event take the conversation's message at `seq` out of what the model
+ * sees? A replacement names what it replaces in `sourceEventSeqs` — dsh-compaction-basic's
+ * summary every message it shadows. Its `surfaceOp` range is not read: it runs from one
+ * message to another in the conversation's order, which a replaced tool result (a newer
+ * seq in an older place) takes out of seq order.
+ */
+function shadows(event, seq) {
+  const op = event?.surfaceOp
+  if (op === undefined || op === 'append') return false
+  return Array.isArray(event.sourceEventSeqs) && event.sourceEventSeqs.includes(seq)
+}
+
+/**
+ * A host-only dsh session projection folding which index this plugin last sent a session,
+ * while the message is still in the conversation: the latest index message's seq and its
+ * text's digest, until a replacement takes that message out (a compaction), from when
+ * nothing counts as sent. dsh drives it over every committed event, a fork's inherited ones
+ * and a restored log's included, and checkpoints it — so a session resumed after a restart
+ * is not sent again the index it holds.
+ */
+const RECALL = {
+  key: RECALL_KEY,
+  stateVersion: 1,
+  // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
+  stateSchema: {
+    parse(value) {
+      if (!isRecall(value)) throw new TypeError(`${RECALL_KEY}: not a state of this unit`)
+      return { ...value }
+    },
+  },
+  init: () => NOTHING_SENT,
+  apply(state, event) {
+    if (event?.type === 'user/message' && event.data?.source?.kind === RECALL_KIND &&
+        Number.isSafeInteger(event.seq) && event.seq >= 0) {
+      return { seq: event.seq, digest: event.data.source.cleared === true ? '' : digestOf(textOf(event.data)) }
+    }
+    return state.seq !== null && shadows(event, state.seq) ? NOTHING_SENT : state
+  },
+}
+
+/**
+ * What to send a session with its coming step, or undefined: the index it should see,
+ * headed as the latest, when that is not what it holds (RECALL); once, a note that no
+ * index applies any more, when it should see none but holds one — its store gone, say
+ * (social mode, where who is on the other end decides, keeps the index in the runtime
+ * context and never comes here). Nothing where the session's
+ * latest assembly did not hold the memory context (a persona preset turned optional
+ * runtime context off), and nothing without RECALL: a session whose last copy cannot be
+ * told would be sent the index on every step.
+ */
+function recallFor(settings, live, roleOf, index, assembled) {
+  return (agent) => {
+    const session = agent?.session
+    if (session === null || typeof session !== 'object') return undefined
+    if (assembled.get(session) !== true || live.recall === undefined) return undefined
+    const sent = live.recall.stateOf(session, RECALL_KEY)
+    if (!isRecall(sent)) return undefined
+    const shown = roleOf(agent) === 'owner' ? index({ agent }) : ''
+    if (shown) {
+      const text = `${settings.text.recallHead}\n\n${shown}`
+      return digestOf(text) === sent.digest ? undefined : recallMessage(text)
+    }
+    return sent.digest ? recallMessage(settings.text.recallCleared, true) : undefined
+  }
+}
+
+/** One index message as dsh's createUserMessage makes one: a fresh id, frozen. */
+function recallMessage(text, cleared = false) {
+  return Object.freeze({
+    role: 'user',
+    content: Object.freeze([Object.freeze({ type: 'text', text })]),
+    source: Object.freeze({
+      kind: RECALL_KIND,
+      speaker: Object.freeze({ role: 'none' }),
+      ...(cleared ? { cleared: true } : {}),
+    }),
+    id: randomUUID(),
+  })
+}
+
 /** How long a directory's walk up to its project root, or a shown index, is trusted. */
 const RECHECK_MS = 10000
 
 /**
- * The runtime-context text for the indexes a session should see: the pinned
- * `indexPath`, or else its project store and the global one under `$DSH_HOME` (both,
- * when both exist — dsh loads both AGENTS.md scopes too).
+ * The text of the indexes a session should see, for its index message (recallFor): the
+ * pinned `indexPath`, or else its project store and the global one under `$DSH_HOME`
+ * (both, when both exist — dsh loads both AGENTS.md scopes too).
  *
- * dsh calls this synchronously on every step, so it does as little I/O as it can: the
+ * This runs on every step, on dsh's main thread, so it does as little I/O as it can: the
  * walk up to the project root is remembered per directory for a few seconds, and an
  * index is re-read only when it changes (identity, size, mtime or ctime) or a few
  * seconds have passed — then only as far as the cap, since nothing past it is shown.
@@ -2727,8 +2960,14 @@ const TEXT = {
       `${moreThanLines === undefined ? '' : `more than ${moreThanLines} lines, `}${bytes} bytes`,
     cutCap: (size, maxLines, maxBytes) =>
       `[Cut here: the index is over the Engramory cap (${size}; the cap is ${maxLines} ` +
-      `lines / ${maxBytes} bytes). Lines below are left out of this snapshot — compact ` +
+      `lines / ${maxBytes} bytes). Lines below are left out of this copy — compact ` +
       'the index.]',
+    recallHead:
+      'Engramory memory index, as it stands now: it replaces any earlier Engramory index ' +
+      'message in this conversation.',
+    recallCleared:
+      'Engramory: no memory index is loaded now; earlier Engramory index messages in this ' +
+      'conversation no longer apply.',
     skill: skillEn,
   },
   zh: {
@@ -2783,7 +3022,9 @@ const TEXT = {
       `${moreThanLines === undefined ? '' : `超过 ${moreThanLines} 行，`}${bytes} 字节`,
     cutCap: (size, maxLines, maxBytes) =>
       `[到此截断：索引超过了 Engramory 上限（${size}；上限是 ${maxLines} 行 / ` +
-      `${maxBytes} 字节）。下面的行没有进入这次快照——请压缩索引。]`,
+      `${maxBytes} 字节）。下面的行这次没有带上——请压缩索引。]`,
+    recallHead: 'Engramory 记忆索引，现在的样子：它取代这段对话里此前的 Engramory 索引消息。',
+    recallCleared: 'Engramory：现在没有加载记忆索引；这段对话里此前的 Engramory 索引消息不再适用。',
     skill: skillZh,
   },
 }
@@ -2828,18 +3069,18 @@ function code(s) {
 function whereEn(stores, companion) {
   const store = stores.pinned !== undefined
     ? [stores.social
-      ? 'This host pins one index; in the user\'s own conversations your runtime context gives its path.'
+      ? 'This host pins one index; in the user\'s own conversations your context gives its path.'
       : `This host pins one index: ${code(stores.pinned)}${qualified(stores.pinned) ? '' : ', relative to your working directory'}.`,
     'Its folder is the store: every note goes there, beside it.']
     : [stores.social
-      ? 'Your store is the global one, `.engramory-memory/` in dsh\'s home folder; in the user\'s own conversations your runtime context gives its full path.'
+      ? 'Your store is the global one, `.engramory-memory/` in dsh\'s home folder; in the user\'s own conversations your context gives its full path.'
       : `Your store is the global one: ${code(stores.global)}, its index ${code(stores.indexName)}.`,
     'It serves every conversation, whatever its working directory. Write every note there,',
     'beside the index; on the first save, create the folder and the index if they do not',
     'exist yet.',
     '',
     stores.injected
-      ? 'A project can have a store of its own, `.engramory-memory/` in the project\'s root, but only the user creates one — never create it yourself. Where a project has one, your runtime context shows its index as "Project memory index":'
+      ? 'A project can have a store of its own, `.engramory-memory/` in the project\'s root, but only the user creates one — never create it yourself. Where a project has one, your context shows its index as "Project memory index":'
       : 'A project can have a store of its own, a `.engramory-memory/` folder between your working directory and the project\'s root (the nearest folder above that holds `.git`, else the working directory itself), but only the user creates one; never create it yourself. Look for its index there, nearest first, and nowhere else, and skip an index that is a link or leads out of the project; where one exists,',
     `what holds only in that project goes there; what is about the user, ${companion ? 'your own life, ' : ''}how they want you to work`,
     'anywhere, and anything you are unsure of go in the global store.']
@@ -2860,17 +3101,17 @@ function whereEn(stores, companion) {
 function whereZh(stores, companion) {
   const store = stores.pinned !== undefined
     ? [stores.social
-      ? '本宿主固定了一个索引；在用户本人的会话里，运行时上下文会给出它的路径。'
+      ? '本宿主固定了一个索引；在用户本人的会话里，上下文会给出它的路径。'
       : `本宿主固定了一个索引：${code(stores.pinned)}${qualified(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
     '它所在的文件夹就是记忆库：每条笔记都写在那里，放在索引旁边。']
     : [stores.social
-      ? '你的记忆库是全局库，即 dsh 主目录下的 `.engramory-memory/`；在用户本人的会话里，运行时上下文会给出完整路径。'
+      ? '你的记忆库是全局库，即 dsh 主目录下的 `.engramory-memory/`；在用户本人的会话里，上下文会给出完整路径。'
       : `你的记忆库是全局库：${code(stores.global)}，索引是 ${code(stores.indexName)}。`,
     '不管会话的工作目录在哪，用的都是它。每条笔记都写在那里，放在索引旁边；第一次保存时，',
     '文件夹或索引还不存在就新建。',
     '',
     stores.injected
-      ? '项目也可以有自己的库——项目根目录下的 `.engramory-memory/`——但只能由用户来建，你绝不自己建。某个项目有自己的库时，运行时上下文里会出现它的「项目记忆索引」：'
+      ? '项目也可以有自己的库——项目根目录下的 `.engramory-memory/`——但只能由用户来建，你绝不自己建。某个项目有自己的库时，上下文里会出现它的「项目记忆索引」：'
       : '项目也可以有自己的库——工作目录到项目根目录之间的某个 `.engramory-memory/` 文件夹（项目根目录指往上最近的、含 `.git` 的文件夹，没有就是工作目录本身）——但只能由用户来建，你绝不自己建。只在这一段里找它的索引，离工作目录近的优先，别处都不找；索引是链接、或指到项目外面的，跳过；有项目库时，',
     `只在这个项目成立的事记在那里；关于用户的、${companion ? '你自己的人生、' : ''}用户希望你在哪里都照做的，以及拿不准的，`,
     '记在全局库。']
@@ -2925,7 +3166,7 @@ function skillEn(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     'At the start of a task, read the index and open only the notes whose hooks look',
     'relevant. Treat what you recall as background that may be stale: re-verify any',
     'file, flag, or version against the repo before acting on it. On dsh this plugin',
-    'usually puts the index into your runtime context, headed "Project memory index",',
+    'usually puts the index into your context, headed "Project memory index",',
     '"User memory index" or "Memory index": when one is there, use it instead of',
     'reading the file; when none is, read the index of the store above, if there is one yet.',
     '',
@@ -2950,6 +3191,11 @@ function skillEn(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     '`feedback` and `project` notes MUST carry a `**Why:**` line and a',
     '`**How to apply:**` line. Add exactly one pointer line to the index, and delete',
     'memories that turn out to be wrong.',
+    ...(stores.injected ? [
+      'On dsh, with the index in your context, add that line without reading the whole index',
+      'again: before an edit dsh needs the file read once since this conversation was last',
+      'opened or resumed — a few lines (`limit`) will do — and not again after your own edit.',
+    ] : []),
     '',
     'Store settled facts, never current state: "2.0 shipped on 2026-01-15" is durable;',
     '"the current version is X", the tip commit, or a passing test count will rot —',
@@ -3057,8 +3303,8 @@ function skillZh(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     ] : []),
     '',
     '任务开始时读索引，只打开钩子看起来相关的笔记。回忆到的内容当作可能过期的背景：',
-    '动手前对照仓库复核文件、开关和版本。在 dsh 上，本插件通常已把索引放进你的运行时',
-    '上下文，标题是「项目记忆索引」「全局记忆索引」或「记忆索引」：有就直接用，不必读',
+    '动手前对照仓库复核文件、开关和版本。在 dsh 上，本插件通常已把索引放进你的上下文，',
+    '标题是「项目记忆索引」「全局记忆索引」或「记忆索引」：有就直接用，不必读',
     '文件；没有就读上面那个记忆库的索引（如果已经建了）。',
     '',
     '## 写入',
@@ -3085,6 +3331,11 @@ function skillZh(companion = false, stores = storesOf({ indexName: DEFAULT_INDEX
     '',
     '`feedback` 和 `project` 笔记**必须**有一行 `**为什么：**` 和一行 `**怎么用：**`。',
     '索引里只加一行指针；发现记错了的记忆就删掉。',
+    ...(stores.injected ? [
+      '在 dsh 上，索引已在你的上下文里时，加这一行不必再把整个索引读一遍：dsh 只要求这段',
+      '对话这次打开或恢复以来、改之前读过一次这个文件——用 `limit` 读几行就够——你自己改过之后',
+      '也不用再读。',
+    ] : []),
     '',
     '只存定论，不存当前状态：「2.0 于 2026-01-15 发布」是持久的；「当前版本是 X」、最新',
     '提交、测试通过数都会过期——改记去哪里读。',
