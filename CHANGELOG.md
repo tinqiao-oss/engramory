@@ -6,6 +6,33 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.0 — 2026-11-03
+
+The dsh plugin's global store can be moved to another folder, its memory with it.
+
+- **dsh: move the global store from the settings page.** *Where the memory is*, at the
+  foot of the plugin's settings, takes an empty folder (or one not there yet) and moves
+  the whole store there — notes, index, archive — then clears the old place. The store is
+  copied and checked file by file before the switch; the old place is then renamed aside,
+  compared with the new one and removed: what was written to it meanwhile is added to the
+  new place, and a file changed in both places keeps the new place's version, with the old
+  one's beside it as `<name>.old-<id>` and a line for it at the end of the index. Each step
+  is written down first, so a move cut short is undone (before the switch) or finished
+  (after) by the next dsh to open. For those few seconds dsh's file tools are held off the
+  store; afterwards a save to the old place is refused with the new one named.
+- **The place belongs to the dsh home, not a profile.** It is kept in
+  `$DSH_HOME/.engramory-memory.json`, so the desktop app, the command line and `dsh web` on
+  one computer all use the moved store. With no such file the store is at its default place,
+  as before. A file that cannot be taken as written names no place: recall then shows no
+  global index, the skill says not to save to it, and in social mode someone else's
+  conversation gets no file tool at all.
+- **dsh, social mode: the global store is closed to someone else's conversation wherever it
+  is** — moved, reached through a link among its parent folders (a dangling one too), with a
+  move's own folders beside it — and now also with `indexPath` pinned, as another profile of
+  the same home may still use it.
+- **dsh: a project store that is the global store under another name** (a checkout's link
+  to it) is shown once, as the global store.
+
 ## 1.4.0 — 2026-11-03
 
 The dsh plugin's memory page can check for a newer version. Nothing else changes.

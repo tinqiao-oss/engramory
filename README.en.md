@@ -26,7 +26,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.4.0.** The store format, the tools and the index caps now change
+> **Status: 1.5.0.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like
@@ -69,7 +69,8 @@ dsh plugin --profile <name> add dsh-engramory
 ```
 
 In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page. It
-works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default, and
+works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default (the
+plugin's settings page can move it, all of it, elsewhere), and
 the sidebar gets a read-only Memory page. Settings, companion mode, social mode and the
 cap's rules are in the [plugin README](adapters/dsh/plugin/README.en.md).
 
@@ -128,6 +129,9 @@ python tools/engramory_init.py claude-reader --project-root ~/.claude \
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.dsh/.engramory-memory
 ```
+
+Where the dsh plugin has moved its global store, `--memory-root` is where it is now; move it
+again, and install the readers again with the new place.
 
 The other way round, dsh reading Claude Code's store, is `dsh-reader` with
 `--memory-root ~/.claude/projects/<project>/memory`.

@@ -1285,3 +1285,218 @@ test('client: an index the desktop shows in its folder rather than opens is said
   assert.ok(textOf(view.tree).includes('opened{"name":'))
   assert.ok(!textOf(view.tree).includes('revealed{'))
 })
+
+// --- where the memory is: the place section on the package's page ---
+
+const placeData = (patch = {}) => ({
+  store: '/home/u/.dsh/.engramory-memory', default: '/home/u/.dsh/.engramory-memory',
+  file: '/home/u/.dsh/.engramory-memory.json', ...patch,
+})
+
+/**
+ * A fetch answering the settings route with settingsData() and the store route from `store`
+ * (by method; a function gets what was sent to it so far), recording what reached the store route.
+ */
+function placeFetch(store) {
+  const sent = []
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method ?? 'GET'
+    if (!url.startsWith('api/engramory/store')) {
+      return { ok: true, status: 200, json: async () => settingsData() }
+    }
+    sent.push({ url, method, body: init.body && JSON.parse(init.body) })
+    const next = store[method]
+    const value = typeof next === 'function' ? next(sent) : next
+    return { ok: value.status === undefined || value.status < 400, status: value.status ?? 200, json: async () => value.body ?? value }
+  }
+  return sent
+}
+
+/** The package's page, mounted and settled, with timers cut to nothing while `fn` runs. */
+async function withPlacePage(fn) {
+  const { slots, react } = await applied()
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (callback) => realTimeout(callback, 0)
+  try {
+    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k, vars) => (vars ? `${k}${JSON.stringify(vars)}` : k) }))
+    await page.settle()
+    await fn(page)
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
+}
+
+const placeInput = (tree) => findAll(tree, (n) => n.type === 'input' && n.props['aria-label'] === 'placeInput')[0]
+
+test('client: the place section says where the memory is, moves it to the folder typed, and says when it is done', async () => {
+  const sent = placeFetch({
+    GET: (log) => (log.some((s) => s.method === 'POST')
+      ? (log.at(-1).url.includes('?id=')
+        ? placeData({ store: '/data/vault', outcome: { done: log.filter((s) => s.url.includes('?id=')).length > 1, ok: true, conflicts: 0 } })
+        : placeData({ store: '/data/vault' }))
+      : placeData()),
+    POST: { status: 202, body: { ok: true, id: 'abcd1234' } },
+  })
+  await withPlacePage(async (page) => {
+    assert.match(textOf(page.tree), /placeNow \/home\/u\/\.dsh\/\.engramory-memoryplaceIsDefault/)
+    assert.equal(button(page.tree, 'placeBack'), undefined, 'no way back to where it already is')
+    assert.equal(button(page.tree, 'placeMove').props.disabled, true, 'nothing typed yet')
+    placeInput(page.tree).props.onChange({ target: { value: '  /data/vault ' } })
+    await page.settle()
+    button(page.tree, 'placeMove').props.onClick()
+    for (let i = 0; i < 20 && !/placeMoved\b/.test(textOf(page.tree)); i++) await page.settle()
+    assert.deepEqual(sent.find((s) => s.method === 'POST').body, { to: '/data/vault' })
+    assert.ok(sent.some((s) => s.url === 'api/engramory/store?id=abcd1234'), 'it asks after the move it started')
+    assert.match(textOf(page.tree), /placeMoved/)
+    assert.match(textOf(page.tree), /placeNow \/data\/vault/)
+    assert.equal(placeInput(page.tree).props.value, '')
+    assert.ok(button(page.tree, 'placeBack'), 'moved: the way back is offered')
+  })
+})
+
+test('client: a move with files changed at both places says how many to merge', async () => {
+  placeFetch({
+    GET: (log) => placeData(log.some((s) => s.url.includes('?id='))
+      ? { store: '/data/vault', outcome: { done: true, ok: true, conflicts: 2 } } : {}),
+    POST: { status: 202, body: { ok: true, id: 'abcd1234' } },
+  })
+  await withPlacePage(async (page) => {
+    placeInput(page.tree).props.onChange({ target: { value: '/data/vault' } })
+    await page.settle()
+    button(page.tree, 'placeMove').props.onClick()
+    for (let i = 0; i < 20 && !/placeMovedConflicts/.test(textOf(page.tree)); i++) await page.settle()
+    assert.match(textOf(page.tree), /placeMovedConflicts\{"count":2\}/)
+  })
+})
+
+test('client: a place the plugin turns down says why, and a move that stopped says where', async () => {
+  for (const [answer, why] of [
+    [{ status: 400, body: { ok: false, error: 'place', reason: 'notEmpty' } }, 'whyNotEmpty'],
+    [{ status: 400, body: { ok: false, error: 'source', reason: 'unavailable' } }, 'whyUnavailable'],
+    [{ status: 409, body: { ok: false, error: 'busy' } }, 'whyBusy'],
+    [{ status: 500, body: { ok: false, error: 'failed', message: 'x' } }, 'whyFailed'],
+  ]) {
+    placeFetch({ GET: placeData(), POST: answer })
+    await withPlacePage(async (page) => {
+      placeInput(page.tree).props.onChange({ target: { value: '/data/full' } })
+      await page.settle()
+      button(page.tree, 'placeMove').props.onClick()
+      for (let i = 0; i < 20 && !/placeMoveFailed/.test(textOf(page.tree)); i++) await page.settle()
+      assert.match(textOf(page.tree), new RegExp(`placeMoveFailed\\{"reason":"${why}`), why)
+      assert.equal(button(page.tree, 'placeMove').props.disabled, false, 'the form is usable again')
+    })
+  }
+  placeFetch({
+    GET: (log) => placeData(log.some((s) => s.url.includes('?id='))
+      ? { outcome: { done: true, ok: false, error: 'failed', detail: 'EBUSY' } } : {}),
+    POST: { status: 202, body: { ok: true, id: 'abcd1234' } },
+  })
+  await withPlacePage(async (page) => {
+    placeInput(page.tree).props.onChange({ target: { value: '/data/vault' } })
+    await page.settle()
+    button(page.tree, 'placeMove').props.onClick()
+    for (let i = 0; i < 20 && !/placeMoveFailed/.test(textOf(page.tree)); i++) await page.settle()
+    assert.match(textOf(page.tree), /placeMoveFailed\{"reason":"whyFailed \(EBUSY\)"\}/)
+  })
+})
+
+test('client: back to the default place, a pinned index, a broken record, a move left to finish', async () => {
+  const sent = placeFetch({
+    GET: placeData({ store: '/data/vault' }),
+    POST: { status: 200, body: { ok: true, same: true } },
+  })
+  await withPlacePage(async (page) => {
+    assert.doesNotMatch(textOf(page.tree), /placeIsDefault/)
+    button(page.tree, 'placeBack').props.onClick()
+    for (let i = 0; i < 20 && !/placeSame/.test(textOf(page.tree)); i++) await page.settle()
+    assert.deepEqual(sent.find((s) => s.method === 'POST').body, { to: null })
+  })
+  for (const [data, says, offers] of [
+    [placeData({ pinned: true }), /placePinned/, false],
+    [placeData({ remote: true }), /placeRemote/, false],
+    [placeData({ store: null, problem: 'pointer' }), /placeProblem\{"file":"\/home\/u\/\.dsh\/\.engramory-memory\.json"\}/, false],
+    [placeData({ moving: { id: 'abcd1234', phase: 'committed', from: '/a', to: '/b', error: 'failed' } }), /placeResuming placeResumingWhy/, true],
+    [placeData({ customSkill: true, legacyRules: true }), /placeCustomSkill[\s\S]*placeLegacy/, true],
+  ]) {
+    placeFetch({ GET: data, POST: { status: 500, body: {} } })
+    await withPlacePage(async (page) => {
+      assert.match(textOf(page.tree), says)
+      assert.equal(placeInput(page.tree) !== undefined, offers, JSON.stringify(data))
+    })
+  }
+})
+
+test('client: where the memory is cannot be read: said, and offered again', async () => {
+  let fail = true
+  globalThis.fetch = async (url) => (url.startsWith('api/engramory/store') && fail
+    ? { ok: false, status: 500, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => (url.startsWith('api/engramory/store') ? placeData() : settingsData()) })
+  await withPlacePage(async (page) => {
+    assert.match(textOf(page.tree), /placeLoadFailed/)
+    fail = false
+    const section = findAll(page.tree, (n) => n.type === 'section' && /placeLoadFailed/.test(textOf(n)))[0]
+    findAll(section, (n) => n.type === 'button')[0].props.onClick()
+    await page.settle()
+    assert.match(textOf(page.tree), /placeNow/)
+  })
+})
+
+test('client: a place the store is in already reads where it is again; a move another dsh finished is said to be over', async () => {
+  // another dsh has moved it to /data/vault meanwhile: the page still says the default place
+  placeFetch({
+    GET: (log) => (log.some((s) => s.method === 'POST') ? placeData({ store: '/data/vault' }) : placeData()),
+    POST: { status: 200, body: { ok: true, same: true } },
+  })
+  await withPlacePage(async (page) => {
+    placeInput(page.tree).props.onChange({ target: { value: '/data/vault' } })
+    await page.settle()
+    button(page.tree, 'placeMove').props.onClick()
+    for (let i = 0; i < 20 && !/placeSame/.test(textOf(page.tree)); i++) await page.settle()
+    assert.match(textOf(page.tree), /placeNow \/data\/vault/)
+  })
+  placeFetch({
+    GET: (log) => placeData(log.some((s) => s.url.includes('?id=')) ? { store: '/data/vault', outcome: { done: true, elsewhere: true } } : {}),
+    POST: { status: 202, body: { ok: true, id: 'abcd1234' } },
+  })
+  await withPlacePage(async (page) => {
+    placeInput(page.tree).props.onChange({ target: { value: '/data/vault' } })
+    await page.settle()
+    button(page.tree, 'placeMove').props.onClick()
+    for (let i = 0; i < 20 && !/placeEnded/.test(textOf(page.tree)); i++) await page.settle()
+    assert.match(textOf(page.tree), /placeEnded/)
+    assert.doesNotMatch(textOf(page.tree), /placeStillMoving/)
+  })
+})
+
+test('client: a move under way when the page opened is followed until it is over', async () => {
+  let asked = 0
+  placeFetch({
+    GET: () => (++asked < 3
+      ? placeData({ moving: { id: 'abcd1234', phase: 'detached', from: '/a', to: '/data/vault' } })
+      : placeData({ store: '/data/vault' })),
+    POST: { status: 500, body: {} },
+  })
+  await withPlacePage(async (page) => {
+    for (let i = 0; i < 20 && /placeResuming/.test(textOf(page.tree)); i++) await page.settle()
+    assert.ok(asked >= 3, 'asked again on its own')
+    assert.doesNotMatch(textOf(page.tree), /placeResuming/)
+    assert.match(textOf(page.tree), /placeNow \/data\/vault/)
+  })
+})
+
+test('client: a move followed from the page is still followed after one look fails', async () => {
+  let asked = 0
+  globalThis.fetch = async (url) => {
+    if (!url.startsWith('api/engramory/store')) return { ok: true, status: 200, json: async () => settingsData() }
+    asked++
+    if (asked === 2) throw new Error('the network hiccupped')
+    return { ok: true, status: 200, json: async () => (asked < 3
+      ? placeData({ moving: { id: 'abcd1234', phase: 'detached', from: '/a', to: '/data/vault' } })
+      : placeData({ store: '/data/vault' })) }
+  }
+  await withPlacePage(async (page) => {
+    for (let i = 0; i < 20 && /placeResuming/.test(textOf(page.tree)); i++) await page.settle()
+    assert.ok(asked >= 3, `asked ${asked} times`)
+    assert.doesNotMatch(textOf(page.tree), /placeResuming/)
+  })
+})

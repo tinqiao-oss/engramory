@@ -16,7 +16,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.4.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
+> **状态:1.5.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ## 长什么样
 
@@ -55,7 +55,7 @@ updated: 2026-10-31
 dsh plugin --profile <名字> add dsh-engramory
 ```
 
-dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`，侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
+dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`（插件的设置页能换位置，插件会整个搬过去），侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
 
 ![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
@@ -95,6 +95,8 @@ python tools/engramory_init.py claude-reader --project-root ~/.claude \
 python tools/engramory_init.py codex-reader --project-root ~/.codex \
   --memory-root ~/.dsh/.engramory-memory
 ```
+
+dsh 插件给全局库换过位置的，`--memory-root` 写换过之后的位置；以后再换，读者要用新位置重装一次。
 
 反过来让 dsh 读 Claude Code 的库，换成 `dsh-reader`，`--memory-root` 指向 `~/.claude/projects/<project>/memory`。
 

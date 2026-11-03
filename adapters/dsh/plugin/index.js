@@ -25,12 +25,12 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, realpath,
-  realpathSync, statSync,
+  closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, readSync,
+  realpath, realpathSync, statSync,
 } from 'node:fs'
 import * as fsp from 'node:fs/promises'
 import { homedir, hostname, networkInterfaces } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 
 export const name = 'engramory'
@@ -74,8 +74,17 @@ const PARTIAL_WRITES = new Set(['edit', 'str_replace', 'insert'])
 /**
  * Where `tools/engramory_init.py dsh` puts a store: `<root>/.engramory-memory/`, the
  * root being `$DSH_HOME` for a global install and the project for a project install.
+ * The global store can be moved elsewhere (homeState); this stays its default place.
  */
 const STORE_DIR = '.engramory-memory'
+
+/**
+ * Is `segment` (folded) a name this plugin gives its own folders and files: a store's, or
+ * one of a move's (POINTER_FILE and the others, the folders a move copies into and
+ * leaves behind)? All of them begin `.engramory-memory`, then end or go on with `-` or `.`.
+ */
+const ownName = (segment) => segment === STORE_DIR ||
+  segment.startsWith(`${STORE_DIR}-`) || segment.startsWith(`${STORE_DIR}.`)
 
 /** After every first-party runtime context (dsh's own orders end at 210). */
 const INDEX_CONTEXT_ORDER = 300
@@ -208,11 +217,15 @@ export function apply(ctx, config = {}) {
   // get here (an edit whose simulated result exceeds V8's string limit, say), and like
   // the Python guard it fails open — the host could not perform such an edit either.
   // The stranger filter is the exception: it fails closed on its own (refuseStranger).
+  // So is a move of the store (refuseMoving), which holds every write to it off while it
+  // runs, and turns one sent to where the store was toward where it is.
   ctx.tools.guard((exec) => {
     const stranger = settings.social
       ? refuseStranger(exec, settings, sessionCwd, roleOf)
       : undefined
     if (stranger !== undefined) return stranger
+    const moving = refuseMoving(exec, settings, sessionCwd)
+    if (moving !== undefined) return moving
     try {
       return refuseOversizedIndex(exec, settings, sessionCwd)
     } catch {
@@ -228,11 +241,16 @@ export function apply(ctx, config = {}) {
   // level would throw (undeclared service — issue #8's second crash); inside the
   // callback the service is declared, so the read is legal.
   let refreshSkill = () => {}
+  // The built-in skill names where the global store is, and the store can be moved — by this
+  // dsh or another sharing its home (homeState): the skill is registered again once the place
+  // it names is not where the store is, checked as each step's prompt is assembled (below).
+  let skillPlace
   if (config.registerSkill !== false) {
     ctx.inject(['skills'], (inner) => {
       let dispose
       const register = () => {
         if (typeof dispose === 'function') dispose()
+        skillPlace = placeKey()
         dispose = inner.skills.register({
           name: 'engramory',
           // the description names the index the user configured, not always MEMORY.md
@@ -267,6 +285,15 @@ export function apply(ctx, config = {}) {
     language.current = next
     refreshSkill()
   })
+  const keepSkillCurrent = config.registerSkill !== false && config.skill === undefined
+    ? () => {
+        try {
+          if (skillPlace !== undefined && placeKey() !== skillPlace) refreshSkill()
+        } catch {
+          // never fail an assembly over the skill
+        }
+      }
+    : () => {}
 
   // Recall without a read: the index reaches the model as a message of this plugin's own,
   // sent on a step when what the session should see differs from what it was last sent
@@ -336,8 +363,8 @@ export function apply(ctx, config = {}) {
           const stores = storesOf(settings)
           if (stores.pinned !== undefined) stores.pinned = hostPath(sessionCwd(context), stores.pinned)
           // only a project's index shown, or none: the store the skill sends notes to is
-          // still to be named
-          if (!shown.includes(stores.pinned ?? join(stores.global, stores.indexName))) {
+          // still to be named (or said to be unknown, its place unreadable)
+          if (stores.unknown || !shown.includes(stores.pinned ?? join(stores.global, stores.indexName))) {
             shown = [shown, settings.text.storeAt(stores)].filter(Boolean).join('\n\n')
           }
         }
@@ -433,6 +460,7 @@ export function apply(ctx, config = {}) {
     const filledIn = (c) => ours.has(c?.name) && c.interpolate !== false &&
       typeof c.text === 'string' && c.text.includes('{{')
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+      keepSkillCurrent()
       const result = await next()
       try {
         const listed = Array.isArray(result?.contexts) ? result.contexts : []
@@ -469,6 +497,13 @@ export function apply(ctx, config = {}) {
         }))
       }
     })
+  } else {
+    // nothing of this plugin's in the runtime context: the assembly is still where the skill
+    // is kept naming where the store is
+    ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+      keepSkillCurrent()
+      return next()
+    }, { prepend: true })
   }
 
   // The memory page (client.js, the sidebar's Memory entry) finds the projects' stores
@@ -502,7 +537,8 @@ export function apply(ctx, config = {}) {
   ctx.inject(['connection'], (inner) => {
     if (rowId !== undefined && rowId !== SETTINGS_ROW) return
     if (typeof inner.connection?.fetch?.register !== 'function') return
-    for (const route of [...settingsRoutes(inner, config, fiber), memoryRoute(settings, desk)]) {
+    for (const route of [...settingsRoutes(inner, config, fiber), memoryRoute(settings, desk),
+      storeRoute(settings, config)]) {
       // A row of the same id in a nested include claims the path first: then this one
       // serves no page, rather than failing to mount.
       inner.effect(() => {
@@ -514,6 +550,26 @@ export function apply(ctx, config = {}) {
       })
     }
   })
+
+  // A move of the store cut short — dsh closed, or the machine went down, partway — is taken
+  // up again shortly after dsh opens, and then every minute while one is left (resumeMove):
+  // by whichever dsh sharing this home gets to it first, the desktop app's or the command
+  // line's, headless included. With nothing to finish, a look costs one stat.
+  const home = dshHome()
+  let timer
+  let stopped = false
+  const later = (ms) => {
+    timer = setTimeout(() => {
+      resumeMove(home, settings).catch(() => {}).finally(() => { if (!stopped) later(RESUME_EVERY_MS) })
+    }, ms)
+    timer.unref?.()
+  }
+  later(waitMs(RESUME_FIRST_MS))
+  const stop = () => {
+    stopped = true
+    clearTimeout(timer)
+  }
+  if (typeof ctx.effect === 'function') ctx.effect(() => stop)
 }
 
 /** The settings page's route; client.js fetches it relative to the page, as dsh's own pages do. */
@@ -848,7 +904,15 @@ async function listStores(settings, registry) {
   const stores = []
   // the places it could not read, once each: two workspaces may reach one store
   const failed = new Set()
+  // Where the global store is: a home that cannot say leaves it out, and the page says why.
+  let location
+  try {
+    if (homeState().invalid !== undefined) location = 'unknown'
+  } catch {
+    location = 'unreadable'
+  }
   for (const candidate of list) {
+    if (candidate.kind === 'user' && location !== undefined) continue
     try {
       const store = await locate(candidate, settings)
       if (store === undefined) continue
@@ -873,6 +937,7 @@ async function listStores(settings, registry) {
     more,
     ...(failed.size === 0 ? {} : { unreadable: failed.size }),
     ...(pinned === undefined ? {} : { pinned }),
+    ...(location === undefined ? {} : { location }),
   }
 }
 
@@ -887,7 +952,8 @@ async function locate(candidate, settings) {
   let root
   let indexName = settings.indexName
   if (candidate.kind === 'user') {
-    dir = join(dshHome(), STORE_DIR)
+    dir = homeState().store
+    if (dir === undefined) return undefined // the home cannot say where it is (listStores says so)
   } else if (candidate.kind === 'pinned') {
     dir = dirname(settings.indexPath)
     indexName = basename(settings.indexPath)
@@ -1676,9 +1742,13 @@ const MAX_LISTED = 32
  *     levels and follows links, and any tree may hold a store this filter cannot see
  *     from here (another project's, below the session's directory). grep and glob
  *     with no `path` walk the session's directory, so they are refused too;
- *   - a path with a `.engramory-memory` segment, as written or as the OS resolves it
- *     (links, junctions, 8.3 short names) — a store that does not exist yet included,
- *     so a stranger cannot plant one for the user's next session;
+ *   - a path with a `.engramory-memory` segment, or one named as a move names its own
+ *     (ownName), as written or as the OS resolves it (links, junctions, 8.3 short names) —
+ *     a store that does not exist yet included, so a stranger cannot plant one for the
+ *     user's next session;
+ *   - a path in the global store, wherever it has been moved, or in a move's folders
+ *     (storeTargets) — whether or not an index is pinned, since the store is the dsh
+ *     home's, not this profile's;
  *   - a path in the pinned index's directory, or in the directory its target is in;
  *   - the same for every file a call lists (`files`, as dsh's `present` takes them), and
  *     for where a session moves to (`cd`) — there a directory is fine, a store's is not;
@@ -1759,8 +1829,8 @@ const MAX_STRANGER_DEPTH = 64
 /** A path compared without case or Unicode form (the stranger filter only). */
 const foldPath = (p) => p.normalize('NFC').toLowerCase()
 
-/** Does a folded path have a store directory among its segments? */
-const namesStore = (folded) => folded.split(/[\\/]+/).includes(STORE_DIR)
+/** Does a folded path have a store directory, or one of a move's names, among its segments? */
+const namesStore = (folded) => folded.split(/[\\/]+/).some(ownName)
 
 /** Is folded `path` the folded `root` or below it? */
 const under = (path, root) =>
@@ -1801,18 +1871,37 @@ function osKey(p) {
  * A store elsewhere that is a link is not looked for. Every path walked here is held to
  * the same bounds as a tool's — no network path, nothing too deep — and an error that
  * is not "nothing there" throws, refusing the call.
+ *
+ * The global store is where the dsh home says it is (homeState), moved or not, with its
+ * default place, the places it was moved from and a move's own folders beside it — pinned
+ * index or not, since another profile of the same home may use it. Where that cannot be
+ * read, the call is refused. Those places are also reached through a link among their
+ * ancestors, a dangling one too (aliasesOf): `C:\alias\vault` with `C:\alias` pointing to a
+ * drive not there yet is closed at `D:\future\vault` as well.
  */
 function storeTargets(cwd, settings) {
   const start = checkedRoot(cwd ?? process.cwd())
-  const dirs = [checkedRoot(join(dshHome(), STORE_DIR))]
+  // the home's own bounds first: a home on another machine refuses before any I/O
+  const fallback = checkedRoot(join(dshHome(), STORE_DIR))
+  const state = homeState()
+  if (state.invalid !== undefined || state.unknownMove) throw new Error('where the store is cannot be read')
+  const { moving } = state
+  const named = [fallback, state.store,
+    ...(moving === undefined ? [] : [moving.from, moving.to, moving.staging, moving.detached])].map(checkedRoot)
+  const dirs = [...named, ...state.retired.map(checkedRoot)]
+  let indexLinked
   if (settings.indexPath === undefined) {
     // The global index may itself be a link, and recall reads through it: the directory
     // it points to holds the user's index under a name no store has.
-    const index = join(dirs[0], settings.indexName)
+    const index = join(state.store, settings.indexName)
     dirs.push(dirname(realpathOr(index)))
     const pointed = linkTarget(index)
     if (pointed !== undefined) dirs.push(dirname(pointed))
+    indexLinked = pointed === undefined ? undefined : dirname(pointed)
   }
+  // the places the store has been or is, and the pinned index's folder (below), are also
+  // closed where a link among their parents leads
+  const linked = [...named, ...state.retired, ...(indexLinked === undefined ? [] : [indexLinked])]
   for (let dir = start; ; dir = dirname(dir)) {
     const store = join(dir, STORE_DIR)
     if (present(store)) dirs.push(store)
@@ -1824,7 +1913,9 @@ function storeTargets(cwd, settings) {
     dirs.push(dirname(pinned), dirname(realpathOr(pinned)))
     const pointed = linkTarget(pinned)
     if (pointed !== undefined) dirs.push(dirname(pointed))
+    linked.push(dirname(pinned), ...(pointed === undefined ? [] : [dirname(pointed)]))
   }
+  for (const dir of linked) dirs.push(...aliasesOf(dir))
   for (const d of [...dirs]) {
     const pointed = linkTarget(d)
     if (pointed !== undefined) dirs.push(pointed)
@@ -1849,6 +1940,39 @@ function present(p) {
     if (absent(error)) return false
     throw error
   }
+}
+
+/** How many links aliasesOf() follows, one through another, before it gives up (and refuses). */
+const MAX_LINK_HOPS = 8
+
+/**
+ * The other names `p` goes by through a link or junction among its ancestors (or `p`
+ * itself): for each, its target with the rest of `p` after it — a dangling link's too, read
+ * from the link itself — and that path's own aliases in turn. Synchronous and bounded: a
+ * stat per segment, MAX_LINK_HOPS links deep, the same bounds as a tool's path on every name
+ * reached; past them, or on an error but "nothing there", it throws.
+ */
+function aliasesOf(p, hops = 0) {
+  const out = []
+  const { root } = parse(p)
+  const parts = p.slice(root.length).split(/[\\/]+/).filter(Boolean)
+  let head = root
+  for (let i = 0; i < parts.length; i++) {
+    head = join(head, parts[i])
+    let link
+    try {
+      link = lstatSync(head)
+    } catch (error) {
+      if (absent(error)) break // nothing below it exists either
+      throw error
+    }
+    if (!link.isSymbolicLink()) continue
+    if (hops >= MAX_LINK_HOPS) throw new Error(`too many links: ${p}`)
+    const alias = checkedRoot(join(checkedRoot(resolve(dirname(head), readlinkSync(head))), ...parts.slice(i + 1)))
+    out.push(alias, ...aliasesOf(alias, hops + 1))
+    break // what follows is walked through the alias
+  }
+  return out
 }
 
 /** Where a link or junction at `p` points, resolved, dangling or not; else undefined. */
@@ -2129,15 +2253,16 @@ const RECHECK_MS = 10000
 
 /**
  * The text of the indexes a session should see, for its index message (recallFor): the
- * pinned `indexPath`, or else its project store and the global one under `$DSH_HOME`
- * (both, when both exist — dsh loads both AGENTS.md scopes too) — and whether any store
- * there could not be read just now (`unsure`).
+ * pinned `indexPath`, or else its project store and the global one, wherever the dsh home
+ * says it is (both, when both exist — dsh loads both AGENTS.md scopes too) — and whether any
+ * store there could not be read just now (`unsure`).
  *
  * This runs on every step, on dsh's main thread, so it does as little I/O as it can: the
  * walk up to the project root is remembered per directory for a few seconds, and an
  * index is re-read only when it changes (identity, size, mtime or ctime) or a few
  * seconds have passed — then only as far as the cap, since nothing past it is shown.
- * A step usually costs one stat per store. A failed read is not remembered.
+ * A step usually costs one stat per store, and two for the home's own small files
+ * (homeState). A failed read is not remembered.
  */
 function indexRecall(settings, sessionCwd) {
   const projects = new Map() // session directory -> { at, store }
@@ -2151,17 +2276,32 @@ function indexRecall(settings, sessionCwd) {
     // store the user placed there by name — an absolute pin, $DSH_HOME — still is.
     const remote = remotePath(cwd)
     const pinned = settings.indexPath === undefined ? undefined : hostPath(cwd, settings.indexPath)
+    // An index there that cannot be read just now — locked, refused, a disk that hiccupped —
+    // is not news that it went away: what the session should see is then not known.
+    let unsure = false
+    // Where the global store is (homeState): not shown at all where that is not known — the
+    // skill then says so — rather than guessed at; not known just now, the same as an index
+    // not read just now.
+    let global
+    if (pinned === undefined) {
+      try {
+        const state = homeState()
+        if (state.invalid === undefined) global = { label: labels.user, path: join(state.store, settings.indexName) }
+      } catch {
+        unsure = true
+      }
+    }
     const candidates = pinned !== undefined
       ? (remote && !qualified(settings.indexPath) && remotePath(pinned)
           ? []
           : [{ label: labels.pinned, path: pinned }])
-      : [remote ? undefined : projectStore(cwd, settings.indexName, projects, labels.project),
-          { label: labels.user, path: join(dshHome(), STORE_DIR, settings.indexName) }]
+      : [remote ? undefined : projectStore(cwd, settings.indexName, projects, labels.project), global]
     const seen = new Set()
     const parts = []
-    // An index there that cannot be read just now — locked, refused, a disk that hiccupped —
-    // is not news that it went away: what the session should see is then not known.
-    let unsure = false
+    // A project store that is the global store under another name (a checkout's link to where
+    // the user put it) is the global store: shown once, as that. Looked at only with a project
+    // store there: the global index costs one stat a step otherwise, as before.
+    const globalId = global === undefined || candidates[0] === undefined ? undefined : identityAt(global.path)
     for (const store of candidates) {
       if (store === undefined) continue
       let stat
@@ -2174,6 +2314,7 @@ function indexRecall(settings, sessionCwd) {
       if (!stat.isFile()) continue
       const identity = stat.ino ? `${stat.dev}:${stat.ino}` : pathKey(store.path)
       if (seen.has(identity)) continue // the same file under both names
+      if (store !== global && identity === globalId) continue
       const key = `${store.label}\0${store.path}`
       const stamp = `${identity}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
       let entry = shown.get(key)
@@ -2194,6 +2335,17 @@ function indexRecall(settings, sessionCwd) {
       parts.push(entry.text)
     }
     return { text: parts.join('\n\n'), unsure }
+  }
+}
+
+/** A file's identity as indexRecall() tells two names of one file apart, or undefined. */
+function identityAt(path) {
+  try {
+    const stat = statSync(path, { bigint: true })
+    if (!stat.isFile()) return undefined
+    return stat.ino ? `${stat.dev}:${stat.ino}` : pathKey(path)
+  } catch {
+    return undefined
   }
 }
 
@@ -2309,6 +2461,1188 @@ function dshHome() {
   return resolve(expanded)
 }
 
+// --- Where the global store is, and moving it ---
+
+/**
+ * The global store's place belongs to the dsh home, not to a profile: every profile under
+ * one `$DSH_HOME` — the desktop app's, the command line's, `dsh web`'s, each with a plugin
+ * config of its own — shares the store there, so a move made from one is a move for all,
+ * or the others would go on writing where the store no longer is. The place is kept in a
+ * small file beside the default store; with none, the store is at its default place:
+ *
+ *   { "version": 1, "store": "<absolute path>", "retired": ["<a place it moved from>", …] }
+ *
+ * The settings page moves it (storeRoute). The places it moved from stay listed, the
+ * latest MAX_RETIRED: dsh's file tools are turned from them to where it is now
+ * (refuseMoving), for a model still holding an old path in its conversation.
+ */
+const POINTER_FILE = `${STORE_DIR}.json`
+/** A move under way (MOVE_STEPS), so that one cut short is finished, or undone, by the next dsh to open. */
+const JOURNAL_FILE = `${STORE_DIR}-move.json`
+/** What each file held when the move copied it: how a late change at the old place is told from that copy. */
+const HASHES_FILE = `${STORE_DIR}-move-hashes.json`
+/** Held through a move or the finishing of one, by every dsh sharing the home: one at a time. */
+const LOCK_FILE = `${STORE_DIR}.lock`
+const MAX_HOME_FILE_BYTES = 64 * 1024
+const MAX_HASHES_BYTES = 16 * 1024 * 1024
+const MAX_RETIRED = 8
+/** A place's depth, in segments: far more than a store needs, few enough to walk on the main thread. */
+const MAX_PLACE_DEPTH = 32
+const MOVE_ID = /^[a-z0-9]{8}$/
+/**
+ * A move's steps, each written to the journal once it is done:
+ *   prepared  — the journal is written: dsh's file tools are held off both places (refuseMoving)
+ *   staged    — the store is copied into a folder beside the new place, checked byte for byte
+ *   published — that folder is renamed to the new place
+ *   committed — the home's file names the new place: from here on, it is the store
+ *   detached  — the old place is renamed aside, so that nothing reaches it by its name any more
+ * and then the old place's files are settled into the new one (settle) and it is gone. A move
+ * cut short before it is committed is undone, and the old place stays the store; one cut
+ * short after is carried on. Writes are held off the new place until the move is committed,
+ * and off the old one until it is done.
+ */
+const MOVE_STEPS = ['prepared', 'staged', 'published', 'committed', 'detached']
+const BEFORE_COMMIT = new Set(['prepared', 'staged', 'published'])
+/** Names Windows opens as a device whatever folder they are in, an extension after them or not. */
+const DEVICE_NAME = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(?:\..*)?$/i
+
+/** The home's small files as last read: path -> { stamp, at, value }. */
+const homeFiles = new Map()
+/** How long a home file read is trusted with its stamp unchanged: short, as they are tiny. */
+const HOME_RECHECK_MS = 2000
+/** The last home state read whole, by home: what refuseMoving() holds to while it cannot be read. */
+const lastHome = new Map()
+
+/**
+ * One of the home's small JSON files as `parse` takes it: `{ absent: true }`, what `parse`
+ * returns, or `{ bad: true }` where it returns undefined or the file is not one it could be.
+ * Read again when its stamp changes or HOME_RECHECK_MS have passed (a stamp is not proof on
+ * every disk: FAT keeps two-second times). Synchronous — the guard and recall ask — and
+ * bounded; throws on an error but "nothing there".
+ */
+function homeFile(path, parse) {
+  let stat
+  try {
+    stat = statSync(path, { bigint: true })
+  } catch (error) {
+    if (!absent(error)) throw error
+    homeFiles.delete(path)
+    return { absent: true }
+  }
+  const stamp = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
+  const hit = homeFiles.get(path)
+  if (hit !== undefined && hit.stamp === stamp && Date.now() - hit.at < HOME_RECHECK_MS) return hit.value
+  let value = { bad: true }
+  if (stat.isFile() && stat.size <= BigInt(MAX_HOME_FILE_BYTES)) {
+    let text
+    try {
+      text = readFileSync(path, 'utf8')
+    } catch (error) {
+      if (!absent(error)) throw error
+      return { absent: true }
+    }
+    value = parse(jsonOf(text)) ?? value
+  }
+  homeFiles.set(path, { stamp, at: Date.now(), value })
+  if (homeFiles.size > 32) homeFiles.delete(homeFiles.keys().next().value)
+  return value
+}
+
+/** `text` as JSON — a byte order mark a hand edit left allowed — or undefined. */
+function jsonOf(text) {
+  try {
+    return JSON.parse(text.replace(/^\uFEFF/, ''))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Where the global store is, as the dsh home says: `{ root, fallback, store, retired,
+ * moving }`, `store` its default place (`fallback`) unless the home's file names another, and
+ * `moving` the move under way, if any. `invalid` where that file cannot be taken as written —
+ * `store` is then undefined: no place is guessed, and a stranger's file tools are refused
+ * (storeTargets) — and `unknownMove` where a move's journal cannot. A home on another machine
+ * is not read here (the guard and recall run on dsh's main thread): its default place is the
+ * store, and no move is made there. Throws on an error but "nothing there", which the callers
+ * take as not known just now.
+ */
+function homeState() {
+  const root = dshHome()
+  const fallback = join(root, STORE_DIR)
+  const state = { root, fallback, store: fallback, retired: [], moving: undefined }
+  if (remotePath(root)) return state
+  const pointer = homeFile(join(root, POINTER_FILE), (data) => pointerOf(data, root, fallback))
+  if (pointer.bad) return { ...state, store: undefined, invalid: 'pointer' }
+  if (!pointer.absent) {
+    state.store = pointer.store ?? fallback
+    state.retired = pointer.retired
+  }
+  const journal = homeFile(join(root, JOURNAL_FILE), (data) => journalOf(data, root, fallback))
+  if (journal.bad) state.unknownMove = true
+  else if (!journal.absent) state.moving = journal
+  // only a state read whole: a journal that cannot be taken as written does not replace the
+  // move on record before it (refuseMoving holds to that one)
+  if (!state.unknownMove) lastHome.set(root, state)
+  return state
+}
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/** The home's file as homeState() takes it — `{ store, retired }` — or undefined. */
+function pointerOf(data, root, fallback) {
+  if (!isObject(data) || data.version !== 1) return undefined
+  const store = data.store === undefined ? undefined : placeOf(data.store, root, fallback)
+  if (data.store !== undefined && store === undefined) return undefined
+  if (data.retired !== undefined && (!Array.isArray(data.retired) || data.retired.length > MAX_RETIRED)) return undefined
+  const retired = []
+  for (const value of data.retired ?? []) {
+    const place = placeOf(value, root, fallback)
+    if (place === undefined) return undefined
+    if (!overlaps(place, store ?? fallback)) retired.push(place)
+  }
+  return { store, retired }
+}
+
+/**
+ * Does a place the store moved from hold the store now, or sit inside it (a move to `A/sub`
+ * after one away from `A`)? Then it is not one to turn writes away from: it would turn them
+ * away from the store itself.
+ */
+function overlaps(retired, store) {
+  if (within(store, retired) || within(retired, store)) return true
+  try {
+    const [r, s2] = [realPlaceSync(retired), realPlaceSync(store)]
+    return within(s2, r) || within(r, s2)
+  } catch {
+    return false
+  }
+}
+
+/** A move's journal as homeState() and resumeMove() take it, or undefined. */
+function journalOf(data, root, fallback) {
+  if (!isObject(data) || data.version !== 1) return undefined
+  if (typeof data.id !== 'string' || !MOVE_ID.test(data.id) || !MOVE_STEPS.includes(data.phase)) return undefined
+  if (data.error !== undefined && (typeof data.error !== 'string' || !/^[A-Za-z]{1,32}$/.test(data.error))) return undefined
+  const from = placeOf(data.from, root, fallback)
+  const to = placeOf(data.to, root, fallback)
+  if (from === undefined || to === undefined || sameFolder(from, to)) return undefined
+  return {
+    id: data.id, phase: data.phase, from, to,
+    // never read from the journal: a hand edit cannot point a move at a folder of its choosing
+    staging: movePlace(to, 'moving', data.id),
+    detached: movePlace(from, 'old', data.id),
+    ...(data.error === undefined ? {} : { error: data.error }),
+  }
+}
+
+/** A move's own folder beside `place`: the copy on its way in (`moving`), the old place set aside (`old`). */
+const movePlace = (place, kind, id) => join(dirname(place), `${STORE_DIR}-${kind}-${id}`)
+
+/** `value` as a place the store may be, resolved, or undefined (placeProblem, reservedPlace). */
+function placeOf(value, root, fallback) {
+  if (placeProblem(value) !== undefined) return undefined
+  const place = resolve(value)
+  return reservedPlace(place, root, fallback) ? undefined : place
+}
+
+/** Are two places the same folder by name, as the OS compares names? */
+const samePlace = (a, b) => folded(resolve(a)) === folded(resolve(b))
+
+/**
+ * Are two places the same folder, by name or as the disk resolves them? Two dsh sharing a home
+ * may spell it apart — an 8.3 short name and the long one, macOS's `/var` and `/private/var` —
+ * and one's default place is then the other's under another name. Synchronous: what of each
+ * exists is resolved (realPlaceSync); one that cannot be counts as not the same.
+ */
+function sameFolder(a, b) {
+  if (samePlace(a, b)) return true
+  try {
+    return folded(realPlaceSync(a)) === folded(realPlaceSync(b))
+  } catch {
+    return false
+  }
+}
+
+/** realPlace(), synchronously: the deepest folder of `p` that exists, real, with the rest after it. */
+function realPlaceSync(p) {
+  const tail = []
+  let head = resolve(p)
+  for (;;) {
+    try {
+      return join(realOf(head), ...tail)
+    } catch (error) {
+      if (!absent(error)) throw error
+      const parent = dirname(head)
+      if (parent === head) return resolve(p)
+      tail.unshift(basename(head))
+      head = parent
+    }
+  }
+}
+
+/**
+ * Why `p` cannot be where the global store is, judged by its spelling alone, or undefined. It
+ * must name one folder on this machine from wherever it is read: absolute (on Windows with a
+ * drive), not a network path, not a root, no name Windows would open as something else (a
+ * reserved device name, a name ending in a dot or a space, a stream), and not too deep.
+ */
+function placeProblem(p) {
+  if (typeof p !== 'string' || p === '' || p.length > 1024 || p !== p.trim() || /[\u0000-\u001f]/.test(p)) {
+    return 'invalid'
+  }
+  if (/^[\\/]{2}/.test(p)) return 'network'
+  if (!qualified(p)) return 'relative'
+  const full = resolve(p)
+  if (dirname(full) === full) return 'root'
+  const parts = full.slice(parse(full).root.length).split(/[\\/]+/).filter(Boolean)
+  if (parts.length > MAX_PLACE_DEPTH) return 'deep'
+  if (process.platform === 'win32' &&
+      parts.some((s) => /[<>:"|?*]/.test(s) || /[. ]$/.test(s) || DEVICE_NAME.test(s))) {
+    return 'invalid'
+  }
+  return undefined
+}
+
+/**
+ * Is `place` somewhere the store must not go: the dsh home, the user's home folder or a
+ * folder holding either; inside the dsh home anywhere but the default place (its profiles,
+ * skills, sessions); or a place with a segment named as this plugin names its own (ownName) —
+ * a project's store, which a project's conversations would read as theirs, or a move's. By
+ * name, as the OS compares names; a move checks the real paths too (placeFor).
+ */
+function reservedPlace(place, root, fallback, home = homedir()) {
+  // the default place, under this dsh's spelling of the home or another's (sameFolder)
+  if (samePlace(place, fallback) || (folded(basename(place)) === STORE_DIR && sameFolder(place, fallback))) return false
+  if (place.split(/[\\/]+/).some((s) => ownName(s.toLowerCase()))) return true
+  return within(root, place) || within(home, place) || within(place, root)
+}
+
+/** Is `p` the folder `dir` or inside it, by name, as the OS compares names? */
+function within(p, dir) {
+  const rel = relative(folded(resolve(dir)), folded(resolve(p)))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * A write by dsh's file tools to where the global store is being moved from or to while the
+ * move runs, or to a place it has moved from: refused, saying what to do instead. Only the
+ * writes the guard judges (gatedWrite), and only while a move or a moved store is on record
+ * (homeState): the common case stays a few compares and two stats. A path that cannot be
+ * checked is refused during a move, let through after one (the cap's guard is still ahead).
+ * Not a security boundary: a shell writes anywhere (SECURITY.md).
+ */
+function refuseMoving(exec, settings, sessionCwd) {
+  let args
+  let tool
+  try {
+    args = exec?.arguments
+    tool = typeof exec?.name === 'string' ? exec.name : ''
+  } catch {
+    return undefined // a call that cannot even be read: dsh cannot make it either
+  }
+  if (!args || typeof args !== 'object') return undefined
+  // every editor command but a view (another plugin's tool of the name may have more than dsh's)
+  if (!gatedWrite(tool, args) && !(tool === 'str_replace_editor' && args.command !== 'view')) return undefined
+  let state
+  try {
+    state = homeState()
+    // a move's journal not taken as written: the move on record before it is still held to
+    if (state.unknownMove) state = lastHome.get(state.root) ?? state
+  } catch {
+    // not readable just now: a move on record when it last was is still held to
+    state = lastHome.get(dshHome())
+    if (state === undefined) return undefined
+  }
+  const { moving } = state
+  if (moving === undefined && state.retired.length === 0) return undefined
+  const t = settings.text
+  const closed = []
+  if (moving !== undefined) {
+    // The new place too while the move runs, its settling included; once one stops with its
+    // error on record (to be carried on later), the new place is the store and takes writes.
+    const places = BEFORE_COMMIT.has(moving.phase) || moving.error === undefined ? [moving.from, moving.to] : [moving.from]
+    for (const dir of [...places, moving.staging, moving.detached]) closed.push([dir, t.storeMoving])
+  }
+  if (state.store !== undefined) {
+    for (const dir of state.retired) closed.push([dir, t.storeMoved(state.store)])
+  }
+  try {
+    for (const p of new Set([args.file_path, args.path].filter((v) => typeof v === 'string'))) {
+      const target = pathKey(hostPath(sessionCwd(exec), p))
+      for (const [dir, reason] of closed) {
+        if (under(target, pathKey(dir))) return reason
+      }
+    }
+  } catch {
+    return moving === undefined ? undefined : t.storeMoving
+  }
+  return undefined
+}
+
+/** The settings page's store route; client.js fetches it relative to the page, as the others. */
+const STORE_ROUTE = '/api/engramory/store'
+/** How long a move waits before it copies: a write dsh let through just before lands first. */
+const MOVE_DRAIN_MS = 1000
+/** How long the old place, set aside, is left before it is settled: a write under way there finishes. */
+const MOVE_SETTLE_MS = 2000
+/** How often, a second apart, a move tries to set the old place aside while something holds it. */
+const DETACH_TRIES = 5
+const BUSY = new Set(['EBUSY', 'EPERM', 'EACCES'])
+/** A move cut short is looked for this soon after dsh opens, then this often while one is left. */
+const RESUME_FIRST_MS = 3000
+const RESUME_EVERY_MS = 60000
+/** A lock older than this is a dsh's that stopped mid-move, whatever its process. */
+const LOCK_STALE_MS = 15 * 60 * 1000
+/** A lock not written whole, older than this, was left by a dsh that stopped making it. */
+const LOCK_TORN_MS = 30 * 1000
+/** How often a move renews its lock while it copies or settles many files: well inside LOCK_STALE_MS. */
+const LEASE_MS = 60 * 1000
+/** Bounds on what one move copies: a store is a few hundred small files. */
+const MAX_MOVE_ENTRIES = 20000
+const MAX_MOVE_BYTES = 256 * 1024 * 1024
+const MAX_MOVE_DEPTH = 8
+/** What became of the moves this process ran, by id, for the page that started one. */
+const outcomes = new Map()
+/** The locks this process holds, by id: one of its own left behind is not taken for a live one. */
+const heldLocks = new Set()
+
+/**
+ * The store route. GET says where the global store is and what a move would meet: its
+ * default place, the home's file, a pinned index (no move then), a skill of the user's own or
+ * an AGENTS.md block from the installer (both of which name a place themselves), a home on
+ * another machine, a move under way; with `?id=`, what became of that move. POST `{ to }` — a
+ * folder, or null for the default place — starts a move and answers with its id at once (202):
+ * the page asks again until the move is done. Only the owner reaches it, as the settings route.
+ */
+function storeRoute(settings, config) {
+  return {
+    path: STORE_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: (request) => (request.method === 'POST' ? startMove(request, settings) : storeStatus(request, settings, config)),
+  }
+}
+
+async function storeStatus(request, settings, config) {
+  const root = dshHome()
+  let state
+  try {
+    state = homeState()
+  } catch {
+    state = { invalid: 'unreadable' }
+  }
+  let id = null
+  try {
+    id = new URL(request.url, 'http://localhost').searchParams.get('id')
+  } catch {
+    // no move asked after
+  }
+  const { moving } = state
+  // A move another dsh carried on (this one restarted since, say): over once no move is on record.
+  const outcome = id === null ? undefined
+    : outcomes.get(id) ?? (moving === undefined && state.invalid === undefined && !state.unknownMove
+      ? { done: true, elsewhere: true } : undefined)
+  const problem = state.invalid ?? (state.unknownMove ? 'journal' : undefined)
+  return json(200, {
+    store: state.invalid === undefined ? state.store : null,
+    default: join(root, STORE_DIR),
+    file: join(root, POINTER_FILE),
+    ...(problem === undefined ? {} : { problem }),
+    ...(settings.indexPath === undefined ? {} : { pinned: true }),
+    ...(config.skill === undefined ? {} : { customSkill: true }),
+    ...(await legacyRules(root) ? { legacyRules: true } : {}),
+    ...(remotePath(root) ? { remote: true } : {}),
+    ...(moving === undefined ? {} : {
+      moving: { id: moving.id, phase: moving.phase, from: moving.from, to: moving.to,
+        ...(moving.error === undefined ? {} : { error: moving.error }) },
+    }),
+    ...(outcome === undefined ? {} : { outcome }),
+  })
+}
+
+/** Does the home's AGENTS.md hold the installer's dsh block (engramory_init.py dsh), which names the default place? */
+async function legacyRules(root) {
+  if (remotePath(root)) return false
+  try {
+    const path = join(root, 'AGENTS.md')
+    if ((await fsp.stat(path)).size > 4 * 1024 * 1024) return false
+    return /^<!-- BEGIN ENGRAMORY DSH -->\s*$/m.test(await fsp.readFile(path, 'utf8'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * POST on the store route: checks what it can before anything is written — the request, the
+ * place (placeFor), the store where it is (sourceProblem) — under the home's lock, then writes
+ * the journal and hands the move to run(), which lets the lock go once it is done.
+ */
+async function startMove(request, settings) {
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return json(400, { ok: false, error: 'invalid', field: 'body' })
+  }
+  if (!isObject(body) || !Object.hasOwn(body, 'to')) return json(400, { ok: false, error: 'invalid', field: 'body' })
+  if (body.to !== null && typeof body.to !== 'string') return json(400, { ok: false, error: 'invalid', field: 'to' })
+  if (settings.indexPath !== undefined) return json(409, { ok: false, error: 'pinned' })
+  const root = dshHome()
+  if (remotePath(root)) return json(409, { ok: false, error: 'remote' })
+  const id = moveId()
+  let locked
+  try {
+    locked = await takeLock(root, id)
+  } catch {
+    return json(409, { ok: false, error: 'unreadable' })
+  }
+  if (!locked) return json(409, { ok: false, error: 'busy' })
+  let handedOver = false
+  try {
+    homeFiles.clear() // read afresh, under the lock: another dsh may have just moved it
+    let state
+    try {
+      state = homeState()
+    } catch {
+      return json(409, { ok: false, error: 'unreadable' })
+    }
+    if (state.invalid !== undefined || state.unknownMove) return json(409, { ok: false, error: 'problem' })
+    if (state.moving !== undefined) return json(409, { ok: false, error: 'busy' })
+    let place
+    try {
+      place = await placeFor(body.to, state)
+    } catch {
+      place = { problem: 'unreadable' }
+    }
+    if (place.same) return json(200, { ok: true, same: true })
+    if (place.problem !== undefined) return json(400, { ok: false, error: 'place', reason: place.problem })
+    const source = await sourceProblem(state).catch(() => 'unreadable')
+    if (source !== undefined) return json(400, { ok: false, error: 'source', reason: source })
+    const written = { version: 1, id, phase: 'prepared', from: state.store, to: place.to }
+    await writeHomeJson(root, JOURNAL_FILE, written)
+    handedOver = true
+    run(root, journalOf(written, root, state.fallback), settings, id, true)
+    return json(202, { ok: true, id })
+  } catch (error) {
+    return json(500, { ok: false, error: 'failed', message: String(error?.message ?? error) })
+  } finally {
+    if (!handedOver) await releaseLock(root, id).catch(() => {})
+  }
+}
+
+/** A move's id: eight lowercase letters and digits. */
+const moveId = () => randomUUID().replace(/-/g, '').slice(0, 8)
+
+/**
+ * Where `raw` — the page's text, a leading `~` for the user's home folder, or null for the
+ * default place — would put the store: `{ to }`, `{ same: true }` where the store is there
+ * already, or `{ problem }`. By name first (placeProblem, reservedPlace), then as the disk
+ * resolves both — links, 8.3 short names, case — so that neither is inside the other, the
+ * same folder under two names counts as one, and a reserved place is not reached by another
+ * name. The place must be a folder not there yet, or an empty one.
+ */
+async function placeFor(raw, state) {
+  const { root, fallback } = state
+  let to = fallback
+  if (raw !== null) {
+    const expanded = raw === '~' ? homedir() : /^~[\\/]/.test(raw) ? join(homedir(), raw.slice(2)) : raw
+    const problem = placeProblem(expanded)
+    if (problem !== undefined) return { problem }
+    to = resolve(expanded)
+    if (reservedPlace(to, root, fallback)) return { problem: 'reserved' }
+  }
+  if (samePlace(to, state.store)) return { same: true }
+  const [realTo, realFrom, realRoot, realFallback, realHome] =
+    await Promise.all([to, state.store, root, fallback, homedir()].map(realPlace))
+  if (folded(realTo) === folded(realFrom)) return { same: true }
+  // a local name for a share (a link to `\\server\share`): recall would wait on it as on the share
+  if (/^[\\/]{2}/.test(realTo) && remotePath(realTo)) return { problem: 'network' }
+  if (within(realTo, realFrom) || within(realFrom, realTo)) return { problem: 'nested' }
+  if (reservedPlace(realTo, realRoot, realFallback, realHome)) return { problem: 'reserved' }
+  let stat
+  try {
+    stat = await fsp.lstat(to)
+  } catch (error) {
+    if (!absent(error)) return { problem: 'unreadable' }
+  }
+  if (stat !== undefined) {
+    if (stat.isSymbolicLink()) return { problem: 'link' }
+    if (!stat.isDirectory()) return { problem: 'notDir' }
+    if ((await fsp.readdir(to)).length > 0) return { problem: 'notEmpty' }
+  }
+  return { to }
+}
+
+/** `p` as the disk resolves it: the deepest folder of it that exists, real, with the rest after it. */
+async function realPlace(p) {
+  const tail = []
+  let head = p
+  for (;;) {
+    try {
+      return join(await realOfAsync(head), ...tail)
+    } catch (error) {
+      if (!absent(error)) throw error
+      const parent = dirname(head)
+      if (parent === head) return p
+      tail.unshift(basename(head))
+      head = parent
+    }
+  }
+}
+
+/**
+ * Why the store, where it is now, cannot be moved, or undefined. Not there at all is a store
+ * not made yet only at the default place: a move always leaves a folder at the place it moves
+ * to, so a moved store that is not there is one not reachable now (a drive not mounted).
+ */
+async function sourceProblem(state) {
+  let stat
+  try {
+    stat = await fsp.lstat(state.store)
+  } catch (error) {
+    if (!absent(error)) return 'unreadable'
+    return samePlace(state.store, state.fallback) ? undefined : 'unavailable'
+  }
+  if (stat.isSymbolicLink()) return 'link'
+  if (!stat.isDirectory()) return 'notDir'
+  return undefined
+}
+
+/**
+ * Carry a move on from where its journal says, then let the home's lock (`lockId`) go; what
+ * became of it is kept for the page (outcomes). `fresh`: started just now, by this request.
+ */
+async function run(root, journal, settings, lockId, fresh) {
+  outcomes.set(journal.id, { done: false })
+  if (outcomes.size > 16) outcomes.delete(outcomes.keys().next().value)
+  let outcome
+  try {
+    outcome = { done: true, ...await advance(root, journal, settings, fresh, lockId) }
+  } catch (error) {
+    outcome = { done: true, ok: false, ...problemOf(error) }
+  }
+  // done only once the lock is let go: the page may start the next move at once
+  await releaseLock(root, lockId).catch(() => {})
+  outcomes.set(journal.id, outcome)
+}
+
+/** The steps of a move (MOVE_STEPS), from the one its journal is at. */
+async function advance(root, journal, settings, fresh, lockId) {
+  if (BEFORE_COMMIT.has(journal.phase)) {
+    if (!fresh) {
+      // Cut short before its commit — partway through the copy, say — a move is undone, and the
+      // old place stays the store; unless the commit landed just before it was cut short.
+      if (!(await pointsTo(root, journal.to))) {
+        await held(root, lockId)
+        await undo(root, journal)
+        throw moveError('interrupted')
+      }
+    } else {
+      try {
+        await wait(MOVE_DRAIN_MS)
+        await held(root, lockId)
+        await stage(root, journal, { root, id: lockId, at: Date.now() })
+        journal = await stepTo(root, journal, 'staged')
+        await held(root, lockId)
+        await publish(journal)
+        journal = await stepTo(root, journal, 'published')
+        await held(root, lockId)
+        await commit(root, journal)
+      } catch (error) {
+        if (error?.moveCode !== 'lost') await undo(root, journal)
+        throw error
+      }
+    }
+    journal = await stepTo(root, journal, 'committed')
+  }
+  try {
+    // carried on: its error is cleared, so that the new place is held off again while it runs —
+    // and a write dsh let through while it was open lands before anything is settled
+    if (journal.error !== undefined) {
+      journal = await stepTo(root, { ...journal, error: undefined }, journal.phase)
+      await wait(MOVE_DRAIN_MS)
+    }
+    if (journal.phase === 'committed') {
+      await held(root, lockId)
+      await detach(journal)
+      journal = await stepTo(root, journal, 'detached')
+      await wait(MOVE_SETTLE_MS)
+    }
+    await held(root, lockId)
+    const conflicts = await settle(root, journal, settings, { root, id: lockId, at: Date.now() })
+    await dropJournal(root)
+    return { ok: true, conflicts: conflicts.length }
+  } catch (error) {
+    // committed: the new place is the store; what is left at the old one is tried again later,
+    // and the error on record opens the new place to writes meanwhile (refuseMoving)
+    if (error?.moveCode !== 'lost') {
+      await stepTo(root, { ...journal, error: problemOf(error).error }, journal.phase).catch(() => {})
+    }
+    throw error
+  }
+}
+
+/**
+ * A move that did not get as far as its commit, undone: the old place stays the store, and the
+ * copy goes — its folder beside the new place whole, and at the new place only the files that
+ * still hold what was copied (HASHES_FILE): anything else found there is left, and so is the
+ * folder then. Unless the home's file names the new place after all — the commit landed and
+ * something after it failed — in which case nothing is undone and the move is carried on later
+ * (its journal is kept).
+ */
+async function undo(root, journal) {
+  if (await pointsTo(root, journal.to).catch(() => true)) return
+  await removeOwn(journal.staging).catch(() => {})
+  if (journal.phase !== 'prepared') {
+    await removeCopies(journal.to, '', await movedHashes(root, journal.id)).catch(() => {})
+  }
+  await dropJournal(root)
+}
+
+/** Remove from `dir` the files that hold what this move copied there, and the folders left empty. */
+async function removeCopies(dir, rel, hashes) {
+  let stat
+  try {
+    stat = await fsp.lstat(dir)
+  } catch (error) {
+    if (absent(error)) return
+    throw error
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) return
+  for (const name of await fsp.readdir(dir)) {
+    const path = join(dir, name)
+    const key = rel === '' ? name : `${rel}/${name}`
+    const entry = await fsp.lstat(path)
+    if (entry.isDirectory()) await removeCopies(path, key, hashes)
+    else if (entry.isFile() && hashes[key] !== undefined && hashes[key] === digestOf(await fsp.readFile(path))) {
+      await persist(() => fsp.unlink(path))
+    }
+  }
+  await persist(() => fsp.rmdir(dir)).catch(() => {}) // not empty: something not this move's is there
+}
+
+/** Does the home's file, read now, name `place` as the store? */
+async function pointsTo(root, place) {
+  const fallback = join(root, STORE_DIR)
+  const data = await readHomeJson(root, POINTER_FILE)
+  if (data === undefined) return sameFolder(place, fallback)
+  const pointer = pointerOf(data, root, fallback)
+  if (pointer === undefined) throw moveError('pointer')
+  return sameFolder(place, pointer.store ?? fallback)
+}
+
+/**
+ * Is the home's lock still this move's? Its time is renewed, so that a long move is not taken
+ * for one a dsh left behind. Another's now — it was taken for stale and taken over — this move
+ * stops where it is, touching nothing more ('lost'): the taker carries on from the journal.
+ */
+async function held(root, lockId) {
+  const path = join(root, LOCK_FILE)
+  const lock = jsonOf(await fsp.readFile(path, 'utf8').catch(() => ''))
+  if (lock?.id !== lockId) throw moveError('lost')
+  // written whole beside it, then renamed over it: a reader never finds it empty or torn
+  const aside = join(root, `${LOCK_FILE}.${lockId}.renew`)
+  try {
+    await fsp.writeFile(aside, JSON.stringify({ id: lockId, pid: process.pid, at: Date.now() }))
+    await persist(() => fsp.rename(aside, path))
+  } catch {
+    await fsp.unlink(aside).catch(() => {})
+    throw moveError('lost') // not renewed: it may be taken for stale, so this move stops here
+  }
+}
+
+/** held(), at most every LEASE_MS along a walk of many files (copyInto, settleInto). */
+async function renew(lease) {
+  if (lease === undefined || Date.now() - lease.at < LEASE_MS) return
+  await held(lease.root, lease.id)
+  lease.at = Date.now()
+}
+
+/**
+ * Copy the store into the move's own folder beside the new place, file by file — each read
+ * once, written new, read back and compared — keeping what each held (HASHES_FILE). Only
+ * folders and regular files: a link, or anything else, stops the move, as does a store past
+ * the bounds. Nothing at the default place: no store yet, nothing to copy.
+ */
+async function stage(root, journal, lease) {
+  const hashes = {}
+  let stat
+  try {
+    stat = await fsp.lstat(journal.from)
+  } catch (error) {
+    if (!absent(error)) throw error
+    // gone since the move was asked for (a drive pulled out): only the default place may be
+    // without a store, as sourceProblem() says
+    if (!sameFolder(journal.from, join(root, STORE_DIR))) throw moveError('unavailable')
+  }
+  if (stat !== undefined) {
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('link')
+    await fsp.mkdir(dirname(journal.staging), { recursive: true })
+    await copyInto(journal.from, journal.staging, '', 0, { entries: 0, bytes: 0, lease }, hashes)
+  }
+  // what undo() and settle() read back must fit what they read (movedHashes)
+  const manifest = { id: journal.id, hashes }
+  if (Buffer.byteLength(`${JSON.stringify(manifest, null, 2)}\n`) > MAX_HASHES_BYTES) throw moveError('tooMany')
+  await writeHomeJson(root, HASHES_FILE, manifest)
+}
+
+async function copyInto(src, dst, rel, depth, budget, hashes) {
+  await fsp.mkdir(dst)
+  for (const name of await fsp.readdir(src)) {
+    if (++budget.entries > MAX_MOVE_ENTRIES) throw moveError('tooMany')
+    await renew(budget.lease)
+    const from = join(src, name)
+    const to = join(dst, name)
+    const key = rel === '' ? name : `${rel}/${name}`
+    const stat = await fsp.lstat(from)
+    if (stat.isSymbolicLink()) throw moveError('link')
+    if (stat.isDirectory()) {
+      if (depth >= MAX_MOVE_DEPTH) throw moveError('tooDeep')
+      await copyInto(from, to, key, depth + 1, budget, hashes)
+    } else if (stat.isFile()) {
+      if (budget.bytes + stat.size > MAX_MOVE_BYTES) throw moveError('tooBig') // before it is read
+      const bytes = await fsp.readFile(from)
+      budget.bytes += bytes.length
+      if (budget.bytes > MAX_MOVE_BYTES) throw moveError('tooBig')
+      await fsp.writeFile(to, bytes, { flag: 'wx' })
+      if (!bytes.equals(await fsp.readFile(to))) throw moveError('verify')
+      await fsp.utimes(to, stat.atime, stat.mtime).catch(() => {}) // dates kept, as a copy would
+      hashes[key] = digestOf(bytes)
+    } else {
+      throw moveError('special')
+    }
+  }
+}
+
+/**
+ * The copy renamed to the new place, an empty folder there taken out first. No copy: either
+ * there was no store to copy, or the rename was done already (a move cut short just after);
+ * the new place's folder is made either way, so that a moved store always has one.
+ */
+async function publish(journal) {
+  try {
+    await fsp.lstat(journal.staging)
+  } catch (error) {
+    if (!absent(error)) throw error
+    await fsp.mkdir(journal.to, { recursive: true })
+    return
+  }
+  await fsp.mkdir(dirname(journal.to), { recursive: true })
+  try {
+    const stat = await fsp.lstat(journal.to)
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('notDir')
+    await persist(() => fsp.rmdir(journal.to)) // empty, as placeFor found it; not empty now, this throws
+  } catch (error) {
+    if (!absent(error)) throw error
+  }
+  await persist(() => fsp.rename(journal.staging, journal.to))
+}
+
+/**
+ * The commit: the home's file rewritten to name the new place (none for the default one), the
+ * old place first among those it moved from. Already naming it: the commit landed before a
+ * move was cut short. Naming neither place: the store was moved by other means meanwhile, and
+ * this move stops.
+ */
+async function commit(root, journal) {
+  const fallback = join(root, STORE_DIR)
+  const data = await readHomeJson(root, POINTER_FILE)
+  const pointer = data === undefined ? { store: undefined, retired: [] } : pointerOf(data, root, fallback)
+  if (pointer === undefined) throw moveError('pointer')
+  const store = pointer.store ?? fallback
+  if (sameFolder(store, journal.to)) return
+  if (!sameFolder(store, journal.from)) throw moveError('changed')
+  const retired = []
+  for (const place of [journal.from, ...pointer.retired]) {
+    if (!overlaps(place, journal.to) && !retired.some((p) => samePlace(p, place))) retired.push(place)
+  }
+  await writeHomeJson(root, POINTER_FILE, {
+    version: 1,
+    ...(sameFolder(journal.to, fallback) ? {} : { store: journal.to }),
+    ...(retired.length === 0 ? {} : { retired: retired.slice(0, MAX_RETIRED) }),
+  })
+}
+
+/**
+ * The old place renamed aside (`detached`): from here, a write that reaches for the old store
+ * by its name finds nothing there, and only this move touches what was in it. Tried again a
+ * few times while something holds it (Windows: a file open without sharing delete); still
+ * held, the move stops, its journal kept, to be carried on later. Nothing at the old place: no
+ * store there yet, or set aside already.
+ */
+async function detach(journal) {
+  for (let tries = 1; ; tries++) {
+    try {
+      await fsp.rename(journal.from, journal.detached)
+      return
+    } catch (error) {
+      if (absent(error)) return
+      if (tries >= DETACH_TRIES || !BUSY.has(error.code)) throw error
+      await wait(1000)
+    }
+  }
+}
+
+/**
+ * The old place's files, set aside, settled into the new place one by one, each removed once
+ * it is there: what is the same in both, or only the copy the move made (HASHES_FILE says
+ * what it held), simply goes; what the new place lacks is copied in; what changed at both
+ * places is kept beside the new one as `<name>.old-<id>`, with a line for it in the index so
+ * that it is found (keepConflict). Nothing is ever written over a file of the new place.
+ * Only folders and regular files are walked: a link or anything else stops it there, the
+ * rest left for later. Returns the conflicts kept.
+ */
+async function settle(root, journal, settings, lease) {
+  let stat
+  try {
+    stat = await fsp.lstat(journal.detached)
+  } catch (error) {
+    if (!absent(error)) throw error
+  }
+  const conflicts = []
+  if (stat !== undefined) {
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('link')
+    const hashes = await movedHashes(root, journal.id)
+    const into = { root: journal.to, id: journal.id, hashes, settings, conflicts, lease }
+    await settleInto(journal.detached, journal.to, '', into)
+    await persist(() => fsp.rmdir(journal.detached))
+  }
+  return conflicts
+}
+
+async function settleInto(dir, target, rel, into) {
+  for (const name of await fsp.readdir(dir)) {
+    await renew(into.lease)
+    const from = join(dir, name)
+    const to = join(target, name)
+    const key = rel === '' ? name : `${rel}/${name}`
+    const stat = await fsp.lstat(from)
+    if (stat.isSymbolicLink()) throw moveError('link')
+    if (stat.isDirectory()) {
+      await settleInto(from, to, key, into)
+      await persist(() => fsp.rmdir(from))
+    } else if (stat.isFile()) {
+      await settleFile(from, to, key, into)
+    } else {
+      throw moveError('special')
+    }
+  }
+}
+
+async function settleFile(from, to, key, into) {
+  const mine = await fsp.readFile(from)
+  let theirs = await bytesAt(to)
+  if (theirs === undefined) {
+    await fsp.mkdir(dirname(to), { recursive: true })
+    try {
+      await fsp.writeFile(to, mine, { flag: 'wx' })
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+      // written there meanwhile: judged as it is now — and if it is gone again, left for later
+      theirs = await bytesAt(to)
+      if (theirs === undefined) throw moveError('verify')
+    }
+    if (theirs === undefined) {
+      // what is there now is not this copy (written over at once): left, to be judged again later
+      if (!mine.equals(await fsp.readFile(to))) throw moveError('verify')
+      await persist(() => fsp.unlink(from))
+      return
+    }
+  }
+  const same = theirs !== null && mine.equals(theirs)
+  // changed at both places: the old place's copy is kept beside the new place's
+  if (!same && into.hashes[key] !== digestOf(mine)) into.conflicts.push(await keepConflict(mine, to, into))
+  await persist(() => fsp.unlink(from))
+}
+
+/** A regular file's bytes, undefined where nothing is there, null where something else is. */
+async function bytesAt(path) {
+  let stat
+  try {
+    stat = await fsp.lstat(path)
+  } catch (error) {
+    if (absent(error)) return undefined
+    throw error
+  }
+  return stat.isFile() ? fsp.readFile(path) : null
+}
+
+/**
+ * The old place's copy of a file that changed at both places, kept beside the new place's as
+ * `<name>.old-<id><ext>` (or `-2`… where that is taken by something else), and named in the
+ * new place's index, so that recall finds it. Run again (a move carried on), it finds its own
+ * copy and its index line already there.
+ */
+async function keepConflict(bytes, to, into) {
+  const ext = extname(to)
+  const stem = basename(to, ext)
+  for (let n = 1; n <= 9; n++) {
+    const path = join(dirname(to), `${stem}.old-${into.id}${n === 1 ? '' : `-${n}`}${ext}`)
+    try {
+      await fsp.writeFile(path, bytes, { flag: 'wx' })
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+      const there = await bytesAt(path)
+      if (there === null || there === undefined || !there.equals(bytes)) continue
+    }
+    if (!bytes.equals(await fsp.readFile(path))) throw moveError('verify')
+    const rel = relative(into.root, path).split(sep).join('/')
+    await indexConflict(into, rel)
+    return rel
+  }
+  throw moveError('conflict')
+}
+
+/** A line for a kept conflict at the end of the new place's index, unless it is there already. */
+async function indexConflict(into, rel) {
+  const index = join(into.root, into.settings.indexName)
+  const current = await bytesAt(index)
+  if (current === null) return // not a file to add to: the copy is still found beside it
+  const target = /[\s()<>]/.test(rel) ? `<${rel}>` : rel
+  if (current !== undefined && current.toString('utf8').includes(`](${target})`)) return
+  const lead = current === undefined || current.length === 0 || current[current.length - 1] === 0x0a ? '' : '\n'
+  await fsp.appendFile(index, `${lead}- [${basename(rel, extname(rel))}](${target}) — ${into.settings.text.conflictLine}\n`)
+}
+
+/** What each file held as this move copied it, or nothing to tell by (a copy then holds as changed). */
+async function movedHashes(root, id) {
+  try {
+    const path = join(root, HASHES_FILE)
+    if ((await fsp.stat(path)).size > MAX_HASHES_BYTES) return {}
+    const data = jsonOf(await fsp.readFile(path, 'utf8'))
+    if (!isObject(data) || data.id !== id || !isObject(data.hashes)) return {}
+    return Object.fromEntries(Object.entries(data.hashes).filter(([, v]) => typeof v === 'string'))
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Remove a folder this move made (its copy, set aside or in place) and what is in it, one
+ * entry at a time: regular files and folders only, never through a link — a link found there
+ * stops it, and the rest stays. Not there: nothing to do.
+ */
+async function removeOwn(dir) {
+  let stat
+  try {
+    stat = await fsp.lstat(dir)
+  } catch (error) {
+    if (absent(error)) return
+    throw error
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('link')
+  for (const name of await fsp.readdir(dir)) {
+    const path = join(dir, name)
+    const entry = await fsp.lstat(path)
+    if (entry.isSymbolicLink()) throw moveError('link')
+    if (entry.isDirectory()) await removeOwn(path)
+    else if (entry.isFile()) await persist(() => fsp.unlink(path))
+    else throw moveError('special')
+  }
+  await persist(() => fsp.rmdir(dir))
+}
+
+/** The journal at `phase`, written. */
+async function stepTo(root, journal, phase) {
+  const { id, from, to, error } = journal
+  await writeHomeJson(root, JOURNAL_FILE, { version: 1, id, phase, from, to, ...(error === undefined ? {} : { error }) })
+  return { ...journal, phase }
+}
+
+/** The move is over: its journal and what it kept of the files go, and writes are let through. */
+async function dropJournal(root) {
+  for (const name of [JOURNAL_FILE, HASHES_FILE]) {
+    await persist(() => fsp.unlink(join(root, name))).catch((error) => { if (!absent(error)) throw error })
+    homeFiles.delete(join(root, name))
+  }
+}
+
+/** One of the home's small JSON files, read now: undefined where it is not there; throws where it is not JSON. */
+async function readHomeJson(root, name) {
+  const path = join(root, name)
+  let text
+  try {
+    if ((await fsp.stat(path)).size > MAX_HOME_FILE_BYTES) throw moveError('pointer')
+    text = await fsp.readFile(path, 'utf8')
+  } catch (error) {
+    if (absent(error)) return undefined
+    throw error
+  }
+  const data = jsonOf(text)
+  if (data === undefined) throw moveError('pointer')
+  return data
+}
+
+/**
+ * One of the home's small JSON files written whole: beside it first, then renamed over it, so
+ * that a reader finds the old text or the new, never part of one (persist: on Windows, a
+ * reader may hold the old one a moment).
+ */
+async function writeHomeJson(root, name, value) {
+  const path = join(root, name)
+  const aside = join(root, `${name}.${moveId()}.tmp`)
+  await fsp.writeFile(aside, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' })
+  try {
+    await persist(() => fsp.rename(aside, path))
+  } catch (error) {
+    await fsp.unlink(aside).catch(() => {})
+    throw error
+  } finally {
+    homeFiles.delete(path)
+  }
+}
+
+/**
+ * Take the home's lock for `id`: created only where none is (`wx`), across processes. One held
+ * by a dsh that is gone — its process not running, or past LOCK_STALE_MS, or never written
+ * whole — is set aside and taken; held by a live one, false. (Two dsh setting the same stale
+ * lock aside at once: the one whose rename comes second finds the other's fresh lock, puts it
+ * back where it can and gives up.) The holder checks it is still its own before each step that
+ * changes the store (held).
+ */
+async function takeLock(root, id) {
+  const path = join(root, LOCK_FILE)
+  const mine = JSON.stringify({ id, pid: process.pid, at: Date.now() })
+  for (let round = 0; round < 2; round++) {
+    try {
+      await fsp.writeFile(path, mine, { flag: 'wx' })
+      heldLocks.add(id)
+      return true
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+    let held
+    let stat
+    try {
+      held = await fsp.readFile(path, 'utf8')
+      stat = await fsp.stat(path) // after the read: a lock torn by a writer at it now is fresh
+    } catch (error) {
+      if (absent(error)) continue
+      throw error
+    }
+    if (!staleLock(held, stat.mtimeMs)) return false
+    const aside = join(root, `${LOCK_FILE}.${id}`)
+    try {
+      await fsp.rename(path, aside)
+    } catch (error) {
+      if (absent(error)) continue
+      throw error
+    }
+    const taken = await fsp.readFile(aside, 'utf8').catch(() => held)
+    if (taken !== held) {
+      // another's fresh lock, set aside by mistake: put back only where none is now (a link
+      // fails where something is), never over a third's; its holder finds it gone otherwise
+      // and stops (held)
+      await fsp.link(aside, path).catch(() => {})
+      await fsp.unlink(aside).catch(() => {})
+      return false
+    }
+    await fsp.unlink(aside).catch(() => {})
+  }
+  return false
+}
+
+/** Is a lock with text `held` (written at `mtimeMs`) one a dsh no longer running left behind? */
+function staleLock(held, mtimeMs) {
+  const lock = jsonOf(held)
+  const at = Number.isFinite(lock?.at) ? lock.at : mtimeMs
+  if (Date.now() - at > LOCK_STALE_MS) return true
+  // not written whole: its writer stopped between making it and filling it in, or is at it now
+  if (!Number.isSafeInteger(lock?.pid) || lock.pid <= 0) return Date.now() - mtimeMs > LOCK_TORN_MS
+  if (lock.pid === process.pid) return !heldLocks.has(lock.id)
+  try {
+    process.kill(lock.pid, 0)
+    return false
+  } catch (error) {
+    return error?.code === 'ESRCH'
+  }
+}
+
+/** Let the home's lock go, if it is still `id`'s. */
+async function releaseLock(root, id) {
+  heldLocks.delete(id)
+  const path = join(root, LOCK_FILE)
+  const held = jsonOf(await fsp.readFile(path, 'utf8').catch(() => ''))
+  if (held?.id === id) await fsp.unlink(path).catch(() => {})
+}
+
+/**
+ * Finish, or undo, a move a dsh sharing this home left cut short (MOVE_STEPS), under the
+ * home's lock; nothing when none is left or another dsh is at it. A journal read but not one
+ * as written is set aside untouched — nothing it names is touched either, and what it left
+ * stays on disk — so that the store is not held off for ever; one not read just now is tried
+ * again later.
+ */
+async function resumeMove(root, settings) {
+  if (remotePath(root)) return
+  try {
+    await fsp.lstat(join(root, JOURNAL_FILE))
+  } catch {
+    return
+  }
+  const id = moveId()
+  if (!(await takeLock(root, id))) return
+  let handedOver = false
+  try {
+    let data
+    try {
+      data = await readHomeJson(root, JOURNAL_FILE)
+    } catch (error) {
+      if (error?.moveCode === undefined) return // not read just now (a lock, a disk): tried again later
+      data = null // read, and not JSON
+    }
+    if (data === undefined) return // finished meanwhile
+    const journal = journalOf(data, root, join(root, STORE_DIR))
+    if (journal === undefined) {
+      await fsp.rename(join(root, JOURNAL_FILE), join(root, `${JOURNAL_FILE}.${id}.bad`)).catch(() => {})
+      homeFiles.clear()
+      return
+    }
+    handedOver = true
+    await run(root, journal, settings, id, false)
+  } finally {
+    if (!handedOver) await releaseLock(root, id).catch(() => {})
+  }
+}
+
+/**
+ * `fn`, tried again for a moment while Windows holds a file it touches — an indexer, an
+ * antivirus scan of a file just written, a reader that opened it without sharing delete —
+ * which fails a rename or a removal with EPERM, EBUSY or EACCES for a few milliseconds.
+ * Elsewhere those mean what they say, and are not retried.
+ */
+async function persist(fn) {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await fn()
+    } catch (error) {
+      if (tries >= 10 || process.platform !== 'win32' || !BUSY.has(error?.code)) throw error
+      await new Promise((done) => setTimeout(done, 50 * tries))
+    }
+  }
+}
+
+/** A move stopped for `code` (what the page says about it). */
+const moveError = (code) => Object.assign(new Error(code), { moveCode: code })
+
+/** What the page is told of a failed move: this plugin's code, or the file system's. */
+const problemOf = (error) => (error?.moveCode !== undefined
+  ? { error: error.moveCode }
+  : { error: 'failed', ...(typeof error?.code === 'string' ? { detail: error.code } : {}) })
+
+/**
+ * `ms`, for the move's waits and the first look for one cut short. `ENGRAMORY_MOVE_WAIT_MS`
+ * may shorten them (the tests do; nothing else should, as the waits are what lets a write
+ * already under way land first).
+ */
+function waitMs(ms) {
+  const cap = process.env.ENGRAMORY_MOVE_WAIT_MS
+  return typeof cap === 'string' && /^\d+$/.test(cap) ? Math.min(ms, Number(cap)) : ms
+}
+
+const wait = (ms) => new Promise((done) => setTimeout(done, waitMs(ms)))
+
 /** One index as the model sees it, cut where the cap cuts it. */
 function renderIndex(label, path, current, settings) {
   const { text: t } = settings
@@ -2366,12 +3700,7 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
   // Nothing below can refuse a read, a view, or an unknown tool, so leave before
   // anything touches the filesystem: a guard runs on EVERY tool call, and this keeps
   // the common case a few string compares.
-  const gated = WHOLE_FILE_WRITES.has(tool)
-    || PARTIAL_WRITES.has(tool)
-    || (tool === 'str_replace_editor'
-      && (args.command === 'create' || args.command === 'str_replace'
-        || args.command === 'insert'))
-  if (!gated) return undefined
+  if (!gatedWrite(tool, args)) return undefined
 
   // Every path the call names is judged: dsh's `write` / `edit` take `file_path`,
   // `str_replace_editor` takes `path`, another plugin's `write` may take `path`, and dsh
@@ -2383,6 +3712,15 @@ function refuseOversizedIndex(exec, settings, sessionCwd) {
     if (reason !== undefined) return reason
   }
   return undefined
+}
+
+/** Is this call one of the writes the guard judges: dsh's file tools that change a file? */
+function gatedWrite(tool, args) {
+  return WHOLE_FILE_WRITES.has(tool)
+    || PARTIAL_WRITES.has(tool)
+    || (tool === 'str_replace_editor'
+      && (args.command === 'create' || args.command === 'str_replace'
+        || args.command === 'insert'))
 }
 
 /** refuseOversizedIndex() for one path a gated call may write. */
@@ -3034,9 +4372,18 @@ const TEXT = {
       'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
       'written in it, or the user never has in dsh\'s own window), so the records of other ' +
       'conversations are closed to it.',
-    storeAt: (stores) =>
-      `Engramory: your memory store is ${code(storeDir(stores))}, its index ` +
-      `${code(stores.indexName)}; create them there on the first save if they do not exist yet.`,
+    storeAt: (stores) => (stores.unknown
+      ? 'Engramory: where your memory store is cannot be read just now (the user sees why on ' +
+        'this plugin\'s settings page); do not save to it until your context names it again.'
+      : `Engramory: your memory store is ${code(storeDir(stores))}, its index ` +
+        `${code(stores.indexName)}; create them there on the first save if they do not exist yet.`),
+    storeMoving:
+      'The Engramory memory store is being moved to another folder right now, which takes a ' +
+      'few seconds: try this save again shortly.',
+    storeMoved: (store) =>
+      `The Engramory memory store has moved to ${code(store)}: save the note there, not here.`,
+    conflictLine:
+      'changed in both places while the store was moved: this is the old place\'s copy, merge it',
     head: (label, path) =>
       `${label} (${code(path)}), loaded for you by dsh-engramory: the index of your ` +
       'long-term memory, one line per note, linking a note file in that directory. Use ' +
@@ -3101,9 +4448,14 @@ const TEXT = {
     strangerHistory:
       '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
       '窗口里亲手发过消息），其他会话的记录对它关闭。',
-    storeAt: (stores) =>
-      `Engramory：你的记忆库在 ${code(storeDir(stores))}，索引是 ${code(stores.indexName)}；` +
-      '还不存在的话，第一次保存时就在那里建。',
+    storeAt: (stores) => (stores.unknown
+      ? 'Engramory：现在读不出你的记忆库在哪（原因用户在本插件的设置页能看到）；上下文再次给出它的' +
+        '位置之前，别往里存。'
+      : `Engramory：你的记忆库在 ${code(storeDir(stores))}，索引是 ${code(stores.indexName)}；` +
+        '还不存在的话，第一次保存时就在那里建。'),
+    storeMoving: 'Engramory 记忆库正在搬到另一个文件夹，要几秒钟：过一会儿再保存一次。',
+    storeMoved: (store) => `Engramory 记忆库已经搬到 ${code(store)}：笔记存到那里，别存这里。`,
+    conflictLine: '搬家时两边都改过：这是旧位置的那一份，请合并',
     head: (label, path) =>
       `${label}（${code(path)}），由 dsh-engramory 为你加载：这是你长期记忆的索引，一行` +
       '一条笔记，链接到该目录下的笔记文件。直接用它，不必读文件，只打开看起来相关的笔记。' +
@@ -3124,10 +4476,12 @@ const TEXT = {
 
 /**
  * Where the stores are, as the skill states it: the pinned index alone, or the global
- * store under `$DSH_HOME` — the one store a plugin-only install has, which the model creates
- * on its first save — beside which a project may hold its own, created by the user only.
- * Without this, a model in a fresh workspace wrote its first index into the session's
- * directory, where neither recall nor the memory page looks, after searching the disk.
+ * store — under `$DSH_HOME` unless the user moved it (homeState); the one store a plugin-only
+ * install has, which the model creates on its first save — beside which a project may hold
+ * its own, created by the user only. Without this, a model in a fresh workspace wrote its
+ * first index into the session's directory, where neither recall nor the memory page looks,
+ * after searching the disk. Where the home cannot say where the store is, `unknown`: the
+ * skill then says not to save to it, rather than naming a place that may be the wrong one.
  */
 function storesOf(settings) {
   const how = {
@@ -3136,9 +4490,27 @@ function storesOf(settings) {
     maxLines: settings.maxLines ?? DEFAULT_MAX_LINES,
     maxBytes: settings.maxBytes ?? DEFAULT_MAX_BYTES,
   }
-  return settings.indexPath !== undefined
-    ? { ...how, pinned: settings.indexPath, indexName: basename(settings.indexPath) }
-    : { ...how, global: join(dshHome(), STORE_DIR), indexName: settings.indexName }
+  if (settings.indexPath !== undefined) {
+    return { ...how, pinned: settings.indexPath, indexName: basename(settings.indexPath) }
+  }
+  let global
+  try {
+    global = homeState().store
+  } catch {
+    // unreadable just now: as unknown
+  }
+  return global === undefined
+    ? { ...how, unknown: true, indexName: settings.indexName }
+    : { ...how, global, indexName: settings.indexName }
+}
+
+/** Where the global store is, as the built-in skill names it: a key that changes when it moves. */
+function placeKey() {
+  try {
+    return homeState().store ?? '?'
+  } catch {
+    return '?'
+  }
 }
 
 /** The configured caps as the skill states them: `200 lines / 25 KB` by default. */
@@ -3166,8 +4538,10 @@ function whereEn(stores, companion) {
       : `This host pins one index: ${code(stores.pinned)}${qualified(stores.pinned) ? '' : ', relative to your working directory'}.`,
     'Its folder is the store: every note goes there, beside it.']
     : [stores.social
-      ? 'Your store is the global one, `.engramory-memory/` in dsh\'s home folder; in the user\'s own conversations your context gives its full path.'
-      : `Your store is the global one: ${code(stores.global)}, its index ${code(stores.indexName)}.`,
+      ? 'Your store is the global one; in the user\'s own conversations your context gives its full path.'
+      : stores.unknown
+        ? 'Your store is the global one, but where it is cannot be read just now (the user sees why on this plugin\'s settings page): until your context names it again, do not save to it.'
+        : `Your store is the global one: ${code(stores.global)}, its index ${code(stores.indexName)}.`,
     'It serves every conversation, whatever its working directory. Write every note there,',
     'beside the index; on the first save, create the folder and the index if they do not',
     'exist yet.',
@@ -3198,8 +4572,10 @@ function whereZh(stores, companion) {
       : `本宿主固定了一个索引：${code(stores.pinned)}${qualified(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
     '它所在的文件夹就是记忆库：每条笔记都写在那里，放在索引旁边。']
     : [stores.social
-      ? '你的记忆库是全局库，即 dsh 主目录下的 `.engramory-memory/`；在用户本人的会话里，上下文会给出完整路径。'
-      : `你的记忆库是全局库：${code(stores.global)}，索引是 ${code(stores.indexName)}。`,
+      ? '你的记忆库是全局库；在用户本人的会话里，上下文会给出完整路径。'
+      : stores.unknown
+        ? '你的记忆库是全局库，但现在读不出它在哪（原因用户在本插件的设置页能看到）：上下文再次给出它的位置之前，别往里存。'
+        : `你的记忆库是全局库：${code(stores.global)}，索引是 ${code(stores.indexName)}。`,
     '不管会话的工作目录在哪，用的都是它。每条笔记都写在那里，放在索引旁边；第一次保存时，',
     '文件夹或索引还不存在就新建。',
     '',

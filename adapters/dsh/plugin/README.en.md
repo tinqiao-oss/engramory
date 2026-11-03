@@ -47,7 +47,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.4.0`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@1.5.0`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
 for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
 install that, then quit dsh from the tray and open it again. Your memory and settings stay.
@@ -60,8 +60,10 @@ is unverified.
 
 **Where the memory lives:**
 
-- **The global store**, `~/.dsh/.engramory-memory/` (under `$DSH_HOME` when it is set).
-  With the plugin alone this is the only store; the AI creates it on its first save.
+- **The global store**, by default `~/.dsh/.engramory-memory/` (under `$DSH_HOME` when it
+  is set); the settings page can move it to another folder (see
+  [Moving the store](#moving-the-store)). With the plugin alone this is the only store;
+  the AI creates it on its first save.
 - **A project store** (optional), `.engramory-memory/` in a project's root, is created
   by you only: run `python tools/engramory_init.py dsh --project-root <project>` from
   the Engramory repo, which also git-ignores it. Where one exists, what holds only in
@@ -155,7 +157,8 @@ owner, so a program forwarding other people's messages must leave it out.
 - **Settings page:** on dsh's *Plugins* page, open *Engramory memory* to set companion
   mode, memory access and the index cap. Saving goes through dsh's own profile editor,
   which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
-  in, can call it, so an agent cannot use it to switch social mode off.
+  in, can call it, so an agent cannot use it to switch social mode off. At its foot, the
+  global store can be moved: see [Moving the store](#moving-the-store).
 - **Memory page:** *Memory* in the sidebar. A banner at the top, the plugin's version
   beside its title, says how many notes, stores and archived files are listed and when
   they were read, with the switches (companion mode, and memory access once it is on)
@@ -185,6 +188,42 @@ owner, so a program forwarding other people's messages must leave it out.
   time. Below that, where to send feedback: a new GitHub issue (its body pre-filled with
   the plugin's version and the OS family, no path and no note), or an email, with a button
   that copies the address.
+
+## Moving the store
+
+*Where the memory is*, at the foot of the settings page, moves the global store to another
+folder: a synced one, say, or a private git repository. Give an empty folder (or one not
+there yet) and click *Move it there*:
+
+- **All of it moves, and the old place is cleared.** It is copied to the new place first,
+  each file checked, and only then switched to; the old place is then renamed aside,
+  compared file by file with the new one, and removed. What was written to the old place
+  while it moved is added to the new one; a file changed in both places keeps the new
+  place's version, with the old place's beside it as `<name>.old-<id>` and a line for it
+  at the end of the index. Nothing in the new place is written over.
+- **Cut short, nothing is lost.** Each step is written down first: dsh closed before the
+  switch, the move is undone when it opens again and the memory stays where it was;
+  closed after, the move is finished when it opens again.
+- **Every dsh on this computer moves with it.** The place is kept in
+  `.engramory-memory.json` in dsh's home folder, which the desktop app, the command line
+  and `dsh web` all follow (their plugin configs are their own; the global store is
+  shared). Do not delete that file: without it the store is looked for at its default
+  place, and the memory moved elsewhere is not found.
+- **For the few seconds it takes, the AI cannot save memory** and is told to try again
+  shortly; after the move, a save it makes to the old place is refused with the new one
+  named.
+- **It cannot go** on a network path, a whole drive, your home folder or dsh's (or a folder
+  holding either), anywhere else in dsh's home folder, a folder named `.engramory-memory`
+  (a project would read it as its own), or inside the store itself. A store holding a
+  folder link, or anything that is not a plain file, is not moved: sort it out by hand.
+  With `indexPath` set, there is no move.
+- **Readers** (`claude-reader`, `codex-reader` and the others, see one writer, many
+  readers above) read the new place once installed again with it.
+- **Only dsh's own writes are held off.** A shell, an editor or another AI tool writing to
+  the store in those few seconds is beyond the plugin, and what it writes may be missed.
+  A network drive mapped to a letter cannot be told apart, and there dsh may stall. Only
+  file contents are copied: NTFS alternate data streams are not, and hard links become
+  separate files.
 
 ## Configuration
 
@@ -238,8 +277,9 @@ writable. This table is pinned by `node --test` in CI.
   some versions and presets carry; a tool of the same name from another plugin is
   judged the same way. Shell tools, MCP file tools and external editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
-- **Stores are found only where the installer puts them.** Elsewhere, or for a project
-  store that links out of the project, set `indexPath`. A project's root is found by
+- **The global store is found where the settings page put it.** Moved there by hand, it
+  is not (move it back and use the settings page, or set `indexPath`); for a project store
+  that links out of the project, set `indexPath`. A project's root is found by
   its `.git` only, and a project store created mid-session can take ten seconds to appear.
 - **Social mode knows you by what dsh's window sends.** Apart from a bridge's owner
   messages, only what you type in dsh's own window is yours, and not when the browser's
@@ -249,8 +289,8 @@ writable. This table is pinned by `node --test` in CI.
 - **What the memory page opens is checked by path.** dsh's opener resolves the path once
   more before the desktop opens it, so a process changing the store's files at that
   moment could redirect what opens (as with dsh's own opener for any workspace file).
-- **Experimental:** companion mode, social mode, and the settings and memory pages may
-  change in a minor version.
+- **Experimental:** companion mode, social mode, the settings and memory pages, and moving
+  the store may change in a minor version.
 
 ## Feedback
 

@@ -10,16 +10,20 @@
  */
 import assert from 'node:assert/strict'
 import { execSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs, {
   chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
   utimesSync, writeFileSync,
 } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { homedir, hostname, tmpdir } from 'node:os'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { test } from 'node:test'
 
 import { apply, inject, name } from './index.js'
+
+// A move of the store waits a moment at two steps for writes already under way; not here.
+process.env.ENGRAMORY_MOVE_WAIT_MS = '0'
 
 // Where neither the config nor dsh names a language, the memory follows the system's:
 // pinned here, so the tests read the same on every machine.
@@ -3043,9 +3047,10 @@ test('settings routes: none without a web server, one exact route for both metho
   const headless = mount({})
   assert.ok(headless.guard) // a headless dsh mounts the cap as before
   const { routes } = webMount({})
-  // the memory page's route comes with it, from the same row
+  // the memory page's route and the store's come with it, from the same row
   assert.deepEqual(routes.map((r) => [r.path, r.methods.join(), r.requestBody]),
-    [['/api/engramory/settings', 'GET,POST', 'buffered'], ['/api/engramory/memory', 'GET,POST', 'buffered']])
+    [['/api/engramory/settings', 'GET,POST', 'buffered'], ['/api/engramory/memory', 'GET,POST', 'buffered'],
+      ['/api/engramory/store', 'GET,POST', 'buffered']])
 })
 
 test('settings GET: the row settings as the plugin reads them, and whether a save can land', async () => {
@@ -3064,7 +3069,7 @@ test('settings GET: the row settings as the plugin reads them, and whether a sav
 })
 
 test('settings route: served by the bundle\'s own row, never by a second row of the package', () => {
-  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 2) // settings and memory
+  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 3) // settings, memory and store
   // a second row would claim the same paths, or claim them first and have the page save it
   assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
 })
@@ -3980,4 +3985,690 @@ test('memory POST: an index named like a program is shown in its folder, never r
     for (const file of ['a.md', 'Memory.MD']) assert.equal((await m.call('POST', { store: 'user', file })).status, 200)
   })
   assert.deepEqual(m.opened.map((o) => o.action), [undefined, undefined])
+})
+
+// --- where the global store is, and moving it (the store route) ---
+
+const POINTER = '.engramory-memory.json'
+const JOURNAL = '.engramory-memory-move.json'
+const HASHES = '.engramory-memory-move-hashes.json'
+const LOCK = '.engramory-memory.lock'
+const pointerIn = (home) => JSON.parse(fs.readFileSync(join(home, POINTER), 'utf8'))
+const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value), 'utf8')
+const digest = (text) => createHash('sha256').update(text).digest('hex')
+const linkKind = process.platform === 'win32' ? 'junction' : 'dir'
+/** A lock as a dsh still running holds it: the test runner's process, which is alive. */
+const liveLock = (home, id = 'abcdefgh') =>
+  writeJson(join(home, LOCK), { id, pid: process.ppid, at: Date.now() })
+
+/** A home whose default store holds `files` (relative path -> text). */
+function homeStore(tag, files = {
+  [INDEX]: '- [a](a.md) — who the user is\n',
+  'a.md': noteOf('user'),
+  'archive/old.md': noteOf('moment'),
+}) {
+  const home = scratch(tag)
+  const dir = join(home, '.engramory-memory')
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true })
+    writeFileSync(join(dir, file), text, 'utf8')
+  }
+  return { home, dir }
+}
+
+/** A folder's files, relative path -> text. */
+function treeOf(dir, rel = '') {
+  const out = {}
+  for (const entry of fs.readdirSync(dir).sort()) {
+    const path = join(dir, entry)
+    const key = rel === '' ? entry : `${rel}/${entry}`
+    if (fs.lstatSync(path).isDirectory()) Object.assign(out, treeOf(path, key))
+    else out[key] = fs.readFileSync(path, 'utf8')
+  }
+  return out
+}
+
+/** Wait until `check` holds (a move carried on in the background), or fail. */
+async function until(check, what) {
+  for (let i = 0; i < 2000; i++) {
+    if (await check()) return
+    await new Promise((done) => setTimeout(done, 5))
+  }
+  throw new Error(`never: ${what}`)
+}
+
+/**
+ * A mount under `$DSH_HOME` = `home` with dsh's web server: `call` its store route, `move`
+ * a move to its end, `guardAt` the guard under that home.
+ */
+function storeMount(home, config = {}, options = {}) {
+  const m = withDshHome(home, () => mount(config, options))
+  const routes = []
+  m.mountLate('connection', { fetch: { register: (route) => { routes.push(route); return async () => {} } } })
+  const route = routes.find((r) => r.path === '/api/engramory/store')
+  const call = (method = 'GET', body, query = '') => withHomeAsync(home, async () => {
+    const init = { method }
+    if (body !== undefined) {
+      init.body = typeof body === 'string' ? body : JSON.stringify(body)
+      init.headers = { 'content-type': 'application/json' }
+    }
+    const response = await route.fetch(new Request(`http://127.0.0.1${route.path}${query}`, init))
+    return { status: response.status, body: await response.json() }
+  })
+  const move = async (to) => {
+    const started = await call('POST', { to })
+    if (started.status !== 202) return started
+    let outcome
+    await until(async () => {
+      outcome = (await call('GET', undefined, `?id=${started.body.id}`)).body.outcome
+      return outcome?.done === true
+    }, 'the move finished')
+    return { status: 202, id: started.body.id, body: outcome }
+  }
+  const guardAt = (exec) => withDshHome(home, () => m.guard(exec))
+  return { ...m, call, move, guardAt }
+}
+
+test('store: moved with every file, the old place gone, and recall, the skill and the memory page follow it', async () => {
+  const { home, dir } = homeStore('mv-home')
+  const before = treeOf(dir)
+  const to = join(scratch('mv-to'), 'AI记忆')
+  const prompt = promptRegistry()
+  const m = storeMount(home, { language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  assert.deepEqual((await m.call('GET')).body, { store: dir, default: dir, file: join(home, POINTER) })
+  assert.ok(m.skills[0].content.includes(dir))
+
+  const moved = await m.move(to)
+  assert.equal(moved.status, 202)
+  assert.deepEqual(moved.body, { done: true, ok: true, conflicts: 0 })
+  assert.deepEqual(treeOf(to), before, 'every file, as it was')
+  assert.equal(fs.existsSync(dir), false, 'the old place is gone')
+  assert.deepEqual(pointerIn(home), { version: 1, store: to, retired: [dir] })
+  assert.deepEqual(fs.readdirSync(home).filter((n) => n.startsWith('.engramory-memory')), [POINTER],
+    'no journal, lock or copy left in the home')
+  assert.deepEqual(fs.readdirSync(dirname(to)), ['AI记忆'], 'nor beside the new place')
+  assert.equal((await m.call('GET')).body.store, to)
+
+  const cwd = scratch('mv-cwd')
+  assert.match(await withDshHome(home, () => prompt.recall(at(cwd))), /User memory index[\s\S]*who the user is/)
+  await withDshHome(home, () => prompt.assembleFor(at(cwd)))
+  assert.equal(m.skills.length, 1)
+  assert.ok(m.skills[0].content.includes(to), 'the skill names the new place')
+  const listed = await withHomeAsync(home, () => memoryMount().call())
+  assert.deepEqual(listed.body.stores.map((s) => [s.kind, s.dir]), [['user', to]])
+})
+
+test('store: moved back to its default place, and a move to where it is does nothing', async () => {
+  const { home, dir } = homeStore('mv-back')
+  const to = join(scratch('mv-back-to'), 'vault')
+  const m = storeMount(home)
+  await m.move(to)
+  const before = treeOf(to)
+  assert.deepEqual((await m.move(null)).body, { done: true, ok: true, conflicts: 0 })
+  assert.deepEqual(treeOf(dir), before)
+  assert.equal(fs.existsSync(to), false)
+  assert.deepEqual(pointerIn(home), { version: 1, retired: [to] }, 'the default place is named by no file')
+  assert.equal((await m.call('GET')).body.store, dir)
+  assert.deepEqual(await m.call('POST', { to: null }), { status: 200, body: { ok: true, same: true } })
+  assert.deepEqual(await m.call('POST', { to: `${dir}${process.platform === 'win32' ? '\\' : '/'}` }),
+    { status: 200, body: { ok: true, same: true } })
+})
+
+test('store: with no store yet, a move names the new place and makes its folder', async () => {
+  const home = scratch('mv-none')
+  const to = join(scratch('mv-none-to'), 'vault')
+  const m = storeMount(home)
+  assert.deepEqual((await m.move(to)).body, { done: true, ok: true, conflicts: 0 })
+  assert.deepEqual(pointerIn(home), { version: 1, store: to, retired: [join(home, '.engramory-memory')] })
+  assert.deepEqual(fs.readdirSync(to), [])
+  // a moved store that is not there now is not one not made yet: a drive not mounted, say
+  rmSync(to, { recursive: true })
+  assert.deepEqual(await m.call('POST', { to: join(scratch('mv-none-2'), 'v') }),
+    { status: 400, body: { ok: false, error: 'source', reason: 'unavailable' } })
+})
+
+test('store: a place a move refuses, by name or as the disk has it, and nothing is written', async () => {
+  const { home, dir } = homeStore('mv-bad')
+  const m = storeMount(home)
+  const full = scratch('mv-full')
+  writeFileSync(join(full, 'x.txt'), 'x', 'utf8')
+  const file = join(scratch('mv-file'), 'f')
+  writeFileSync(file, 'x', 'utf8')
+  const project = scratch('mv-proj')
+  const cases = [
+    ['relative/vault', 'relative'],
+    [` ${join(full, 'v')}`, 'invalid'],
+    [resolve('/'), 'root'],
+    [home, 'reserved'],
+    [join(home, 'profiles', 'web'), 'reserved'],
+    [homedir(), 'reserved'],
+    [dirname(homedir()), 'reserved'],
+    [join(project, '.engramory-memory'), 'reserved'],
+    [join(project, '.engramory-memory-old-abcdefgh'), 'reserved'],
+    [full, 'notEmpty'],
+    [file, 'notDir'],
+    [join(dir, 'inner'), 'reserved'],
+  ]
+  if (process.platform === 'win32') {
+    cases.push(['\\\\host\\share\\vault', 'network'], ['D:vault', 'relative'], ['\\vault', 'relative'],
+      [join(full, 'vault.'), 'invalid'], [join(full, 'con'), 'invalid'], [join(full, 'a:b'), 'invalid'])
+  }
+  for (const [to, reason] of cases) {
+    assert.deepEqual(await m.call('POST', { to }), { status: 400, body: { ok: false, error: 'place', reason } }, to)
+  }
+  for (const [body, field] of [[{ to: 3 }, 'to'], [{}, 'body'], ['nope', 'body'], [[], 'body']]) {
+    assert.deepEqual(await m.call('POST', body), { status: 400, body: { ok: false, error: 'invalid', field } })
+  }
+  assert.deepEqual(fs.readdirSync(home), ['.engramory-memory'], 'nothing written')
+})
+
+test('store: a place that is the store, or inside it, under another name', async () => {
+  const { home } = homeStore('mv-alias-place')
+  const to = join(scratch('mv-alias-to'), 'vault')
+  const m = storeMount(home)
+  await m.move(to)
+  assert.deepEqual(await m.call('POST', { to: join(to, 'sub') }),
+    { status: 400, body: { ok: false, error: 'place', reason: 'nested' } })
+  assert.deepEqual(await m.call('POST', { to: dirname(to) }),
+    { status: 400, body: { ok: false, error: 'place', reason: 'nested' } })
+  const alias = join(scratch('mv-alias-link'), 'alias')
+  symlinkSync(to, alias, linkKind)
+  assert.deepEqual(await m.call('POST', { to: alias }), { status: 200, body: { ok: true, same: true } })
+  assert.deepEqual(await m.call('POST', { to: join(alias, 'sub') }),
+    { status: 400, body: { ok: false, error: 'place', reason: 'nested' } })
+  const empty = scratch('mv-alias-empty')
+  const link = join(scratch('mv-alias-link2'), 'link')
+  symlinkSync(empty, link, linkKind)
+  assert.deepEqual(await m.call('POST', { to: link }),
+    { status: 400, body: { ok: false, error: 'place', reason: 'link' } })
+})
+
+test('store: a store that is a link, or holds one, is not moved, and nothing changes', async () => {
+  const { home, dir } = homeStore('mv-link')
+  symlinkSync(scratch('mv-link-out'), join(dir, 'out'), linkKind)
+  const to = join(scratch('mv-link-to'), 'vault')
+  const m = storeMount(home)
+  assert.deepEqual((await m.move(to)).body, { done: true, ok: false, error: 'link' })
+  assert.equal(fs.existsSync(to), false)
+  assert.deepEqual(fs.readdirSync(dirname(to)), [], 'no copy left beside it')
+  assert.deepEqual(fs.readdirSync(home), ['.engramory-memory'], 'no journal, lock or home file')
+  assert.ok(fs.existsSync(join(dir, 'a.md')))
+  assert.equal(m.guardAt(write(join(dir, 'a.md'), 'x')), undefined, 'writes are let through again')
+
+  const linked = homeStore('mv-link2')
+  const vault = scratch('mv-link2-vault')
+  fs.renameSync(linked.dir, join(vault, 'moved'))
+  symlinkSync(join(vault, 'moved'), linked.dir, linkKind)
+  assert.deepEqual(await storeMount(linked.home).call('POST', { to: join(scratch('mv-link2-to'), 'v') }),
+    { status: 400, body: { ok: false, error: 'source', reason: 'link' } })
+})
+
+test('store: a pinned index, a home on another machine, a move under way: no move', async (t) => {
+  const { home } = homeStore('mv-no')
+  const to = join(scratch('mv-no-to'), 'v')
+  assert.deepEqual(await storeMount(home, { indexPath: join(scratch('mv-pin'), INDEX) }).call('POST', { to }),
+    { status: 409, body: { ok: false, error: 'pinned' } })
+  const m = storeMount(home)
+  liveLock(home)
+  assert.deepEqual(await m.call('POST', { to }), { status: 409, body: { ok: false, error: 'busy' } })
+  // a lock left by a dsh that is gone is taken over: this process's, under an id it does not hold
+  writeJson(join(home, LOCK), { id: 'abcdefgh', pid: process.pid, at: Date.now() })
+  assert.equal((await m.move(to)).body.ok, true)
+  // and one past its age, whoever holds it
+  writeJson(join(home, LOCK), { id: 'abcdefgh', pid: process.ppid, at: Date.now() - 16 * 60 * 1000 })
+  assert.equal((await m.move(null)).body.ok, true)
+  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
+  const remote = storeMount('\\\\no-such-host.invalid\\share\\.dsh')
+  assert.deepEqual(await remote.call('POST', { to }), { status: 409, body: { ok: false, error: 'remote' } })
+})
+
+test('store: dsh\'s file tools are held off both places while a move runs, and turned from the old one after', async () => {
+  const { home, dir } = homeStore('mv-hold')
+  const to = join(scratch('mv-hold-to'), 'vault')
+  const m = storeMount(home, { language: 'en' })
+  liveLock(home) // the dsh running the move is still at it
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'staged', from: dir, to })
+  const staging = join(dirname(to), '.engramory-memory-moving-abcdefgh')
+  for (const path of [join(dir, 'a.md'), join(to, 'b.md'), join(staging, 'a.md'), join(dir, INDEX)]) {
+    assert.match(m.guardAt(write(path, 'x')) ?? '', /being moved/, path)
+  }
+  assert.match(m.guardAt({ name: 'str_replace_editor',
+    arguments: { command: 'create', path: join(to, 'c.md'), file_text: 'x' } }) ?? '', /being moved/)
+  assert.equal(m.guardAt(write(join(scratch('mv-else'), 'a.md'), 'x')), undefined, 'anywhere else is not')
+  assert.equal(m.guardAt({ name: 'read', arguments: { file_path: join(dir, 'a.md') } }), undefined, 'reads are not')
+  // committed: the new place is the store, still held while the old one is settled into it
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'committed', from: dir, to })
+  assert.match(m.guardAt(write(join(to, 'b.md'), 'x')) ?? '', /being moved/)
+  assert.match(m.guardAt(write(join(dir, 'a.md'), 'x')) ?? '', /being moved/)
+  // stopped there, its error on record, to be carried on later: the new place takes writes
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'detached', from: dir, to, error: 'failed' })
+  assert.equal(m.guardAt(write(join(to, 'b.md'), 'x')), undefined)
+  assert.match(m.guardAt(write(join(dir, 'a.md'), 'x')) ?? '', /being moved/)
+  // done: a write to the old place is sent to the new one
+  rmSync(join(home, JOURNAL))
+  const reason = m.guardAt(write(join(dir, 'a.md'), 'x')) ?? ''
+  assert.match(reason, /has moved to/)
+  assert.ok(reason.includes(to))
+  assert.equal(m.guardAt(write(join(to, 'a.md'), 'x')), undefined)
+})
+
+test('store: a move cut short while it copied is undone when a dsh opens', async () => {
+  const { home, dir } = homeStore('mv-undo')
+  const before = treeOf(dir)
+  const to = join(scratch('mv-undo-to'), 'vault')
+  const staging = join(dirname(to), '.engramory-memory-moving-abcdefgh')
+  mkdirSync(staging)
+  writeFileSync(join(staging, 'a.md'), 'half a copy', 'utf8')
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'prepared', from: dir, to })
+  // its lock, left by a dsh that is gone (this process, under an id it does not hold)
+  writeJson(join(home, LOCK), { id: 'abcdefgh', pid: process.pid, at: Date.now() })
+  storeMount(home)
+  await until(() => !fs.existsSync(join(home, JOURNAL)) && !fs.existsSync(join(home, LOCK)), 'the move undone')
+  assert.deepEqual(treeOf(dir), before)
+  assert.equal(fs.existsSync(staging), false)
+  assert.equal(fs.existsSync(join(home, POINTER)), false)
+})
+
+test('store: a move cut short after its commit is carried on, settling what changed at the old place', async () => {
+  const { home, dir } = homeStore('mv-settle', {
+    [INDEX]: '- [a](a.md) — a\n',
+    'a.md': 'a as moved',
+    'same.md': 'same',
+    'b.md': 'b changed at the old place',
+    'late.md': 'written late',
+    'archive/x.md': 'x as moved',
+  })
+  const to = join(scratch('mv-settle-to'), 'vault')
+  // the copy the move made, and what the new place has had since
+  mkdirSync(join(to, 'archive'), { recursive: true })
+  writeFileSync(join(to, INDEX), '- [a](a.md) — a\n- [n](n.md) — new', 'utf8')
+  writeFileSync(join(to, 'a.md'), 'a changed at the new place', 'utf8')
+  writeFileSync(join(to, 'same.md'), 'same', 'utf8')
+  writeFileSync(join(to, 'b.md'), 'b as moved', 'utf8')
+  writeFileSync(join(to, 'archive', 'x.md'), 'x as moved', 'utf8')
+  writeJson(join(home, HASHES), { id: 'abcdefgh', hashes: {
+    [INDEX]: digest('- [a](a.md) — a\n'), 'a.md': digest('a as moved'), 'same.md': digest('same'),
+    'b.md': digest('b as moved'), 'archive/x.md': digest('x as moved'),
+  } })
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'committed', from: dir, to })
+  storeMount(home, { language: 'en' })
+  await until(() => !fs.existsSync(join(home, JOURNAL)), 'the move finished')
+  assert.equal(fs.existsSync(dir), false)
+  assert.equal(fs.existsSync(join(home, '.engramory-memory-old-abcdefgh')), false)
+  assert.equal(fs.existsSync(join(home, HASHES)), false)
+  const tree = treeOf(to)
+  assert.equal(tree['a.md'], 'a changed at the new place', 'the copy the move made never wins over a newer one')
+  assert.equal(tree['b.md'], 'b as moved', 'nothing is written over a file of the new place')
+  assert.equal(tree['b.old-abcdefgh.md'], 'b changed at the old place', 'changed at both: the old one kept beside it')
+  assert.equal(tree['late.md'], 'written late', 'what only the old place has is copied in')
+  assert.equal(tree['same.md'], 'same')
+  assert.equal(tree['archive/x.md'], 'x as moved')
+  assert.equal(tree[INDEX], '- [a](a.md) — a\n- [n](n.md) — new\n' +
+    '- [b.old-abcdefgh](b.old-abcdefgh.md) — changed in both places while the store was moved: ' +
+    'this is the old place\'s copy, merge it\n')
+  assert.equal(Object.keys(tree).length, 7)
+})
+
+test('store: a home file that cannot be taken as written names no place, and a stranger gets nothing', async () => {
+  const { home, dir } = homeStore('mv-broken')
+  writeFileSync(join(home, POINTER), '{ not json', 'utf8')
+  const prompt = promptRegistry()
+  const m = storeMount(home, { language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const cwd = scratch('mv-broken-cwd')
+  assert.equal(await withDshHome(home, () => prompt.recall(at(cwd))), '', 'no index is guessed at')
+  assert.match(m.skills[0].content, /cannot be read just now/)
+  assert.deepEqual((await m.call('GET')).body,
+    { store: null, default: dir, file: join(home, POINTER), problem: 'pointer' })
+  assert.deepEqual(await m.call('POST', { to: join(scratch('mv-broken-to'), 'v') }),
+    { status: 409, body: { ok: false, error: 'problem' } })
+  assert.equal((await withHomeAsync(home, () => memoryMount().call())).body.location, 'unknown')
+  const social = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
+  const read = (path) => withDshHome(home, () => social.guard({ name: 'read',
+    arguments: { file_path: path }, ...as(theirs('qq-b', cwd)) }))
+  assert.match(read(join(scratch('mv-anywhere'), 'notes.md')) ?? '', /closed to it/,
+    'a stranger\'s file tools are refused outright')
+  // fixed, it is seen again
+  writeJson(join(home, POINTER), { version: 1 })
+  assert.match(await withDshHome(home, () => prompt.recall(at(cwd))), /User memory index/)
+  assert.equal(read(join(scratch('mv-anywhere'), 'notes.md')), undefined)
+})
+
+test('store: the home file is taken only as written', async () => {
+  const home = scratch('mv-pointer')
+  const m = storeMount(home)
+  const shown = async (text) => {
+    writeFileSync(join(home, POINTER), text, 'utf8')
+    return (await m.call('GET')).body
+  }
+  for (const value of [{ version: 2 }, [], { version: 1, store: 'relative/v' }, { version: 1, store: 3 },
+    { version: 1, store: join(home, 'profiles', 'x') }, { version: 1, store: homedir() },
+    { version: 1, store: join(scratch('mv-p'), '.engramory-memory') }, { version: 1, retired: 'x' },
+    { version: 1, retired: Array.from({ length: 9 }, (_, i) => join(scratch('mv-r'), `r${i}`)) }]) {
+    assert.equal((await shown(JSON.stringify(value))).problem, 'pointer', JSON.stringify(value))
+  }
+  const to = join(scratch('mv-pointer-to'), 'v')
+  // a hand edit's byte order mark, and the store among the places it moved from, are fine
+  const fine = await shown(`\uFEFF${JSON.stringify({ version: 1, store: to, retired: [to] })}`)
+  assert.equal(fine.problem, undefined)
+  assert.equal(fine.store, to)
+})
+
+test('store: in social mode a moved store and a move\'s folders are closed to a stranger, an index pinned or not', () => {
+  const home = scratch('mv-social')
+  const to = join(scratch('mv-social-to'), 'vault')
+  mkdirSync(to)
+  writeFileSync(join(to, INDEX), '- u\n', 'utf8')
+  writeJson(join(home, POINTER), { version: 1, store: to })
+  const cwd = scratch('mv-social-cwd')
+  for (const config of [COMPANION, { ...COMPANION, indexPath: join(scratch('mv-social-pin'), INDEX) }]) {
+    const { guard } = withDshHome(home, () => mount(config, { workingDirectory: sessionDirs() }))
+    const read = (path) => withDshHome(home, () => guard({ name: 'read',
+      arguments: { file_path: path }, ...as(theirs('qq-s', cwd)) }))
+    const which = JSON.stringify(config)
+    assert.match(read(join(to, INDEX)) ?? '', /closed to it/, which)
+    assert.match(read(join(dirname(to), '.engramory-memory-old-abcdefgh', 'a.md')) ?? '', /closed to it/, which)
+    assert.match(read(join(home, POINTER)) ?? '', /closed to it/, which)
+    assert.equal(read(join(dirname(to), 'foo.engramory-memory-notes', 'a.md')), undefined,
+      'a name that merely holds it is not')
+    assert.equal(read(join(cwd, 'notes.md')), undefined)
+  }
+})
+
+test('store: a moved store reached through a link to a place not there yet is closed there too', () => {
+  const home = scratch('mv-dangling')
+  const future = join(scratch('mv-dangling-drive'), 'future') // a drive not mounted right now
+  const alias = join(scratch('mv-dangling-link'), 'alias')
+  symlinkSync(future, alias, linkKind)
+  writeJson(join(home, POINTER), { version: 1, store: join(alias, 'vault') })
+  const { guard } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
+  const reason = withDshHome(home, () => guard({ name: 'write',
+    arguments: { file_path: join(future, 'vault', INDEX), content: '- planted\n' },
+    ...as(theirs('qq-d', scratch('mv-dangling-cwd'))) }))
+  assert.match(reason ?? '', /closed to it/)
+})
+
+test('store: the skill names where the store is again once another dsh has moved it', async () => {
+  const home = scratch('mv-skill')
+  const prompt = promptRegistry()
+  const m = withDshHome(home, () => mount({ language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt }))
+  assert.ok(m.skills[0].content.includes(join(home, '.engramory-memory')))
+  const to = join(scratch('mv-skill-to'), 'vault')
+  writeJson(join(home, POINTER), { version: 1, store: to })
+  await withDshHome(home, () => prompt.assembleFor(at(scratch('mv-skill-cwd'))))
+  assert.equal(m.skills.length, 1)
+  assert.ok(m.skills[0].content.includes(to))
+  // a skill of the user's own is left as written
+  const own = withDshHome(home, () => mount({ skill: '# my rules' }))
+  assert.equal(own.skills[0].content, '# my rules')
+})
+
+test('store GET: what a move would meet — a pinned index, a skill of the user\'s own, the installer\'s AGENTS.md block', async () => {
+  const home = scratch('mv-flags')
+  writeFileSync(join(home, 'AGENTS.md'),
+    '# mine\n\n<!-- BEGIN ENGRAMORY DSH -->\nrules\n<!-- END ENGRAMORY DSH -->\n', 'utf8')
+  const { body } = await storeMount(home, { indexPath: join(scratch('mv-flags-pin'), INDEX), skill: '# mine' }).call('GET')
+  assert.deepEqual([body.pinned, body.customSkill, body.legacyRules], [true, true, true])
+  const plain = (await storeMount(scratch('mv-flags-2')).call('GET')).body
+  assert.deepEqual([plain.pinned, plain.customSkill, plain.legacyRules], [undefined, undefined, undefined])
+})
+
+test('store: a project\'s store that is the global store under another name is shown once, as the global one', async () => {
+  const home = scratch('mv-twin')
+  const project = scratch('mv-twin-repo')
+  mkdirSync(join(project, '.git'))
+  const vault = join(project, 'vault')
+  mkdirSync(vault)
+  writeFileSync(join(vault, INDEX), '- [u](u.md) - the user\n', 'utf8')
+  symlinkSync(vault, join(project, '.engramory-memory'), linkKind)
+  writeJson(join(home, POINTER), { version: 1, store: vault })
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const text = await withDshHome(home, () => prompt.recall(at(project)))
+  assert.match(text, /^User memory index/)
+  assert.equal(text.match(/memory index \(/g).length, 1)
+})
+
+test('store: a store gone between the ask and the copy (a drive pulled out) is not taken for none', async () => {
+  const { home } = homeStore('mv-gone')
+  const away = join(scratch('mv-gone-drive'), 'vault')
+  const m = storeMount(home)
+  await m.move(away) // the store is now somewhere a drive can be pulled out of
+  const to = join(scratch('mv-gone-to'), 'v')
+  const before = process.env.ENGRAMORY_MOVE_WAIT_MS
+  process.env.ENGRAMORY_MOVE_WAIT_MS = '300' // the moment before the copy
+  try {
+    const started = await m.call('POST', { to })
+    assert.equal(started.status, 202)
+    fs.renameSync(away, `${away}-unplugged`)
+    let outcome
+    await until(async () => {
+      outcome = (await m.call('GET', undefined, `?id=${started.body.id}`)).body.outcome
+      return outcome?.done === true
+    }, 'the move stopped')
+    assert.deepEqual(outcome, { done: true, ok: false, error: 'unavailable' })
+  } finally {
+    process.env.ENGRAMORY_MOVE_WAIT_MS = before
+  }
+  assert.equal(pointerIn(home).store, away, 'still where it was')
+  assert.equal(fs.existsSync(to), false)
+  assert.equal(fs.existsSync(join(home, JOURNAL)), false)
+})
+
+test('store: a move into a folder inside a place it moved from leaves the new place open to writes', async () => {
+  const { home } = homeStore('mv-nest')
+  const a = join(scratch('mv-nest-a'), 'A')
+  const b = join(scratch('mv-nest-b'), 'B')
+  const m = storeMount(home, { language: 'en' })
+  assert.equal((await m.move(a)).body.ok, true)
+  assert.equal((await m.move(b)).body.ok, true)
+  const sub = join(a, 'sub')
+  assert.equal((await m.move(sub)).body.ok, true)
+  assert.equal(m.guardAt(write(join(sub, 'a.md'), 'x')), undefined, 'the store itself is not turned away from')
+  assert.ok(!pointerIn(home).retired.includes(a), 'A holds the store now: not a place it moved from')
+  assert.match(m.guardAt(write(join(b, 'a.md'), 'x')) ?? '', /has moved to/)
+  // a home file written so by hand (or by a version that kept it) is read the same way
+  writeJson(join(home, POINTER), { version: 1, store: sub, retired: [a, b] })
+  assert.equal(m.guardAt(write(join(sub, 'b.md'), 'x')), undefined)
+})
+
+test('store: a move cut short after its copy, before its commit, is undone, and only its own copies go', async () => {
+  for (const phase of ['staged', 'published']) {
+    const { home, dir } = homeStore(`mv-cut-${phase}`)
+    const before = treeOf(dir)
+    const to = join(scratch(`mv-cut-${phase}-to`), 'vault')
+    const copied = join(phase === 'staged' ? dirname(to) : to, phase === 'staged' ? '.engramory-memory-moving-abcdefgh' : '')
+    mkdirSync(join(copied, 'archive'), { recursive: true })
+    for (const [file, text] of Object.entries(before)) writeFileSync(join(copied, file), text, 'utf8')
+    if (phase === 'published') writeFileSync(join(to, 'foreign.md'), 'not the move\'s', 'utf8')
+    writeJson(join(home, HASHES), { id: 'abcdefgh',
+      hashes: Object.fromEntries(Object.entries(before).map(([file, text]) => [file, digest(text)])) })
+    writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase, from: dir, to })
+    storeMount(home)
+    await until(() => !fs.existsSync(join(home, JOURNAL)), `${phase}: undone`)
+    assert.deepEqual(treeOf(dir), before, phase)
+    assert.equal(fs.existsSync(join(home, POINTER)), false, phase)
+    assert.equal(fs.existsSync(join(dirname(to), '.engramory-memory-moving-abcdefgh')), false, phase)
+    if (phase === 'published') assert.deepEqual(treeOf(to), { 'foreign.md': 'not the move\'s' }, 'what is not its copy stays')
+    else assert.equal(fs.existsSync(to), false)
+  }
+})
+
+test('store: a move cut short just after its commit landed is carried on, not undone', async () => {
+  const { home, dir } = homeStore('mv-landed')
+  const before = treeOf(dir)
+  const to = join(scratch('mv-landed-to'), 'vault')
+  mkdirSync(join(to, 'archive'), { recursive: true })
+  for (const [file, text] of Object.entries(before)) writeFileSync(join(to, file), text, 'utf8')
+  writeJson(join(home, HASHES), { id: 'abcdefgh',
+    hashes: Object.fromEntries(Object.entries(before).map(([file, text]) => [file, digest(text)])) })
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'published', from: dir, to })
+  storeMount(home)
+  await until(() => !fs.existsSync(join(home, JOURNAL)), 'carried on')
+  assert.deepEqual(treeOf(to), before)
+  assert.equal(fs.existsSync(dir), false)
+})
+
+test('store: a journal not read just now is tried again later, never set aside', async () => {
+  const { home } = homeStore('mv-unread')
+  mkdirSync(join(home, JOURNAL)) // read fails as a lock or a disk would: not with "not JSON"
+  storeMount(home)
+  await new Promise((done) => setTimeout(done, 100))
+  assert.ok(fs.lstatSync(join(home, JOURNAL)).isDirectory(), 'left where it is')
+  assert.deepEqual(fs.readdirSync(home).filter((n) => n.includes('.bad')), [])
+  // one read and found not JSON is set aside
+  rmSync(join(home, JOURNAL), { recursive: true })
+  writeFileSync(join(home, JOURNAL), '{ torn', 'utf8')
+  storeMount(home)
+  await until(() => !fs.existsSync(join(home, JOURNAL)), 'set aside')
+  assert.equal(fs.readdirSync(home).filter((n) => n.endsWith('.bad')).length, 1)
+})
+
+test('store: a move another dsh finished is said to be over', async () => {
+  const home = scratch('mv-elsewhere')
+  const { body } = await storeMount(home).call('GET', undefined, '?id=zzzzzzzz')
+  assert.deepEqual(body.outcome, { done: true, elsewhere: true })
+})
+
+test('store: a lock never written whole is taken over once it is old, not before', async () => {
+  const { home } = homeStore('mv-torn')
+  const m = storeMount(home)
+  const to = join(scratch('mv-torn-to'), 'v')
+  writeFileSync(join(home, LOCK), '', 'utf8')
+  assert.deepEqual(await m.call('POST', { to }), { status: 409, body: { ok: false, error: 'busy' } })
+  const old = (Date.now() - 60 * 1000) / 1000
+  utimesSync(join(home, LOCK), old, old)
+  assert.equal((await m.move(to)).body.ok, true)
+})
+
+test('store: a place the store moved from, reached through a link to a place not there yet, is closed there too', () => {
+  const home = scratch('mv-old-dangling')
+  const future = join(scratch('mv-old-drive'), 'future')
+  const alias = join(scratch('mv-old-link'), 'alias')
+  symlinkSync(future, alias, linkKind)
+  const to = join(scratch('mv-old-to'), 'vault')
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [join(alias, 'oldvault')] })
+  const { guard } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
+  const reason = withDshHome(home, () => guard({ name: 'write',
+    arguments: { file_path: join(future, 'oldvault', 'note.md'), content: 'x' },
+    ...as(theirs('qq-o', scratch('mv-old-cwd'))) }))
+  assert.match(reason ?? '', /closed to it/)
+})
+
+test('store: a dsh home spelled another way still reads a home file that names its default place', () => {
+  const real = scratch('mv-spelling')
+  const alias = join(scratch('mv-spelling-link'), 'home')
+  symlinkSync(real, alias, linkKind)
+  const to = join(scratch('mv-spelling-to'), 'vault')
+  // written by a dsh that spells the home `real`; read by one that spells it `alias`
+  writeJson(join(real, POINTER), { version: 1, store: to, retired: [join(real, '.engramory-memory')] })
+  withDshHome(alias, () => {
+    const prompt = promptRegistry()
+    const m = mount({ language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    assert.ok(m.skills[0].content.includes(to), 'the home file is taken as written')
+  })
+})
+
+test('store: a move on record when the home was last read is still held to while it cannot be read', async () => {
+  const { home, dir } = homeStore('mv-unreadable')
+  const to = join(scratch('mv-unreadable-to'), 'vault')
+  const prompt = promptRegistry()
+  const m = storeMount(home, { language: 'en' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  liveLock(home)
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'staged', from: dir, to })
+  // read once, by recall, not by a write the guard judged
+  await withDshHome(home, () => prompt.recall(at(scratch('mv-unreadable-cwd'))))
+  const reason = await failing('statSync', 'EACCES', join(home, POINTER),
+    () => m.guardAt(write(join(dir, 'a.md'), 'x')))
+  assert.match(reason ?? '', /being moved/)
+})
+
+test('store: a place the store moved from, spelled through a link, does not hold off the store inside it', async (t) => {
+  const real = scratch('mv-spell-real')
+  const alias = join(scratch('mv-spell-link'), 'alias')
+  symlinkSync(real, alias, linkKind)
+  const home = scratch('mv-spell-home')
+  const store = join(real, 'A', 'sub')
+  mkdirSync(store, { recursive: true })
+  // moved from A, as one dsh spelled it, to a folder inside it, as another does
+  writeJson(join(home, POINTER), { version: 1, store, retired: [join(alias, 'A')] })
+  const m = storeMount(home)
+  assert.equal(m.guardAt(write(join(store, 'a.md'), 'x')), undefined)
+})
+
+test('store: a pinned index linked into a place not there yet is closed there too', () => {
+  const home = scratch('mv-pin-dangling')
+  const future = join(scratch('mv-pin-drive'), 'future')
+  const alias = join(scratch('mv-pin-link'), 'alias')
+  symlinkSync(future, alias, linkKind)
+  const pinDir = scratch('mv-pin-dir')
+  const pin = join(pinDir, INDEX)
+  try {
+    symlinkSync(join(alias, 'notes', INDEX), pin, 'file')
+  } catch {
+    return // no file links here (Windows without the right to make them): nothing to check
+  }
+  const { guard } = withDshHome(home, () => mount({ ...COMPANION, indexPath: pin }, { workingDirectory: sessionDirs() }))
+  const reason = withDshHome(home, () => guard({ name: 'write',
+    arguments: { file_path: join(future, 'notes', INDEX), content: 'x' },
+    ...as(theirs('qq-p', scratch('mv-pin-cwd'))) }))
+  assert.match(reason ?? '', /closed to it/)
+})
+
+test('store: an editor command dsh\'s own tool does not have is held off a store being moved too', () => {
+  const { home, dir } = homeStore('mv-undo-edit')
+  const m = storeMount(home, { language: 'en' })
+  liveLock(home)
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'staged', from: dir, to: join(scratch('mv-ue-to'), 'v') })
+  assert.match(m.guardAt({ name: 'str_replace_editor', arguments: { command: 'undo_edit', path: join(dir, INDEX) } }) ?? '', /being moved/)
+  assert.equal(m.guardAt({ name: 'str_replace_editor', arguments: { command: 'view', path: join(dir, INDEX) } }), undefined)
+})
+
+test('store: a move stopped after its commit, carried on, waits for writes let through meanwhile before it settles', async () => {
+  const { home, dir } = homeStore('mv-reclose', { [INDEX]: '- [a](a.md) — a\n', 'a.md': 'a' })
+  const to = join(scratch('mv-reclose-to'), 'vault')
+  mkdirSync(to, { recursive: true })
+  writeFileSync(join(to, INDEX), '- [a](a.md) — a\n', 'utf8')
+  writeFileSync(join(to, 'a.md'), 'a', 'utf8')
+  const detached = join(dirname(dir), '.engramory-memory-old-abcdefgh')
+  fs.renameSync(dir, detached)
+  writeJson(join(home, HASHES), { id: 'abcdefgh', hashes: { [INDEX]: digest('- [a](a.md) — a\n'), 'a.md': digest('a') } })
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'detached', from: dir, to, error: 'failed' })
+  const before = process.env.ENGRAMORY_MOVE_WAIT_MS
+  process.env.ENGRAMORY_MOVE_WAIT_MS = '400'
+  try {
+    const m = storeMount(home, { language: 'en' })
+    // the error cleared, the new place is held off again, and nothing is settled for a moment
+    const journal = () => { try { return JSON.parse(fs.readFileSync(join(home, JOURNAL), 'utf8')) } catch { return undefined } }
+    await until(() => journal() !== undefined && journal().error === undefined, 'its error cleared')
+    const cleared = Date.now()
+    assert.match(m.guardAt(write(join(to, 'b.md'), 'x')) ?? '', /being moved/)
+    await until(() => !fs.existsSync(join(home, JOURNAL)), 'finished')
+    assert.ok(Date.now() - cleared >= 300, `settled ${Date.now() - cleared} ms after it closed the new place again`)
+  } finally {
+    process.env.ENGRAMORY_MOVE_WAIT_MS = before
+  }
+  assert.equal(fs.existsSync(detached), false)
+})
+
+test('store: a move\'s journal turned unreadable as written does not let writes through the move it recorded', () => {
+  const { home, dir } = homeStore('mv-badjournal')
+  const to = join(scratch('mv-badjournal-to'), 'vault')
+  const m = storeMount(home, { language: 'en' })
+  liveLock(home)
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'staged', from: dir, to })
+  assert.match(m.guardAt(write(join(dir, 'a.md'), 'x')) ?? '', /being moved/)
+  writeFileSync(join(home, JOURNAL), '{ torn mid-write', 'utf8')
+  assert.match(m.guardAt(write(join(dir, 'a.md'), 'x')) ?? '', /being moved/, 'the old place')
+  assert.match(m.guardAt(write(join(to, 'a.md'), 'x')) ?? '', /being moved/, 'the new place')
+})
+
+test('store: a move renews its lock whole, leaving nothing beside it', async () => {
+  const { home } = homeStore('mv-renew')
+  const m = storeMount(home)
+  assert.equal((await m.move(join(scratch('mv-renew-to'), 'v'))).body.ok, true)
+  assert.deepEqual(fs.readdirSync(home).filter((n) => n.includes('.lock')), [], 'no lock, and no renewal left over')
 })

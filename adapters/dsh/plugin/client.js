@@ -29,8 +29,14 @@ window.__ModuleLoader__.load({
     /** Relative to the page, as dsh's own pages fetch, so a mounted deployment keeps its prefix. */
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
+    const STORE_API = 'api/engramory/store'
+    /** How often the page asks after a move it started, and for how long in all. */
+    const MOVE_POLL_MS = 500
+    const MOVE_WATCH_MS = 120000
+    /** How often the page looks again at a move it did not start, while one is under way. */
+    const MOVE_FOLLOW_MS = 2000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.4.0'
+    const VERSION = '1.5.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -58,7 +64,7 @@ window.__ModuleLoader__.load({
     const TYPES = ['user', 'feedback', 'project', 'reference', 'moment', 'upcoming', 'self', 'other']
 
     const zh = {
-      summary: '大肥鱼模式和记忆权限、索引上限。',
+      summary: '大肥鱼模式和记忆权限、索引上限、记忆库位置。',
       loading: '正在读取设置…',
       loadFailed: '读不到设置。',
       retry: '重试',
@@ -85,6 +91,51 @@ window.__ModuleLoader__.load({
       overridden: '更高一层的配置覆盖了这些值，这里保存不了。',
       invalid: '有一项填得不对：',
       failed: '保存失败：',
+      place: '记忆库位置',
+      placeNow: '现在在',
+      placeIsDefault: '（默认位置）',
+      placeLoadFailed: '读不到记忆库在哪。',
+      placeInput: '新位置',
+      placePlaceholder: '一个空文件夹或还不存在的文件夹，例如 D:\\同步盘\\AI记忆',
+      placeMove: '搬过去',
+      placeBack: '搬回默认位置',
+      placeHint: '整个记忆库连同归档一起搬过去，搬完旧位置自动清理；这台电脑上的桌面版和命令行都用这个位置。搬的那几秒 AI 存不了记忆，会过一会儿再存。放进网盘的话别让两台电脑同时写；放进 git 仓库会被一起提交；映射的网络盘可能让 dsh 卡顿。',
+      placeMoving: '正在搬…',
+      placeMoved: '搬好了，旧位置已经清理。',
+      placeMovedConflicts: '搬好了。有 {count} 个文件在搬的时候两边都被改过：旧位置那份放在新位置、名字里带 .old-，索引里也加了一行，记得合并。',
+      placeSame: '记忆库已经在这里了。',
+      placeStillMoving: '还在搬，过一会儿刷新这一页看看。',
+      placeEnded: '这次搬家已经结束，记忆库现在在上面写的位置。',
+      placeMoveFailed: '没搬成：{reason}',
+      placeResuming: '有一次搬家还没做完，dsh 会自动接着做完。',
+      placeResumingWhy: '上次停在：{reason}会自动再试。',
+      placePinned: '配置里固定了索引（indexPath），记忆库就在它所在的文件夹，这里不能搬。',
+      placeRemote: 'dsh 主目录在网络位置上，这里不能搬。',
+      placeProblem: '记录记忆库位置的文件读不懂，暂时找不到记忆库：{file}。把它改对后刷新这一页。',
+      placeCustomSkill: '你用的是自己写的记忆规则（skill），里面写的位置搬完要自己改。',
+      placeLegacy: 'dsh 主目录的 AGENTS.md 里还有不装插件时写进去的记忆规则，写的是默认位置；装了插件就用不着它了，可以用 engramory_init.py 卸掉。',
+      whyRelative: '要写完整路径（Windows 上带盘符）。',
+      whyNetwork: '不能放在网络路径上。',
+      whyRoot: '不能是整个盘。',
+      whyDeep: '路径太深了。',
+      whyInvalid: '路径里有 Windows 不认的名字或字符。',
+      whyReserved: '这个位置不能用：用户主目录、dsh 主目录和它们的上级都不行，名字也不能跟记忆库撞。',
+      whyNested: '新位置不能在记忆库里面，也不能把记忆库包在里面。',
+      whyNotEmpty: '那个文件夹里已经有东西了，要选空文件夹或还不存在的文件夹。',
+      whyNotDir: '那里是个文件，不是文件夹。',
+      whyLink: '新位置或记忆库里有目录链接，插件不替你搬，请手动处理。',
+      whyUnreadable: '读不了那个位置。',
+      whyUnavailable: '现在的记忆库找不到了，比如它所在的盘没接上。',
+      whyBusy: '正在搬家，等它做完。',
+      whyProblem: '记忆库位置的记录有问题，先修好它。',
+      whyTooMany: '文件太多了。',
+      whyTooBig: '太大了（超过 256 MB）。',
+      whyTooDeep: '文件夹层数太多了。',
+      whySpecial: '记忆库里有不是普通文件的东西。',
+      whyChanged: '搬的时候记忆库被别处换了位置。',
+      whyInterrupted: '上次搬到一半被打断了，已经撤销，记忆库还在原处。',
+      whyFailed: '文件操作出错了。',
+      locationUnknown: '记录记忆库位置的文件读不懂，全局记忆这次没列出来。去「插件 → Engramory 记忆」看看。',
       panel: '记忆',
       panelTitle: 'Engramory 记忆',
       refresh: '刷新',
@@ -136,7 +187,7 @@ window.__ModuleLoader__.load({
       howToSay: '想让 AI 记住什么，直接跟它说，比如「记住：我习惯用 pnpm」「把这个决定记下来」。平时它也会尽量自己挑值得长期记住的记下来，比如你纠正过它的做法。',
       howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
       howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
-      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。换电脑时把那个文件夹拷到新电脑的同一位置；在配置里指定过位置的，配置也一起带过去。',
+      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），在「插件 → Engramory 记忆」里换位置，插件会整个搬过去。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
       howToSocial: '接了 QQ、微信等、别人也能跟你的 AI 聊的话，在上面打开「大肥鱼模式」，再把「记忆权限」改成「社交」：只有认得出是你本人的对话才拿得到记忆。这不是安全隔离，详见插件说明。',
       feedbackLead: '遇到问题或有建议：',
       feedbackIssue: '到 GitHub 提 issue',
@@ -200,7 +251,7 @@ window.__ModuleLoader__.load({
       tidyPrompt: '请按 Engramory 的记忆规则整理这个记忆库：{dir}\n- 索引里指向不存在文件的链接：找得到对应笔记的就改对，确实没有了的只删这个链接；一行里没有别的有效链接了，才删掉整行。\n- 不在索引里的笔记：以后回忆用得上的补进索引，过时的移进 archive/ 或删掉；不要为了补齐全部加进去。\n- 没写类型的笔记补上 type。\n- 索引超出上限就先压缩：合并重复，细节挪回笔记，索引只留指针。\n- 超过约 12 KB 的笔记，按规则拆成几篇。\n- 日期已过的约定别删，问到结果再改写成经历。\n改完再看一遍索引有没有超出上限，然后告诉我改了什么。',
     }
     const en = {
-      summary: 'Companion mode and memory access, and the index cap.',
+      summary: 'Companion mode and memory access, the index cap, and where the memory is.',
       loading: 'Reading the settings…',
       loadFailed: 'Could not read the settings.',
       retry: 'Retry',
@@ -227,6 +278,51 @@ window.__ModuleLoader__.load({
       overridden: 'A higher configuration layer overrides these values, so they cannot be saved here.',
       invalid: 'One field is not acceptable: ',
       failed: 'Saving failed: ',
+      place: 'Where the memory is',
+      placeNow: 'Now in',
+      placeIsDefault: ' (the default place)',
+      placeLoadFailed: 'Could not read where the memory is.',
+      placeInput: 'New place',
+      placePlaceholder: 'An empty folder, or one not there yet, such as D:\\Sync\\AI memory',
+      placeMove: 'Move it there',
+      placeBack: 'Move it back to the default place',
+      placeHint: 'The whole store moves, archive and all, and the old place is cleared once it has; the desktop app and the command line on this computer both use the new place. For the few seconds it takes, the AI cannot save memory and tries again a little later. In a synced folder, do not let two computers write at once; in a git repository it gets committed with the rest; a mapped network drive may make dsh stall.',
+      placeMoving: 'Moving…',
+      placeMoved: 'Moved, and the old place is cleared.',
+      placeMovedConflicts: 'Moved. {count} file(s) changed in both places while it moved: the old place\'s copy is beside it in the new place, with .old- in its name and a line in the index. Merge them.',
+      placeSame: 'The memory is there already.',
+      placeStillMoving: 'Still moving. Refresh this page in a little while.',
+      placeEnded: 'The move is over: the memory is where it says above.',
+      placeMoveFailed: 'Not moved: {reason}',
+      placeResuming: 'A move is not finished yet; dsh finishes it on its own.',
+      placeResumingWhy: 'It last stopped at: {reason} It will try again.',
+      placePinned: 'An index is pinned (indexPath): the memory is in its folder, and is not moved here.',
+      placeRemote: 'dsh\'s home folder is on a network place: the memory is not moved here.',
+      placeProblem: 'The file that says where the memory is cannot be read as written, so the memory cannot be found for now: {file}. Correct it, then refresh this page.',
+      placeCustomSkill: 'You use memory rules of your own (skill): change the place they name once it has moved.',
+      placeLegacy: 'AGENTS.md in dsh\'s home folder still holds memory rules written there for a setup without the plugin, naming the default place. With the plugin they are not needed: engramory_init.py can take them out.',
+      whyRelative: 'Give the whole path (on Windows, with its drive).',
+      whyNetwork: 'It cannot be on a network path.',
+      whyRoot: 'It cannot be a whole drive.',
+      whyDeep: 'The path is too deep.',
+      whyInvalid: 'The path holds a name or a character Windows does not take.',
+      whyReserved: 'That place cannot be used: not your home folder, not dsh\'s, nor any folder holding them, and not a name the memory store uses.',
+      whyNested: 'The new place cannot be inside the store, nor hold it.',
+      whyNotEmpty: 'There is something in that folder already: choose an empty folder, or one not there yet.',
+      whyNotDir: 'That is a file, not a folder.',
+      whyLink: 'The new place or the store holds a folder link: the plugin does not move it for you. Sort it out by hand.',
+      whyUnreadable: 'That place cannot be read.',
+      whyUnavailable: 'The store cannot be found where it is now: its drive may not be connected.',
+      whyBusy: 'A move is under way: wait until it is done.',
+      whyProblem: 'The record of where the memory is has a problem: fix it first.',
+      whyTooMany: 'There are too many files.',
+      whyTooBig: 'It is too big (over 256 MB).',
+      whyTooDeep: 'Its folders go too deep.',
+      whySpecial: 'The store holds something that is not a plain file.',
+      whyChanged: 'The store was moved elsewhere while this move ran.',
+      whyInterrupted: 'The last move was cut short and has been undone: the store is where it was.',
+      whyFailed: 'A file operation failed.',
+      locationUnknown: 'The file that says where the memory is cannot be read as written, so the global memory is not listed this time. See Plugins → Engramory.',
       panel: 'Memory',
       panelTitle: 'Engramory memory',
       refresh: 'Refresh',
@@ -278,7 +374,7 @@ window.__ModuleLoader__.load({
       howToSay: 'To have the AI remember something, just tell it: "remember that I use pnpm", "note this decision down". It also tries to keep what is worth keeping on its own, such as a way of working you corrected.',
       howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
       howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
-      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. On a new computer, copy that folder to the same place, and if your configuration names where the store is, bring that setting along.',
+      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), change where it is in Plugins → Engramory, and the plugin moves it all there. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
       howToSocial: 'If others can talk to your AI too (through QQ, WeChat and the like), turn on Companion mode above and set Memory access to Social: only conversations it can tell are yours get the memory. This is not a security boundary; see the plugin\'s README.',
       feedbackLead: 'Found a problem or have an idea? ',
       feedbackIssue: 'Open an issue on GitHub',
@@ -367,6 +463,10 @@ window.__ModuleLoader__.load({
 .eng-cap{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .eng-cap label{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;}
 .eng-cap input{width:110px;}
+.eng-place-now{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;}
+.eng-place-now code{font-family:var(--ds-font-family-code,ui-monospace,monospace);color:var(--dsw-alias-label-primary);}
+.eng-place-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.eng-place-row .eng-input{flex:1 1 260px;}
 .eng-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap;}
 .eng-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}
 .eng-btn:disabled{opacity:.5;cursor:default;}
@@ -712,12 +812,158 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || !dirty || !valid, onClick: () => save(next) },
             busy ? t('saving') : t('save')),
           h('button', { type: 'button', className: 'eng-btn', disabled: busy || !dirty, onClick: discard }, t('discard')))
-          : null)
+          : null,
+        // where the store is: moved with a button of its own, not saved with the form above
+        h(PlaceSection, { t }))
     }
 
     function SettingsPage(props) {
       if (props.view === 'summary') return props.t('summary')
       return h(SettingsForm, props)
+    }
+
+    /** Why the store route turned a move down, or a move stopped (its codes, index.js). */
+    function whyNot(t, code, detail) {
+      const why = {
+        relative: () => t('whyRelative'), network: () => t('whyNetwork'), root: () => t('whyRoot'),
+        deep: () => t('whyDeep'), invalid: () => t('whyInvalid'), reserved: () => t('whyReserved'),
+        nested: () => t('whyNested'), notEmpty: () => t('whyNotEmpty'), notDir: () => t('whyNotDir'),
+        link: () => t('whyLink'), unreadable: () => t('whyUnreadable'), unavailable: () => t('whyUnavailable'),
+        busy: () => t('whyBusy'), problem: () => t('whyProblem'), pinned: () => t('placePinned'),
+        remote: () => t('placeRemote'), tooMany: () => t('whyTooMany'), tooBig: () => t('whyTooBig'),
+        tooDeep: () => t('whyTooDeep'), special: () => t('whySpecial'), changed: () => t('whyChanged'),
+        interrupted: () => t('whyInterrupted'),
+      }[code]
+      return why === undefined ? `${t('whyFailed')}${typeof detail === 'string' ? ` (${detail})` : ''}` : why()
+    }
+
+    /**
+     * Where the global store is, and moving it: on the package's page, below the settings, with
+     * a button of its own — a move is not a setting the form saves. The page starts a move and
+     * asks after it until it is done; the plugin carries it on whether or not the page stays.
+     */
+    function PlaceSection({ t }) {
+      const [state, setState] = useState({ phase: 'loading' })
+      const [text, setText] = useState('')
+      const [busy, setBusy] = useState(false)
+      const [banner, setBanner] = useState(undefined)
+      const alive = useRef(true)
+      const moving = useRef(false)
+      useEffect(() => () => { alive.current = false }, [])
+      const load = useCallback(async () => {
+        try {
+          const response = await request(STORE_API)
+          if (!response.ok || response.body === undefined) throw new Error(`HTTP ${response.status}`)
+          if (alive.current) setState({ phase: 'ready', data: response.body })
+        } catch {
+          if (alive.current) setState((s) => (s.phase === 'ready' ? s : { phase: 'error' }))
+        }
+      }, [])
+      useEffect(() => { load() }, [load])
+      // a move under way when the page opened (another window's, or one carried on after a
+      // restart): asked after until it is over, as one this page starts
+      const underWay = state.phase === 'ready' && state.data.moving !== undefined && !busy
+      // each look, answered or not, schedules the next while the move is still on record
+      const [looks, setLooks] = useState(0)
+      useEffect(() => {
+        if (!underWay) return undefined
+        const timer = setTimeout(() => {
+          if (alive.current) load().finally(() => { if (alive.current) setLooks((n) => n + 1) })
+        }, MOVE_FOLLOW_MS)
+        return () => clearTimeout(timer)
+      }, [underWay, looks])
+
+      const move = async (to) => {
+        if (moving.current) return
+        moving.current = true
+        setBusy(true)
+        setBanner(undefined)
+        try {
+          let response
+          try {
+            response = await request(STORE_API, {
+              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to }),
+            })
+          } catch (error) {
+            response = { ok: false, body: { error: 'failed', detail: String(error?.message ?? error) } }
+          }
+          if (!alive.current) return
+          const body = response.body ?? {}
+          if (response.ok && body.same === true) {
+            await load() // another dsh may have moved it there: the page shows where it is now
+            if (alive.current) setBanner({ tone: 'ok', text: t('placeSame') })
+            return
+          }
+          if (response.status !== 202 || typeof body.id !== 'string') {
+            setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, body.reason ?? body.error, body.detail) }) })
+            await load()
+            return
+          }
+          setBanner({ tone: 'ok', text: t('placeMoving') })
+          let outcome
+          // by the clock, not by count: each ask may itself wait out its own deadline
+          const until = Date.now() + MOVE_WATCH_MS
+          while (alive.current && outcome?.done !== true && Date.now() < until) {
+            await new Promise((resolve) => setTimeout(resolve, MOVE_POLL_MS))
+            try {
+              const polled = await request(`${STORE_API}?id=${encodeURIComponent(body.id)}`)
+              if (polled.ok && polled.body !== undefined && alive.current) {
+                setState({ phase: 'ready', data: polled.body })
+                outcome = polled.body.outcome
+              }
+            } catch { /* asked again */ }
+          }
+          if (!alive.current) return
+          if (outcome?.done === true && outcome.elsewhere === true) {
+            setText('')
+            setBanner({ tone: 'ok', text: t('placeEnded') })
+          } else if (outcome?.done === true && outcome.ok === true) {
+            setText('')
+            setBanner({ tone: 'ok', text: outcome.conflicts > 0
+              ? t('placeMovedConflicts', { count: outcome.conflicts }) : t('placeMoved') })
+          } else if (outcome?.done === true) {
+            setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, outcome.error, outcome.detail) }) })
+          } else {
+            setBanner({ tone: 'error', text: t('placeStillMoving') })
+          }
+        } finally {
+          moving.current = false
+          if (alive.current) setBusy(false)
+        }
+      }
+
+      if (state.phase === 'loading') return null
+      if (state.phase === 'error') {
+        return h('section', { className: 'eng-section' },
+          h('h3', { className: 'eng-title' }, t('place')),
+          h('p', { className: 'eng-note' }, t('placeLoadFailed')),
+          h('div', { className: 'eng-actions' }, h('button', { type: 'button', className: 'eng-btn', onClick: load }, t('retry'))))
+      }
+      const { data } = state
+      const atDefault = typeof data.store === 'string' && data.store === data.default
+      const blocked = data.pinned === true ? 'placePinned' : data.remote === true ? 'placeRemote' : undefined
+      const stopped = data.moving !== undefined && !busy
+      return h('section', { className: 'eng-section' },
+        h('h3', { className: 'eng-title' }, t('place')),
+        typeof data.store === 'string' ? h('p', { className: 'eng-place-now' },
+          `${t('placeNow')} `, h('code', null, legible(data.store)), atDefault ? t('placeIsDefault') : '') : null,
+        data.problem !== undefined ? h('div', { className: 'eng-banner', 'data-tone': 'error' },
+          t('placeProblem', { file: legible(data.file ?? '') })) : null,
+        stopped ? h('p', { className: 'eng-note' }, t('placeResuming'),
+          data.moving.error === undefined ? '' : ` ${t('placeResumingWhy', { reason: whyNot(t, data.moving.error) })}`) : null,
+        blocked !== undefined ? h('p', { className: 'eng-note' }, t(blocked)) : data.problem === undefined ? [
+          h('div', { className: 'eng-place-row', key: 'row' },
+            h('input', { className: 'eng-input', value: text, disabled: busy, placeholder: t('placePlaceholder'),
+              'aria-label': t('placeInput'), spellCheck: false, onChange: (e) => { setText(e.target.value); setBanner(undefined) } }),
+            h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || text.trim() === '',
+              onClick: () => move(text.trim()) }, busy ? t('placeMoving') : t('placeMove'))),
+          atDefault ? null : h('div', { className: 'eng-actions', key: 'back' },
+            h('button', { type: 'button', className: 'eng-btn', disabled: busy, onClick: () => move(null) }, t('placeBack'))),
+          h('p', { className: 'eng-hint', key: 'hint' }, t('placeHint')),
+          data.customSkill === true ? h('p', { className: 'eng-note', key: 'skill' }, t('placeCustomSkill')) : null,
+          data.legacyRules === true ? h('p', { className: 'eng-note', key: 'legacy' }, t('placeLegacy')) : null,
+        ] : null,
+        banner ? h('div', { className: 'eng-banner', 'data-tone': banner.tone, role: 'status' }, banner.text) : null)
     }
 
     /**
@@ -1301,7 +1547,9 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           (shown === undefined ? store.archive.filter(match).length : 0), 0)
         body = [
           data.pinned === 'relative' ? h('p', { className: 'eng-note', key: 'pinned' }, t('pinnedRelative')) : null,
-          data.stores.length === 0 && data.pinned === undefined && !(data.unreadable > 0) && data.more !== true
+          data.location !== undefined ? h('p', { className: 'eng-note', key: 'location' }, t('locationUnknown')) : null,
+          data.stores.length === 0 && data.pinned === undefined && data.location === undefined &&
+            !(data.unreadable > 0) && data.more !== true
             ? h('p', { className: 'eng-note', key: 'empty' }, t('empty')) : null,
           notes.length + archived > 0 ? h('div', { className: 'eng-toolbar', key: 'toolbar' },
             h('div', { className: 'eng-tabs', role: 'group', 'aria-label': t('typeLabel') },
