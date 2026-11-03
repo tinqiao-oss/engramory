@@ -483,8 +483,6 @@ test('client: a name opens its note through the memory route — and the index, 
   assert.match(textOf(view.tree), /opened\{"name":"who"\}/)
   assert.deepEqual((await posted(() => nameButton(view.tree, 'moments-2026-09').props.onClick())).body,
     { store: 'user', file: 'moments-2026-09.md', archive: true })
-  assert.deepEqual((await posted(() => button(view.tree, 'openIndex').props.onClick())).body,
-    { store: 'user', file: 'MEMORY.md' })
   assert.deepEqual((await posted(() => button(view.tree, 'openFolder').props.onClick())).body, { store: 'user' })
 })
 
@@ -553,7 +551,6 @@ test('client: a store with no index offers its notes but no index or folder to o
   const { view } = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [store] }) })
   await view.settle()
   assert.match(textOf(view.tree), /noIndex/)
-  assert.equal(button(view.tree, 'openIndex'), undefined)
   assert.equal(button(view.tree, 'openFolder'), undefined)
   assert.ok(nameButton(view.tree, 'who'))
 })
@@ -581,7 +578,6 @@ test('client: where dsh cannot open files, the names are text and the page says 
   await view.settle()
   assert.equal(findAll(view.tree, (n) => n.type === 'button' && n.props.className === 'eng-name').length, 0)
   assert.equal(findAll(view.tree, (n) => n.type === 'span' && n.props.className === 'eng-name').length, 5)
-  assert.equal(button(view.tree, 'openIndex'), undefined)
   assert.equal(button(view.tree, 'openFolder'), undefined)
   const text = textOf(view.tree)
   assert.match(text, /openUnavailable/)
@@ -1267,23 +1263,6 @@ test('client: a name from disk that could read as another shows what it hides, a
   await view.settle()
   assert.deepEqual(sent.filter((s) => s.method === 'POST').at(-1).body, { store: 'user', file: tricky })
   assert.match(textOf(view.tree), /opened\{"name":"safe\[U\+202E\]gnp\.exe"\}/)
-})
-
-test('client: an index the desktop shows in its folder rather than opens is said to be shown there', async () => {
-  const store = { ...memoryData().stores[0], index: { name: 'MEMORY.cmd', bytes: 10, lines: 1, over: false } }
-  const { view, sent } = await memoryPage({
-    [`GET ${MEMORY}`]: memoryData({ stores: [store] }), [`POST ${MEMORY}`]: { ok: true, revealed: true },
-  })
-  await view.settle()
-  button(view.tree, 'openIndex').props.onClick()
-  await view.settle()
-  assert.deepEqual(sent.filter((s) => s.method === 'POST').at(-1).body, { store: 'user', file: 'MEMORY.cmd' })
-  assert.ok(textOf(view.tree).includes('revealed{"name":"MEMORY.cmd"}'))
-  // the folder button opens the folder, as before
-  button(view.tree, 'openFolder').props.onClick()
-  await view.settle()
-  assert.ok(textOf(view.tree).includes('opened{"name":'))
-  assert.ok(!textOf(view.tree).includes('revealed{'))
 })
 
 // --- where the memory is: moving it from the memory page ---

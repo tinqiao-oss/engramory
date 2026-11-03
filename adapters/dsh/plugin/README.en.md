@@ -168,7 +168,7 @@ owner, so a program forwarding other people's messages must leave it out.
   row gives its day and how far off it is (a passed date is an outcome to confirm, as a
   reminder: nothing is archived), and a note past 12 KB or one the index leaves out is
   marked. Beside each store's name: its index fill as a bar (to the nearer of its two
-  caps), *Open the index* and *Open the folder*, and for the global store *Move* (see
+  caps), *Open the folder*, and for the global store *Change location* (see
   [Moving the store](#moving-the-store)). What its check-up finds is listed under
   it: the index's links to files that are not there, the notes not in the index (recall
   starts from the index, so the AI will not find them unless another note links to
@@ -191,7 +191,7 @@ owner, so a program forwarding other people's messages must leave it out.
 
 ## Moving the store
 
-*Move*, at the top right of the memory page's global memory (beside *No memory yet* before
+*Change location*, at the top right of the memory page's global memory (beside *No memory yet* before
 there is any), moves the global store to another folder: a synced one, say, or a private
 git repository. Click *Choose folder…* to pick it in the system's own window, or type the
 path, then click *Move it there*:
@@ -249,7 +249,7 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; sending the index needs the exact name on a case-sensitive filesystem (Linux, say). An index not named `.md` is shown in its folder by the memory page's *Open the index*, never opened in the default app. |
+| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; sending the index needs the exact name on a case-sensitive filesystem (Linux, say). |
 | `maxLines` | `200` | Line cap for the index. |
 | `maxBytes` | `25600` | UTF-8 byte cap for the index (25 KB). |
 | `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |
