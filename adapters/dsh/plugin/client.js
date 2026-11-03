@@ -30,12 +30,21 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.3.1'
+    const VERSION = '1.4.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
     const ISSUES = 'https://github.com/tinqiao-oss/engramory/issues/new'
     const EMAIL = 'engramory@agent.qq.com'
+    /** Where "Check for updates" asks for the latest version, in turn: npm's own registry, then
+     * npmmirror, its mirror in China, for when npm cannot be reached. Asked on that click only. */
+    const REGISTRIES = [['npm', 'https://registry.npmjs.org'], ['npmmirror', 'https://registry.npmmirror.com']]
+    /** Where to look when neither answers, and what a newer version changed. */
+    const NPM_PAGE = 'https://www.npmjs.com/package/dsh-engramory?activeTab=versions'
+    const RELEASE = 'https://github.com/tinqiao-oss/engramory/releases/tag/v'
+    /** A version as SemVer writes one: three numbers without leading zeros, then maybe a prerelease
+     * tag and build metadata, each in dot-separated identifiers (a numeric one without leading zeros). */
+    const SEMVER = /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
     /** The how-to's lines, in order. */
     const HOW_TO = ['howToSay', 'howToRecall', 'howToEdit', 'howToMove', 'howToSocial']
     /** A note past this is almost always a timeline under one slug (SKILL.md: "A note has a size
@@ -135,7 +144,24 @@ window.__ModuleLoader__.load({
       copy: '复制',
       copied: '已复制',
       copyFailed: '复制不了，请手动选中上面的地址。',
-      feedbackNote: '邮件会由 AI 助手协助整理，issue 是公开的，两处都别把记忆内容原样贴上去。插件版本 {version}。',
+      feedbackNote: '邮件会由 AI 助手协助整理，issue 是公开的，两处都别把记忆内容原样贴上去。',
+      versionLine: '插件版本 {version}',
+      checkUpdate: '检查更新',
+      checking: '正在检查…',
+      updateNewer: '有新版本 {latest}（你装的是 {current}）',
+      updateNotes: '看这一版改了什么',
+      updateHow: '升级时要写上版本号（只写名字的话，pnpm 默认不装发布不满 24 小时的版本）：',
+      updateDesktop: '桌面版：在「插件」页卸载「Engramory 记忆」，再搜索安装',
+      updateCli: '命令行：',
+      updateProfile: '<名字>',
+      updateAfter: '装完重启 dsh（桌面版从托盘退出再打开）。记忆和设置都会保留。',
+      updateCurrent: '已是最新版本：{source} 上最新的就是 {latest}。',
+      updateAhead: '你装的 {current} 比 {source} 上最新的 {latest} 还新。',
+      updateMirror: 'npm 没有给出版本号，这是镜像 npmmirror 的结果，它有时比 npm 晚几分钟同步。',
+      updateFailed: '查不到最新版本：npm 和 npmmirror 都没有给出版本号。可以到网页上看：',
+      updateNpm: 'npm 上的版本列表',
+      copySpecFailed: '复制不了，请手动选中上面的版本号。',
+      updateNote: '检查更新会向 npm（连不上再试 npmmirror）查最新版本号，请求里不带任何记忆内容；不点就不联网。',
       issueBody: '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：',
       statNote: '条记忆',
       statNotes: '条记忆',
@@ -260,7 +286,24 @@ window.__ModuleLoader__.load({
       copy: 'Copy',
       copied: 'Copied',
       copyFailed: 'Could not copy; select the address above by hand.',
-      feedbackNote: 'Emails are sorted with the help of an AI assistant, and issues are public: do not paste your memory notes into either. Plugin version {version}.',
+      feedbackNote: 'Emails are sorted with the help of an AI assistant, and issues are public: do not paste your memory notes into either.',
+      versionLine: 'Plugin version {version}',
+      checkUpdate: 'Check for updates',
+      checking: 'Checking…',
+      updateNewer: 'Version {latest} is out (you have {current})',
+      updateNotes: 'What changed',
+      updateHow: 'Name the version when you upgrade: by name alone, pnpm by default does not install a version published less than 24 hours ago.',
+      updateDesktop: 'Desktop app: on the Plugins page, uninstall Engramory memory, then search for and install',
+      updateCli: 'Command line: ',
+      updateProfile: '<name>',
+      updateAfter: 'Then restart dsh (in the desktop app, quit from the tray and open it again). Your memory and settings stay.',
+      updateCurrent: 'You have the latest version: the latest on {source} is {latest}.',
+      updateAhead: 'The {current} you have is newer than the latest on {source}, {latest}.',
+      updateMirror: 'npm gave no version, so this is from its mirror npmmirror, which can be a few minutes behind npm.',
+      updateFailed: 'Could not find the latest version: neither npm nor npmmirror gave one. The versions are listed on npm\'s site: ',
+      updateNpm: 'dsh-engramory on npm',
+      copySpecFailed: 'Could not copy; select the version above by hand.',
+      updateNote: 'Checking asks npm (or npmmirror, when npm cannot be reached) for the latest version number; nothing from your memory goes with it. Nothing is asked until you click.',
       issueBody: '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ',
       statNote: 'note',
       statNotes: 'notes',
@@ -439,6 +482,14 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
 .eng-link:hover{opacity:.8;}
 .eng-email{margin:0 8px 0 2px;font-family:var(--ds-font-family-code,ui-monospace,monospace);user-select:all;color:var(--dsw-alias-label-primary);}
 .eng-feedback-note{color:var(--dsw-alias-label-tertiary);}
+.eng-version,.eng-update{display:flex;flex-direction:column;gap:2px;}
+.eng-update{margin:2px 0 6px;}
+.eng-version>p>.eng-btn{margin-left:8px;}
+.eng-update-new{margin-right:8px;font-weight:500;color:var(--dsw-alias-label-primary);}
+.eng-update ul{margin:0;padding-left:18px;}
+.eng-update li{margin:0;}
+.eng-update li .eng-btn{margin-left:6px;}
+.eng-code{margin:0 2px 0 6px;font-family:var(--ds-font-family-code,ui-monospace,monospace);user-select:all;color:var(--dsw-alias-label-primary);}
 .eng-name:focus-visible,.eng-row:focus-visible,.eng-btn:focus-visible,.eng-tab:focus-visible,.eng-link:focus-visible,.eng-howto>summary:focus-visible,.eng-archive>summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:1px;}
 `
 
@@ -821,6 +872,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       book: [['path', { d: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z' }], ['path', { d: 'M4 19V5' }]],
       issue: [['path', { d: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z' }]],
       mail: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['path', { d: 'm3 7 9 6 9-6' }]],
+      package: [['path', { d: 'M12 3 4 7v10l8 4 8-4V7z' }], ['path', { d: 'm4 7 8 4 8-4M12 11v10' }]],
       user: [['circle', { cx: 12, cy: 8.6, r: 3.6 }], ['path', { d: 'M5 19.5c1.2-3.3 3.9-5 7-5s5.8 1.7 7 5z' }]],
       feedback: [['path', { d: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4 3v-3h-.5a2 2 0 0 1-2-2z' }],
         ['path', { d: 'm9 10.3 2 2 4-4' }]],
@@ -1060,10 +1112,107 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         : /linux/i.test(platform) ? 'Linux' : 'unknown'
     }
 
+    /** The latest version on npm and the registry that said so, asked of each in turn until one
+     * answers with a version; undefined when none does. Each gets 8 seconds, body included, and no cookie or
+     * referrer goes with the request: the package's name is all it asks about. */
+    async function latestVersion() {
+      for (const [source, registry] of REGISTRIES) {
+        const deadline = new AbortController()
+        const timer = setTimeout(() => deadline.abort(), 8000)
+        try {
+          const response = await fetch(`${registry}/${PACKAGE}/latest`, { cache: 'no-store', credentials: 'omit',
+            referrerPolicy: 'no-referrer', signal: deadline.signal, headers: { accept: 'application/json' } })
+          const version = response.ok ? (await response.json())?.version : undefined
+          if (typeof version === 'string' && version.length <= 64 && SEMVER.test(version)) return { version, source }
+        } catch {
+          // unreachable, refused, too slow or not JSON: the next registry
+        } finally {
+          clearTimeout(timer)
+          // a body left unread (an error's) or half read is let go, not left streaming
+          deadline.abort()
+        }
+      }
+      return undefined
+    }
+
+    /** -1, 0 or 1 as version `a` is older than, the same as or newer than `b` (both SEMVER): by
+     * the three numbers, then a prerelease before its release. Two prereleases of one release
+     * count as the same; this package publishes none to npm's `latest`. */
+    function compareVersions(a, b) {
+      const x = SEMVER.exec(a)
+      const y = SEMVER.exec(b)
+      for (let i = 1; i <= 3; i++) {
+        if (Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]) ? -1 : 1
+      }
+      return x[4] === y[4] || (x[4] !== undefined && y[4] !== undefined) ? 0 : x[4] === undefined ? 1 : -1
+    }
+
+    /**
+     * The installed version and, on a click and only then, how it stands against the latest on
+     * npm. A newer one comes with the steps that install it, the version named: by name alone,
+     * pnpm (the desktop's, and the CLI's from pnpm 11) takes only a version a day old. dsh has no
+     * update for a plugin outside its own catalog, so the desktop's way is uninstall and install.
+     */
+    function UpdateCheck({ t }) {
+      const [check, setCheck] = useState({ phase: 'idle' })
+      const [copy, setCopy] = useState('copy')
+      const alive = useRef(true)
+      useEffect(() => () => { alive.current = false }, [])
+      const run = async () => {
+        setCheck({ phase: 'checking' })
+        setCopy('copy')
+        const found = await latestVersion()
+        if (!alive.current) return
+        setCheck(found === undefined ? { phase: 'failed' } : { phase: 'done', latest: found.version,
+          source: found.source, order: compareVersions(found.version, VERSION) })
+      }
+      const spec = `${PACKAGE}@${check.latest}`
+      const copySpec = async () => {
+        const done = await copyText(spec)
+        if (alive.current) setCopy(done ? 'copied' : 'copyFailed')
+      }
+      const external = (href, text) => h('a', { className: 'eng-link', href, target: '_blank', rel: 'noopener noreferrer' }, text)
+      let result = null
+      if (check.phase === 'failed') {
+        result = h('p', { role: 'status' }, t('updateFailed'), external(NPM_PAGE, t('updateNpm')))
+      } else if (check.phase === 'done' && check.order <= 0) {
+        result = h('p', { role: 'status' },
+          check.order === 0 ? t('updateCurrent', { latest: check.latest, source: check.source })
+            : t('updateAhead', { latest: check.latest, current: VERSION, source: check.source }))
+      } else if (check.phase === 'done') {
+        result = h('div', { className: 'eng-update', role: 'status' },
+          h('p', null,
+            h('span', { className: 'eng-update-new' }, t('updateNewer', { latest: check.latest, current: VERSION })),
+            external(`${RELEASE}${check.latest}`, t('updateNotes'))),
+          h('p', null, t('updateHow')),
+          h('ul', null,
+            h('li', null, t('updateDesktop'), h('code', { className: 'eng-code' }, spec),
+              h('button', { type: 'button', className: 'eng-btn eng-btn-small', onClick: copySpec },
+                t(copy === 'copied' ? 'copied' : 'copy'))),
+            h('li', null, t('updateCli'),
+              h('code', { className: 'eng-code' }, `dsh plugin --profile ${t('updateProfile')} add ${spec}`))),
+          copy === 'copyFailed' ? h('p', { className: 'eng-feedback-note' }, t('copySpecFailed')) : null,
+          h('p', null, t('updateAfter')))
+      }
+      // a mirror's word, which may trail npm's, is said to be one
+      const mirrored = check.phase === 'done' && check.source !== 'npm'
+        ? h('p', { className: 'eng-feedback-note' }, t('updateMirror')) : null
+      return h('div', { className: 'eng-version' },
+        h('p', null,
+          icon('package', 14),
+          t('versionLine', { version: VERSION }),
+          h('button', { type: 'button', className: 'eng-btn eng-btn-small', disabled: check.phase === 'checking',
+            onClick: run }, t(check.phase === 'checking' ? 'checking' : 'checkUpdate'))),
+        result,
+        mirrored,
+        h('p', { className: 'eng-feedback-note' }, t('updateNote')))
+    }
+
     /**
      * Where to report a problem or send an idea: a new issue, its body started with the
      * plugin's version and the OS (no path, no note), or the mailbox, whose address the
-     * button copies — the desktop app opens only web links, not `mailto:`.
+     * button copies — the desktop app opens only web links, not `mailto:`. Above them, the
+     * version and the check for a newer one.
      */
     function Feedback({ t }) {
       const [copy, setCopy] = useState('copy')
@@ -1075,6 +1224,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       }
       const href = `${ISSUES}?body=${encodeURIComponent(t('issueBody', { version: VERSION, os: osName() }))}`
       return h('footer', { className: 'eng-feedback' },
+        h(UpdateCheck, { t }),
         h('p', null,
           icon('issue', 14),
           t('feedbackLead'),
@@ -1084,7 +1234,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h('button', { type: 'button', className: 'eng-btn eng-btn-small', onClick: copyAddress },
             t(copy === 'copied' ? 'copied' : 'copy'))),
         copy === 'copyFailed' ? h('p', { className: 'eng-feedback-note', role: 'status' }, t('copyFailed')) : null,
-        h('p', { className: 'eng-feedback-note' }, t('feedbackNote', { version: VERSION })))
+        h('p', { className: 'eng-feedback-note' }, t('feedbackNote')))
     }
 
     /**

@@ -753,7 +753,8 @@ test('client: the memory page ends with where to send feedback: an issue that na
       zh.issueBody.replace('{version}', version).replace('{os}', 'Windows'))
     const text = textOf(view.tree)
     assert.ok(text.includes('engramory@agent.qq.com'))
-    assert.ok(text.includes(zh.feedbackNote.replace('{version}', version)))
+    assert.ok(text.includes(zh.feedbackNote))
+    assert.ok(text.includes(zh.versionLine.replace('{version}', version)))
     button(view.tree, zh.copy).props.onClick()
     await view.settle()
     assert.deepEqual(copied, ['engramory@agent.qq.com'])
@@ -798,6 +799,171 @@ test('client: the feedback issue names only the version and the OS family, whate
     '（写下遇到的问题或建议）\n\n---\ndsh-engramory {version}\n打开这个页面的电脑：{os}\ndsh 版本：')
   assert.equal(dictionaries.engramory.en.issueBody,
     '(What happened, or your idea)\n\n---\ndsh-engramory {version}\nComputer this page was opened on: {os}\ndsh version: ')
+})
+
+// --- the version, and the check for a newer one ---
+
+const NPM = 'https://registry.npmjs.org/dsh-engramory/latest'
+const MIRROR = 'https://registry.npmmirror.com/dsh-engramory/latest'
+const INSTALLED = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+
+/**
+ * The memory page in Chinese, with the registries answering from `registries` — a body, a
+ * `{ status }`, an Error to throw, or a function of the request's init that returns a
+ * promise of a response — and every request to them recorded with its init.
+ */
+async function updatePage(registries) {
+  const { view, sent, zh } = await memoryPage({}, { zh: true })
+  const local = globalThis.fetch
+  const asked = []
+  globalThis.fetch = async (url, init = {}) => {
+    if (!/^https?:/.test(url)) return local(url, init)
+    asked.push({ url, init })
+    const answer = registries[url]
+    if (answer === undefined || answer instanceof Error) throw answer ?? new Error(`no registry ${url}`)
+    if (typeof answer === 'function') return answer(init)
+    return { ok: (answer.status ?? 200) < 400, status: answer.status ?? 200, json: async () => answer }
+  }
+  await view.settle()
+  return { view, sent, zh, asked }
+}
+const check = async (view, zh) => {
+  button(view.tree, zh.checkUpdate).props.onClick()
+  await view.settle()
+}
+
+test('client: the version is checked against npm only on a click, and a newer one comes with the steps that install it, the version named', async () => {
+  const copied = []
+  await withNavigator({ platform: 'Win32', clipboard: { writeText: async (text) => { copied.push(text) } } }, async () => {
+    const { view, sent, zh, asked } = await updatePage({ [NPM]: { name: 'dsh-engramory', version: '99.0.0' } })
+    // listed, and nothing asked beyond dsh until the button is pressed
+    assert.deepEqual(asked, [])
+    assert.ok(sent.every(({ url }) => !/^https?:/.test(url)))
+    let text = textOf(view.tree)
+    assert.ok(text.includes(zh.versionLine.replace('{version}', INSTALLED)))
+    assert.ok(text.includes(zh.updateNote))
+    await check(view, zh)
+    // one request, a GET of this package's latest, with no cookie, no referrer, no body: these
+    // options and no other, and one header, asking for JSON
+    assert.deepEqual(asked.map(({ url }) => url), [NPM])
+    const [{ init }] = asked
+    assert.deepEqual(Object.keys(init).sort(), ['cache', 'credentials', 'headers', 'referrerPolicy', 'signal'])
+    assert.deepEqual([init.credentials, init.referrerPolicy, init.cache], ['omit', 'no-referrer', 'no-store'])
+    assert.deepEqual(init.headers, { accept: 'application/json' })
+    text = textOf(view.tree)
+    assert.ok(text.includes(zh.updateNewer.replace('{latest}', '99.0.0').replace('{current}', INSTALLED)))
+    assert.ok(text.includes(zh.updateHow) && text.includes(zh.updateAfter))
+    // the version named, to search for on the Plugins page and on the command line
+    assert.deepEqual(findAll(view.tree, (n) => n.type === 'code').map(textOf),
+      ['dsh-engramory@99.0.0', 'dsh plugin --profile <名字> add dsh-engramory@99.0.0'])
+    const notes = findAll(view.tree, (n) => n.type === 'a' && textOf(n) === zh.updateNotes)[0]
+    assert.equal(notes.props.href, 'https://github.com/tinqiao-oss/engramory/releases/tag/v99.0.0')
+    assert.deepEqual([notes.props.target, notes.props.rel], ['_blank', 'noopener noreferrer'])
+    // the first Copy is the version's, above the mailbox's
+    findAll(view.tree, (n) => n.type === 'button' && textOf(n) === zh.copy)[0].props.onClick()
+    await view.settle()
+    assert.deepEqual(copied, ['dsh-engramory@99.0.0'])
+    assert.ok(button(view.tree, zh.copied))
+  })
+  // no clipboard: say to select it by hand
+  await withNavigator({ platform: 'Win32' }, async () => {
+    const { view, zh } = await updatePage({ [NPM]: { version: '99.0.0' } })
+    await check(view, zh)
+    findAll(view.tree, (n) => n.type === 'button' && textOf(n) === zh.copy)[0].props.onClick()
+    await view.settle()
+    assert.ok(textOf(view.tree).includes(zh.copySpecFailed))
+  })
+})
+
+test('client: a version check says this is the latest, or newer than npm\'s, by the numbers and not the text', async () => {
+  const [major, minor, patch] = INSTALLED.split('.').map(Number)
+  for (const [latest, key] of [
+    [INSTALLED, 'updateCurrent'],
+    [`${INSTALLED}+build.7`, 'updateCurrent'], // build metadata makes no version newer
+    [`${major}.${minor}.${patch + 1}`, 'updateNewer'],
+    [`${major}.${minor + 10}.0`, 'updateNewer'], // 1.14 after 1.4, where text would put it before
+    [`${major + 1}.0.0`, 'updateNewer'],
+    [`${major}.${minor}.${patch + 1}-rc.1`, 'updateNewer'],
+    [`${INSTALLED}-rc.1`, 'updateAhead'], // a prerelease comes before its release
+    [`${major - 1}.${minor + 1}.${patch + 1}`, 'updateAhead'],
+  ]) {
+    const { view, zh } = await updatePage({ [NPM]: { version: latest } })
+    await check(view, zh)
+    const text = textOf(view.tree)
+    const said = zh[key].replace('{latest}', latest).replace('{current}', INSTALLED).replace('{source}', 'npm')
+    assert.ok(text.includes(said), `${latest}: ${key}`)
+    assert.equal(findAll(view.tree, (n) => n.type === 'code').length, key === 'updateNewer' ? 2 : 0, latest)
+  }
+})
+
+test('client: when npm cannot be reached the mirror is asked, and when neither answers the page says where to look', async () => {
+  // npm unreachable, failing, or answering with something that is not a version: the mirror's word
+  for (const npm of [new Error('offline'), { status: 503 }, { version: '<b>99</b>' }, { version: 99 }, {},
+    { status: 200, version: 'latest' }, { version: '99.0.0-.' }, { version: '99.0.0-rc..1' }, { version: '99.0.0-01' },
+    { version: '099.0.0' }, { version: '1234567890.0.0' }, { version: `99.0.0-${'a'.repeat(60)}` }]) {
+    const { view, zh, asked } = await updatePage({ [NPM]: npm, [MIRROR]: { version: '99.0.0' } })
+    await check(view, zh)
+    assert.deepEqual(asked.map(({ url }) => url), [NPM, MIRROR], JSON.stringify(npm))
+    assert.equal(asked[1].init.credentials, 'omit')
+    // the first request is let go — an error's body is not left streaming
+    assert.equal(asked[0].init.signal.aborted, true, JSON.stringify(npm))
+    assert.ok(findAll(view.tree, (n) => n.type === 'code').some((n) => textOf(n) === 'dsh-engramory@99.0.0'))
+    // said to be the mirror's word, which may trail npm's
+    assert.ok(textOf(view.tree).includes(zh.updateMirror), JSON.stringify(npm))
+  }
+  // the mirror's latest is the mirror's, not npm's, when it is no newer than this one
+  const behind = await updatePage({ [NPM]: { status: 503 }, [MIRROR]: { version: INSTALLED } })
+  await check(behind.view, behind.zh)
+  assert.ok(textOf(behind.view.tree).includes(
+    behind.zh.updateCurrent.replace('{source}', 'npmmirror').replace('{latest}', INSTALLED)))
+  assert.ok(textOf(behind.view.tree).includes(behind.zh.updateMirror))
+  // npm answering is enough: the mirror is not asked, nor mentioned
+  const first = await updatePage({ [NPM]: { version: '99.0.0' }, [MIRROR]: { version: '98.0.0' } })
+  await check(first.view, first.zh)
+  assert.deepEqual(first.asked.map(({ url }) => url), [NPM])
+  assert.ok(!textOf(first.view.tree).includes(first.zh.updateMirror))
+  // neither: where to look, and the button offers to try again
+  const { view, zh, asked } = await updatePage({ [NPM]: new Error('offline'), [MIRROR]: { status: 500 } })
+  await check(view, zh)
+  assert.ok(textOf(view.tree).includes(zh.updateFailed))
+  const npmPage = findAll(view.tree, (n) => n.type === 'a' && textOf(n) === zh.updateNpm)[0]
+  assert.equal(npmPage.props.href, 'https://www.npmjs.com/package/dsh-engramory?activeTab=versions')
+  assert.equal(button(view.tree, zh.checkUpdate).props.disabled, false)
+  await check(view, zh)
+  assert.deepEqual(asked.map(({ url }) => url), [NPM, MIRROR, NPM, MIRROR])
+})
+
+test('client: a check in flight disables its button, and a registry that never finishes answering is given up on', async () => {
+  let answer
+  const { view, zh } = await updatePage({ [NPM]: () => new Promise((resolve) => { answer = resolve }) })
+  await check(view, zh)
+  const busy = button(view.tree, zh.checking)
+  assert.equal(busy.props.disabled, true)
+  answer({ ok: true, status: 200, json: async () => ({ version: INSTALLED }) })
+  await view.settle()
+  assert.ok(textOf(view.tree).includes(zh.updateCurrent.replace('{source}', 'npm').replace('{latest}', INSTALLED)))
+  // headers from npm, then a body that never comes — until the deadline aborts it; the mirror answers
+  const stalled = (init) => Promise.resolve({ ok: true, status: 200,
+    json: () => new Promise((resolve, reject) => { init.signal.addEventListener('abort', () => reject(new Error('aborted'))) }) })
+  const page = await updatePage({ [NPM]: stalled, [MIRROR]: { version: '99.0.0' } })
+  const realTimeout = globalThis.setTimeout
+  // the page listed already: only the check's deadlines run out at once, and what they were
+  const delays = []
+  globalThis.setTimeout = (fn, ms) => { delays.push(ms); return realTimeout(fn, 0) }
+  try {
+    const { view, zh, asked } = page
+    button(view.tree, zh.checkUpdate).props.onClick()
+    for (let i = 0; i < 20 && asked.length < 2; i++) {
+      await new Promise((resolve) => realTimeout(resolve, 2))
+      await view.settle()
+    }
+    await view.settle()
+    assert.deepEqual(asked.map(({ url }) => url), [NPM, MIRROR])
+    assert.ok(findAll(view.tree, (n) => n.type === 'code').some((n) => textOf(n) === 'dsh-engramory@99.0.0'))
+    assert.deepEqual(delays.slice(0, 2), [8000, 8000]) // eight seconds for each registry, its body included
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
 })
 
 // --- the banner, the plans, the bar, the filters, the tidy-up instructions ---

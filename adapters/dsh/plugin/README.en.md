@@ -44,7 +44,17 @@ it). In dsh's desktop app you can also search for `dsh-engramory` on the Plugins
 dsh plugin --profile <name> add dsh-engramory
 ```
 
-To uninstall, use `remove` instead of `add`. Compatible dsh releases are listed in
+To uninstall, use `remove` instead of `add`.
+
+**Name the version to upgrade**, as in `dsh plugin --profile <name> add
+dsh-engramory@1.4.0`: by name alone, pnpm 11 (the desktop app's own included) by default
+installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
+for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
+install that, then quit dsh from the tray and open it again. Your memory and settings stay.
+*Check for updates* at the foot of the memory page finds the latest version and lists
+these steps.
+
+Compatible dsh releases are listed in
 `dsh.compatibility.dshReleases` in [`package.json`](https://github.com/tinqiao-oss/engramory/blob/master/adapters/dsh/plugin/package.json); an unlisted release
 is unverified.
 
@@ -167,9 +177,13 @@ owner, so a program forwarding other people's messages must leave it out.
   rather than counting that as nothing. Read-only, never a note's text; a name, *Open
   the index* and *Open the folder* open on the machine dsh runs on; a machine with no
   desktop (a headless server, a session over SSH) shows none of them. A short *How to use
-  it* follows, open while there is no memory yet. At the foot, where to send feedback: a
-  new GitHub issue (its body pre-filled with the plugin's version and the OS family, no
-  path and no note), or an email, with a button that copies the address.
+  it* follows, open while there is no memory yet. At the foot, the plugin's version and
+  *Check for updates*: only when clicked, it asks npm (npmmirror when npm cannot be
+  reached) for the latest version number, with nothing from your memory, and lists the
+  steps that upgrade to a newer one, the version named. The plugin goes online at no other
+  time. Below that, where to send feedback: a new GitHub issue (its body pre-filled with
+  the plugin's version and the OS family, no path and no note), or an email, with a button
+  that copies the address.
 
 ## Configuration
 

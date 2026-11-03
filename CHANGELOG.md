@@ -6,6 +6,23 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.4.0 — 2026-11-03
+
+The dsh plugin's memory page can check for a newer version. Nothing else changes.
+
+- **dsh: *Check for updates* at the foot of the memory page**, beside the plugin's
+  version. Only when clicked, the page asks npm for the package's latest version number
+  (npmmirror, its mirror in China, when npm cannot be reached; 8 seconds each), with no
+  cookie, no referrer and nothing from your memory. A newer version comes with the steps
+  that install it, the version named — `dsh-engramory@X.Y.Z` on the desktop's Plugins page
+  after uninstalling, or `dsh plugin --profile <name> add dsh-engramory@X.Y.Z` — and a link
+  to its release notes. An answer from npmmirror is said to be one, as it can trail npm by
+  a few minutes. This is the only time the plugin goes online.
+- **README: how to upgrade.** Name the version: by name alone, pnpm 11, the desktop app's
+  included, by default installs only a version published at least 24 hours ago. dsh has no
+  *Update* for a plugin outside its own catalog, so on the desktop it is uninstall, install,
+  restart; your memory and settings stay.
+
 ## 1.3.1 — 2026-11-03
 
 Fixes from a review of the whole dsh plugin. On dsh 0.2 with the defaults, how memory is
