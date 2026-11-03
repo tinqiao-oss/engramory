@@ -1056,3 +1056,63 @@ test('client: the tidy-up instructions drop a dead link, not the line its live n
     assert.match(dictionaries.engramory[lang].tidyPrompt, lang === 'zh' ? /不要为了补齐全部加进去/ : /do not add them all/)
   }
 })
+
+test('client: a name from disk that could read as another shows what it hides, and opens as it is', async () => {
+  // a project's store is whatever its checkout put there: a right-to-left override turns
+  // `safe<RLO>gnp.exe` into what reads as `safeexe.png`, and a control character hides
+  const [rlo, isolate, nel, separator, zwsp, zwj] = [0x202e, 0x2066, 0x85, 0x2028, 0x200b, 0x200d]
+    .map((code) => String.fromCharCode(code))
+  const tricky = `safe${rlo}gnp.exe.md`
+  // an emoji written with a joiner keeps it: the joiner is part of how it is written
+  const family = `${String.fromCodePoint(0x1f468)}${zwj}${String.fromCodePoint(0x1f469)}.md`
+  const store = {
+    ...memoryData().stores[0],
+    dir: `/home/u${isolate}/.dsh/.engramory-memory`, titles: [`repo${nel}`],
+    notes: [{ name: tricky, type: 'user' }, { name: `report${zwsp}.md`, type: 'user' }, { name: family, type: 'user' }],
+    archive: [`old${separator}.md`],
+    health: { checked: true, broken: [`gone${rlo}.md`], brokenMore: false, unindexed: [] },
+  }
+  const { view, sent } = await memoryPage({
+    [`GET ${MEMORY}`]: memoryData({ stores: [store] }), [`POST ${MEMORY}`]: { ok: true },
+  })
+  await view.settle()
+  const text = textOf(view.tree)
+  for (const hidden of [rlo, isolate, nel, separator, zwsp]) assert.ok(!text.includes(hidden), hidden.codePointAt(0).toString(16))
+  assert.deepEqual(rowsOf(view.tree).map(([, name]) => name).sort(),
+    ['old[U+2028]', 'report[U+200B]', 'safe[U+202E]gnp.exe', family.replace(/\.md$/, '')].sort())
+  for (const shown of ['gone[U+202E].md', '/home/u[U+2066]/.dsh', 'repo[U+0085]']) assert.ok(text.includes(shown), shown)
+  assert.ok(findAll(view.tree, (n) => n.props.className === 'eng-row').map((row) => row.props.title)
+    .includes('safe[U+202E]gnp.exe.md'))
+  // the filter finds it by what the page shows, as by what it is
+  const filter = (value) => findAll(view.tree, (n) => n.type === 'input' && n.props.type === 'search')[0]
+    .props.onChange({ target: { value } })
+  for (const typed of ['safe[U+202E]gnp', 'gnp.exe']) {
+    filter(typed)
+    await view.settle()
+    assert.deepEqual(rowsOf(view.tree).map(([, name]) => name), ['safe[U+202E]gnp.exe'], typed)
+  }
+  filter('')
+  await view.settle()
+  // what the page sends back is the name itself
+  nameButton(view.tree, 'safe[U+202E]gnp.exe').props.onClick()
+  await view.settle()
+  assert.deepEqual(sent.filter((s) => s.method === 'POST').at(-1).body, { store: 'user', file: tricky })
+  assert.match(textOf(view.tree), /opened\{"name":"safe\[U\+202E\]gnp\.exe"\}/)
+})
+
+test('client: an index the desktop shows in its folder rather than opens is said to be shown there', async () => {
+  const store = { ...memoryData().stores[0], index: { name: 'MEMORY.cmd', bytes: 10, lines: 1, over: false } }
+  const { view, sent } = await memoryPage({
+    [`GET ${MEMORY}`]: memoryData({ stores: [store] }), [`POST ${MEMORY}`]: { ok: true, revealed: true },
+  })
+  await view.settle()
+  button(view.tree, 'openIndex').props.onClick()
+  await view.settle()
+  assert.deepEqual(sent.filter((s) => s.method === 'POST').at(-1).body, { store: 'user', file: 'MEMORY.cmd' })
+  assert.ok(textOf(view.tree).includes('revealed{"name":"MEMORY.cmd"}'))
+  // the folder button opens the folder, as before
+  button(view.tree, 'openFolder').props.onClick()
+  await view.settle()
+  assert.ok(textOf(view.tree).includes('opened{"name":'))
+  assert.ok(!textOf(view.tree).includes('revealed{'))
+})

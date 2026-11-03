@@ -6,6 +6,48 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.3.1 — 2026-11-03
+
+Fixes from a review of the whole dsh plugin. On dsh 0.2 with the defaults, how memory is
+stored, recalled and guarded does not change.
+
+- **dsh, social mode: someone else's conversation can no longer use dsh's session
+  search** (an optional, experimental bundle), which reads any conversation opened in the
+  same directory — the user's own, and the index in it, included. The filter also checks
+  now the files a call lists (`files`, as dsh's `present` takes them — it told a stranger
+  whether a file in a store existed) and where a session moves to (`cd`): any directory
+  but a store's.
+- **dsh 0.1, social mode: a `{{` in the index no longer fails every request.** dsh 0.1
+  ignores `interpolate: false` on runtime context and fills in every `{{name}}` group —
+  failing the request over a name it does not know, and putting a value in for one it
+  does (`{{cwd}}`). Where dsh would fill them in, no two braces of the plugin's runtime
+  context are left side by side (a zero-width space goes between them); on dsh 0.2 the
+  text is exactly as written. Up to 1.2.0 every mode put the index there.
+- **dsh 0.1: a session's directory is the one it was opened in**, as dsh 0.1's file tools
+  take it, not the process's: for the cap, for the project store recall looks for, and
+  for social mode's filter. A session opened in the process's own directory, as most are,
+  saw no difference.
+- **dsh: an index found but then not read no longer counts as gone at once.** One locked,
+  refused or on a disk that hiccupped as it was read told the conversation no index
+  applied any more, then sent it the whole index again once it could be read. Now, for a
+  step, the conversation keeps the copy it holds and is sent nothing; still not read on
+  the next step, it is told as before, so one store long unreadable holds back no other.
+  Social mode, where the index is runtime context, is as before.
+- **dsh: an index not named `.md` is shown in its folder by the memory page**, rather than
+  opened in the desktop's own app, which runs what it opens when the name says program
+  (`.cmd`, `.lnk`, `.url`…) — and a project's store is whatever its checkout put there.
+  The page says it was shown, not opened.
+- **dsh: names that could read as another show what they hide** on the memory page — a
+  control character, a line or paragraph separator, a bidirectional mark or override, a
+  zero-width space or word joiner, as `[U+202E]` — in note and archive names, store names
+  and folders, and links to nothing. A click still opens the file by its own name, and the
+  filter finds it by either.
+- **dsh: an index read a few bytes at a time**, on a file system that answers so, goes into
+  one buffer rather than one allocation kept per read.
+- **README: dsh needs Node.js 22.12 or later**, not 18 as it said.
+  By default the desktop app installs a version only once it has been published for 24
+  hours, unless you ask for `dsh-engramory@1.3.1`.
+
 ## 1.3.0 — 2026-11-03
 
 On dsh the index reaches the model as a message of its own, sent again only when it

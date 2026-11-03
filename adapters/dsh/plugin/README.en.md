@@ -37,8 +37,8 @@ which is general-purpose agent memory: Claude Code, Codex and others can use the
 
 ## Install
 
-Needs Node.js 18+ and `pnpm` on PATH (dsh's plugin command uses it). In dsh's desktop
-app you can also search for `dsh-engramory` on the Plugins page.
+Needs Node.js 22.12+ (what dsh itself needs) and `pnpm` on PATH (dsh's plugin command uses
+it). In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page.
 
 ```sh
 dsh plugin --profile <name> add dsh-engramory
@@ -103,9 +103,11 @@ theirs, and the memory already put into it stays in its history.
 
 Someone else's conversation gets no index and is not told where the store is; dsh's
 file tools there may name files only (every directory is refused), and any path into
-a store is refused however it is spelled. This is **not** a security boundary: a shell
-tool reads any file, and another profile on the same account can read the store too.
-Real isolation needs filesystem permissions or a sandbox. A custom `skill` (see
+a store is refused however it is spelled; dsh's session search (an optional, experimental
+feature that reads the records of other conversations in the same directory) is refused
+there outright. This is **not** a security boundary: a shell tool reads any file, and
+another profile on the same account can read the store too. Real isolation needs
+filesystem permissions or a sandbox. A custom `skill` (see
 [Configuration](#configuration)) reaches every conversation as written, someone else's
 included, so if it says where the store is, they are told too.
 
@@ -185,7 +187,7 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; sending the index needs the exact name on a case-sensitive filesystem (Linux, say). |
+| `indexName` | `MEMORY.md` | The file name treated as the index. The cap matches it case-insensitively; sending the index needs the exact name on a case-sensitive filesystem (Linux, say). An index not named `.md` is shown in its folder by the memory page's *Open the index*, never opened in the default app. |
 | `maxLines` | `200` | Line cap for the index. |
 | `maxBytes` | `25600` | UTF-8 byte cap for the index (25 KB). |
 | `indexPath` | unset | The one index to use: absolute, or relative to the session's directory. Unset, a `MEMORY.md` in any project is capped as an index; a store outside the default places also needs it to be found. |

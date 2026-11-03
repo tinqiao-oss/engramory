@@ -80,6 +80,12 @@ const STORE_DIR = '.engramory-memory'
 /** After every first-party runtime context (dsh's own orders end at 210). */
 const INDEX_CONTEXT_ORDER = 300
 
+/**
+ * `text` with no two braces side by side — a zero-width space between them — so no `{{`
+ * in it opens a prompt variable where dsh fills them in (dsh 0.1's runtime context, apply()).
+ */
+const verbatim = (text) => text.replace(/\{(?=\{)/g, `{${String.fromCharCode(0x200b)}`)
+
 export function apply(ctx, config = {}) {
   // `indexPath` pins the guard to ONE file. Without it the only signal is the
   // basename, so an unrelated MEMORY.md in any other project is gated too — a real
@@ -127,7 +133,9 @@ export function apply(ctx, config = {}) {
   // file or none: an edit of the real index passed unmeasured, and a shrinking rewrite
   // of an over-cap index was judged against an empty file and refused. The service is
   // optional (0.1.x has none) and may mount late, so — like `skills` below — it is
-  // picked up reactively and never makes the cap wait.
+  // picked up reactively and never makes the cap wait. Without it (dsh 0.1), dsh's file
+  // tools resolve against the directory the session was opened in, its header's `cwd`
+  // (dsh-tool-fs), which need not be the process's either: so does this.
   let workingDirectory
   ctx.inject(['workingDirectory'], (inner) => {
     inner.effect(() => {
@@ -140,7 +148,9 @@ export function apply(ctx, config = {}) {
   })
   const sessionCwd = (exec) => {
     try {
-      const dir = workingDirectory?.get(exec.agent.session)
+      const session = exec.agent.session
+      const moved = workingDirectory?.get(session)
+      const dir = typeof moved === 'string' && isAbsolute(moved) ? moved : session?.header?.cwd
       return typeof dir === 'string' && isAbsolute(dir) ? dir : undefined
     } catch {
       return undefined // no agent, no session, or a service shape this port predates
@@ -302,7 +312,7 @@ export function apply(ctx, config = {}) {
   // request runs no waterfall, and cannot carry a yes over to a later step.
   const injectIndex = settings.injectIndex
   const guarded = settings.companion || settings.social
-  const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ''
+  const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ({ text: '', unsure: false })
   const asMessage = injectIndex && !settings.social
   const memoryContext = guarded ? 'engramory:memory' : 'engramory:memory-index'
   const assembled = new WeakMap() // session -> did its latest assembly hold the memory context
@@ -316,7 +326,7 @@ export function apply(ctx, config = {}) {
         let shown = ''
         if (settings.social) {
           try {
-            shown = index(context)
+            shown = index(context).text
           } catch {
             // an index that cannot be read must not take the companion rules with it
           }
@@ -353,19 +363,6 @@ export function apply(ctx, config = {}) {
   // sends it again.
   if (asMessage) {
     const recallMessage = recallFor(settings, live, roleOf, index, assembled)
-    ctx.on('system-prompt/assemble', async (assembly, context, next) => {
-      const result = await next()
-      try {
-        const session = context?.agent?.session
-        if (session !== null && typeof session === 'object') {
-          assembled.set(session, Array.isArray(result?.contexts) &&
-            result.contexts.some((c) => c?.name === memoryContext))
-        }
-      } catch {
-        // never fail an assembly over recall
-      }
-      return result
-    }, { prepend: true })
     ctx.on('agent/pre-step', async (step, next) => {
       const decision = await next()
       if (decision?.kind === 'reject' || step?.signal?.aborted || !Array.isArray(decision?.messages)) {
@@ -383,7 +380,7 @@ export function apply(ctx, config = {}) {
       const action = await next()
       if (action?.kind !== 'retry' || failed?.signal?.aborted) return action
       try {
-        const message = recallMessage(failed.agent)
+        const message = recallMessage(failed.agent, { retry: true })
         if (message !== undefined) failed.agent.session.append('user/message', message, { surfaceOp: 'append' })
       } catch {
         // never fail a retry over recall
@@ -424,6 +421,33 @@ export function apply(ctx, config = {}) {
   }
 
   if (contexts.length > 0) {
+    // Each assembly of a step's prompt, read outermost (prepended), as the other listeners
+    // leave it, says two things. Whether the coming step may carry the index message
+    // (above). And whether this plugin's runtime context will be taken as written: dsh 0.1
+    // drops `interpolate: false` from a runtime context as it assembles one (dsh 0.2 keeps
+    // it) and fills in every `{{name}}` group of the text, failing the whole request over a
+    // name it does not know — in social mode a `{{` the user wrote in the index is enough.
+    // Where the assembly no longer says `interpolate: false`, no two braces of this plugin's
+    // text are left side by side (verbatim()); dsh 0.2's text stays exactly as written.
+    const ours = new Set(contexts.map((c) => c.name))
+    const filledIn = (c) => ours.has(c?.name) && c.interpolate !== false &&
+      typeof c.text === 'string' && c.text.includes('{{')
+    ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+      const result = await next()
+      try {
+        const listed = Array.isArray(result?.contexts) ? result.contexts : []
+        const session = context?.agent?.session
+        if (asMessage && session !== null && typeof session === 'object') {
+          assembled.set(session, listed.some((c) => c?.name === memoryContext))
+        }
+        if (listed.some(filledIn)) {
+          return { ...result, contexts: listed.map((c) => (filledIn(c) ? { ...c, text: verbatim(c.text) } : c)) }
+        }
+      } catch {
+        // never fail an assembly over recall
+      }
+      return result
+    }, { prepend: true })
     ctx.inject(['systemPrompt'], (inner) => {
       const prompt = inner.systemPrompt
       if (typeof prompt?.context !== 'function') return
@@ -695,7 +719,7 @@ const TIMED_OUT = Symbol('timed out')
  * The memory page's one route. GET lists the stores recall can use, by name only: where each
  * is, its index's size against the cap, its notes' names with their types and sizes, its
  * archive's names, and its check-up (checkUp) — and how many stores could not be read. POST `{ store, file?, archive? }` opens a note or the index in the desktop's own
- * app — or, with no `file`, shows the store's index in the file manager — through dsh's
+ * app (an index not named `.md`, in the file manager) — or, with no `file`, shows the store's index in the file manager — through dsh's
  * session controller, which checks the path once more. The page never sends a path: a store
  * is the id the listing gave it, a file a name in that store's directory, and both are found
  * again before anything opens. Nothing is written, and no note's text reaches the page.
@@ -749,7 +773,8 @@ function memoryRoute(settings, desk) {
     const timer = setTimeout(() => abort.abort(), OPEN_MS)
     try {
       await opener.openWorkspacePath(target, abort.signal)
-      return json(200, { ok: true })
+      // shown in the file manager rather than opened (targetOf): the page says which
+      return json(200, target.action === 'reveal' ? { ok: true, revealed: true } : { ok: true })
     } catch (error) {
       return json(502, { ok: false, error: 'failed', message: String(error?.message ?? error) })
     } finally {
@@ -1345,7 +1370,11 @@ async function targetOf(settings, registry, body) {
       return index === undefined ? undefined : { path: index, action: 'reveal' }
     }
     const path = await fileIn(store, body.file, body.archive === true)
-    return path === undefined ? undefined : { path }
+    if (path === undefined) return undefined
+    // A note is a `.md`. An index the user named otherwise (`indexName`, `indexPath`) is shown
+    // in its folder instead: the desktop's own app runs what it opens when the name says
+    // program (`.cmd`, `.lnk`, `.url`…), and a project's store is whatever its checkout put there.
+    return /\.md$/i.test(path) ? { path } : { path, action: 'reveal' }
   } catch {
     return undefined
   }
@@ -1628,6 +1657,18 @@ const PATH_ARGS = ['file_path', 'path', 'filePath', 'filename', 'file', 'target_
 const TREE_SEARCHES = new Set(['grep', 'glob'])
 
 /**
+ * Tools that read other conversations' records, every event in them: dsh's session search
+ * (an optional bundle). dsh lets a conversation read any other opened in the same directory —
+ * a stranger's the user's own, the index in it included.
+ */
+const HISTORY_TOOLS = new Set([
+  'session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read',
+])
+
+/** Past this many files listed in one call, a stranger's call is refused without checking each. */
+const MAX_LISTED = 32
+
+/**
  * In social mode, a stranger's conversation may not point a file tool at a memory
  * store — not to read it, list it, search it, or write it — and may name files only,
  * never a directory. Refused:
@@ -1638,7 +1679,11 @@ const TREE_SEARCHES = new Set(['grep', 'glob'])
  *   - a path with a `.engramory-memory` segment, as written or as the OS resolves it
  *     (links, junctions, 8.3 short names) — a store that does not exist yet included,
  *     so a stranger cannot plant one for the user's next session;
- *   - a path in the pinned index's directory, or in the directory its target is in.
+ *   - a path in the pinned index's directory, or in the directory its target is in;
+ *   - the same for every file a call lists (`files`, as dsh's `present` takes them), and
+ *     for where a session moves to (`cd`) — there a directory is fine, a store's is not;
+ *   - dsh's session search (HISTORY_TOOLS), whatever it is asked: it reads the records of
+ *     the user's own conversations too.
  * Paths are compared without case or Unicode form on every platform: macOS opens
  * `.ENGRAMORY-MEMORY` as the store too, and refusing a stranger one path too many
  * costs nothing. Fails closed: a stranger's call that cannot be checked is refused.
@@ -1650,26 +1695,38 @@ const TREE_SEARCHES = new Set(['grep', 'glob'])
 function refuseStranger(exec, settings, sessionCwd, roleOf) {
   try {
     if (roleOf(exec?.agent) !== 'stranger') return undefined
+    if (HISTORY_TOOLS.has(exec.name)) return settings.text.strangerHistory
     const args = exec.arguments !== null && typeof exec.arguments === 'object'
       ? exec.arguments
       : {}
-    const named = PATH_ARGS.map((k) => args[k]).filter((v) => typeof v === 'string' && v !== '')
+    const strings = (values) => values.filter((v) => typeof v === 'string' && v !== '')
+    const named = strings(PATH_ARGS.map((k) => args[k]))
+    // Files listed rather than named, as dsh's `present` takes them (`files: [{ path }]`).
+    if (Array.isArray(args.files)) {
+      if (args.files.length > MAX_LISTED) return settings.text.strangerRefusal
+      for (const item of args.files) {
+        named.push(...strings(item !== null && typeof item === 'object' ? PATH_ARGS.map((k) => item[k]) : [item]))
+      }
+    }
     // The root a tree search really walks, whatever else the call carries: dsh ignores
     // arguments a tool does not declare, so a stray `file_path` is not its root.
     if (TREE_SEARCHES.has(exec.name)) {
       named.push(typeof args.path === 'string' && args.path !== '' ? args.path : '.')
     }
-    if (named.length === 0) return undefined
+    // Where a session moves to (dsh's `working_directory`, `cd`): a directory, so not refused
+    // for being one — but never a store's.
+    const moves = strings([args.cd])
+    if (named.length === 0 && moves.length === 0) return undefined
     const cwd = sessionCwd(exec)
     const stores = storeTargets(cwd, settings)
-    for (const p of named) {
+    for (const [p, move] of [...named.map((p) => [p, false]), ...moves.map((p) => [p, true])]) {
       // A network or device path can stall a stat for as long as the share takes to
       // time out, on the host's main thread: refused before any I/O.
       if (/^[\\/]{2}/.test(p)) return settings.text.strangerRefusal
       const spelled = hostPath(cwd, p)
       // Resolving walks the path a stat per missing segment: bounded before any I/O.
       if (tooDeep(spelled) || /^[\\/]{2}/.test(spelled)) return settings.text.strangerRefusal
-      if (isDirectory(spelled)) return settings.text.strangerRefusal
+      if (!move && isDirectory(spelled)) return settings.text.strangerRefusal
       const written = foldPath(spelled)
       const target = osKey(spelled)
       if (namesStore(written) || namesStore(target)) return settings.text.strangerRefusal
@@ -2021,15 +2078,30 @@ const RECALL = {
  * latest assembly did not hold the memory context (a persona preset turned optional
  * runtime context off), and nothing without RECALL: a session whose last copy cannot be
  * told would be sent the index on every step.
+ *
+ * A store found but not read just now (indexRecall's `unsure`: a lock, a refusal, a disk
+ * that hiccupped) is not news that it went away: a session holding a copy keeps it and is
+ * sent nothing on the first step of a run of such steps, and on a request dsh retries
+ * within a step (`retry`). Not read on a later step of the run either, the session is sent
+ * what can be read, as if that store were gone, until every store is read again — one store
+ * long unreadable holds back no other's — and so is one holding no copy (a compaction took
+ * it), at once.
  */
 function recallFor(settings, live, roleOf, index, assembled) {
-  return (agent) => {
+  // sessions in a run of steps with a store found but not read, held back once in it already
+  const held = new WeakSet()
+  return (agent, { retry = false } = {}) => {
     const session = agent?.session
     if (session === null || typeof session !== 'object') return undefined
     if (assembled.get(session) !== true || live.recall === undefined) return undefined
     const sent = live.recall.stateOf(session, RECALL_KEY)
     if (!isRecall(sent)) return undefined
-    const shown = roleOf(agent) === 'owner' ? index({ agent }) : ''
+    const { text: shown, unsure } = roleOf(agent) === 'owner' ? index({ agent }) : { text: '', unsure: false }
+    if (!unsure) held.delete(session)
+    else if (sent.seq !== null && (retry || !held.has(session))) {
+      held.add(session)
+      return undefined
+    }
     if (shown) {
       const text = `${settings.text.recallHead}\n\n${shown}`
       return digestOf(text) === sent.digest ? undefined : recallMessage(text)
@@ -2058,7 +2130,8 @@ const RECHECK_MS = 10000
 /**
  * The text of the indexes a session should see, for its index message (recallFor): the
  * pinned `indexPath`, or else its project store and the global one under `$DSH_HOME`
- * (both, when both exist — dsh loads both AGENTS.md scopes too).
+ * (both, when both exist — dsh loads both AGENTS.md scopes too) — and whether any store
+ * there could not be read just now (`unsure`).
  *
  * This runs on every step, on dsh's main thread, so it does as little I/O as it can: the
  * walk up to the project root is remembered per directory for a few seconds, and an
@@ -2086,12 +2159,16 @@ function indexRecall(settings, sessionCwd) {
           { label: labels.user, path: join(dshHome(), STORE_DIR, settings.indexName) }]
     const seen = new Set()
     const parts = []
+    // An index there that cannot be read just now — locked, refused, a disk that hiccupped —
+    // is not news that it went away: what the session should see is then not known.
+    let unsure = false
     for (const store of candidates) {
       if (store === undefined) continue
       let stat
       try {
         stat = statSync(store.path, { bigint: true }) // exact 64-bit file ids on Windows
-      } catch {
+      } catch (error) {
+        if (!absent(error)) unsure = true
         continue // no store there
       }
       if (!stat.isFile()) continue
@@ -2105,7 +2182,10 @@ function indexRecall(settings, sessionCwd) {
         // can change with it.
         if (store.root !== undefined && !projectIndex(store.path, store.root)) continue
         const current = readIndex(store.path, readUpTo, true)
-        if (current === undefined) continue // unreadable just now: try again next step
+        if (current === undefined) {
+          unsure = true
+          continue // read again next step
+        }
         entry = { stamp, at: Date.now(), text: renderIndex(store.label, store.path, current, settings) }
         shown.set(key, entry)
         if (shown.size > 64) shown.delete(shown.keys().next().value)
@@ -2113,7 +2193,7 @@ function indexRecall(settings, sessionCwd) {
       seen.add(identity)
       parts.push(entry.text)
     }
-    return parts.join('\n\n')
+    return { text: parts.join('\n\n'), unsure }
   }
 }
 
@@ -2701,17 +2781,23 @@ function readIndex(filePath, limit, keepHead = false) {
     fd = openSync(filePath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
     const stat = fstatSync(fd)
     if (!stat.isFile()) return undefined
-    const chunks = []
+    // One buffer, doubled as the file turns out longer and never past `limit + 1`: a read
+    // may return less than it was asked for (a file system that answers a few bytes at a
+    // time), and a chunk kept per read would hold its whole allocation for each few bytes.
+    let buffer = Buffer.allocUnsafe(Math.min(65536, limit + 1))
     let total = 0
     for (;;) {
-      const chunk = Buffer.allocUnsafe(Math.min(65536, limit + 1 - total))
-      const got = readSync(fd, chunk, 0, chunk.length, null)
-      if (got === 0) return Buffer.concat(chunks, total)
-      chunks.push(chunk.subarray(0, got))
+      if (total === buffer.length) {
+        const grown = Buffer.allocUnsafe(Math.min(limit + 1, buffer.length * 2))
+        buffer.copy(grown, 0, 0, total)
+        buffer = grown
+      }
+      const got = readSync(fd, buffer, total, buffer.length - total, null)
+      if (got === 0) return buffer.subarray(0, total)
       total += got
       if (total > limit) {
         const bytes = Math.max(stat.size, total)
-        return keepHead ? { bytes, head: Buffer.concat(chunks, total) } : { bytes }
+        return keepHead ? { bytes, head: buffer.subarray(0, total) } : { bytes }
       }
     }
   } catch {
@@ -2944,6 +3030,10 @@ const TEXT = {
       'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
       'written in it, or the user never has in dsh\'s own window), so the memory store is ' +
       'closed to it.',
+    strangerHistory:
+      'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
+      'written in it, or the user never has in dsh\'s own window), so the records of other ' +
+      'conversations are closed to it.',
     storeAt: (stores) =>
       `Engramory: your memory store is ${code(storeDir(stores))}, its index ` +
       `${code(stores.indexName)}; create them there on the first save if they do not exist yet.`,
@@ -3008,6 +3098,9 @@ const TEXT = {
     strangerRefusal:
       '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
       '窗口里亲手发过消息），记忆库对它关闭。',
+    strangerHistory:
+      '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
+      '窗口里亲手发过消息），其他会话的记录对它关闭。',
     storeAt: (stores) =>
       `Engramory：你的记忆库在 ${code(storeDir(stores))}，索引是 ${code(stores.indexName)}；` +
       '还不存在的话，第一次保存时就在那里建。',

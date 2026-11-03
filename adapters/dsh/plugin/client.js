@@ -30,7 +30,7 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.3.0'
+    const VERSION = '1.3.1'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -98,6 +98,7 @@ window.__ModuleLoader__.load({
       openIndex: '打开索引',
       openFolder: '打开文件夹',
       opened: '已打开 {name}。',
+      revealed: '已在文件夹里显示 {name}。',
       openUnavailable: '这台 dsh 不能在本机打开文件（比如远程访问时）。文件在上面写的位置。',
       openMissing: '找不到这个文件了，可能刚被改名或删掉。点刷新看看。',
       openBusy: '还在打开上一个，稍等一下再点。',
@@ -222,6 +223,7 @@ window.__ModuleLoader__.load({
       openIndex: 'Open the index',
       openFolder: 'Open the folder',
       opened: 'Opened {name}.',
+      revealed: 'Showed {name} in its folder.',
       openUnavailable: 'This dsh cannot open files on its own computer (when reached remotely, say). The files are where the path above says.',
       openMissing: 'That file is gone — renamed or deleted just now, perhaps. Refresh to see.',
       openBusy: 'Still opening the previous one — click again in a moment.',
@@ -725,6 +727,22 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       unavailable: 'openUnavailable', missing: 'openMissing', busy: 'openBusy', timeout: 'listTimeout',
     }
     const nameOf = (file) => file.replace(/\.md$/i, '')
+    /**
+     * A name or path from disk as the page shows it: a control character, a line or paragraph
+     * separator, a bidirectional mark, embedding, override or isolate, or a character with no
+     * width of its own (a zero-width space, a word joiner, a byte order mark) — any of which can
+     * make a name read as another, or hide part of it — shown as its code point (`[U+202E]`).
+     * The joiners some scripts and emoji are written with (U+200C, U+200D) are left as they are.
+     * What the page sends back to open a file is the name as it is.
+     */
+    const HIDDEN = [[0x0, 0x1f], [0x7f, 0x9f], [0x61c, 0x61c], [0x200b, 0x200b], [0x200e, 0x200f],
+      [0x2028, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]]
+    const legible = (text) => Array.from(String(text), (ch) => {
+      const code = ch.codePointAt(0)
+      return HIDDEN.some(([low, high]) => code >= low && code <= high)
+        ? `[U+${code.toString(16).toUpperCase().padStart(4, '0')}]`
+        : ch
+    }).join('')
     const sizeOf = (t, bytes) => (bytes < 1024 ? t('sizeBytes', { n: bytes }) : t('sizeKB', { n: (bytes / 1024).toFixed(1) }))
     const typeKey = (type) => `type${type[0].toUpperCase()}${type.slice(1)}`
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -885,9 +903,9 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const [tidy, setTidy] = useState('idle')
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
-      const title = store.kind === 'user' ? [t('storeUser'), ...store.titles].join(' · ')
+      const title = legible(store.kind === 'user' ? [t('storeUser'), ...store.titles].join(' · ')
         : store.kind === 'pinned' ? [t('storePinned'), ...store.titles].join(' · ')
-          : store.titles.join(' · ')
+          : store.titles.join(' · '))
       const { index } = store
       const sizes = index === null ? {} : { size: sizeOf(t, index.bytes), maxSize: sizeOf(t, cap.maxBytes) }
       // lines are counted only for an index read whole; past that, its bytes say over or not
@@ -915,7 +933,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
             : t(check.brokenMore ? 'healthBrokenMore' : 'healthBroken', { count: check.broken.length }),
           // what the index says, as it says it: there is no file to open
           check.broken.length > 0 ? h('ul', { className: 'eng-broken' },
-            check.broken.map((target) => h('li', { key: target }, h('code', null, target)))) : null) : null,
+            check.broken.map((target) => h('li', { key: target }, h('code', null, legible(target))))) : null) : null,
         checked && check.unindexed.length > 0
           ? h('p', { className: 'eng-attn-item', key: 'unindexed' }, t('healthUnindexed', { count: check.unindexed.length })) : null,
         checked && untyped > 0 ? h('p', { className: 'eng-attn-item', key: 'untyped' }, t('healthUntyped', { count: untyped })) : null,
@@ -963,12 +981,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         const parts = [
           h('span', { className: 'eng-mark', key: 'mark' }, icon(Object.hasOwn(ICONS, type) ? type : 'other', 18, 1.6)),
           h('span', { className: 'eng-row-text', key: 'text' },
-            h('span', { className: 'eng-name' }, shownName(file, plan)),
+            h('span', { className: 'eng-name' }, legible(shownName(file, plan))),
             h('span', { className: 'eng-row-meta' }, meta)),
           badges.length > 0 ? h('span', { className: 'eng-badges', key: 'badges' }, badges) : null,
           canOpen ? h('span', { className: 'eng-row-go', key: 'go' }, icon('chevron', 14)) : null,
         ]
-        const props = { className: 'eng-row', 'data-type': type, title: file }
+        const props = { className: 'eng-row', 'data-type': type, title: legible(file) }
         return h('li', { key: file }, canOpen
           ? h('button', { type: 'button', ...props, onClick: () => open(store, file, note === undefined) }, ...parts)
           : h('div', props, ...parts))
@@ -996,7 +1014,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
                 onClick: () => open(store, index.name, false) }, icon('index', 14), t('openIndex')),
               h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', key: 'folder',
                 onClick: () => open(store, undefined, false) }, icon('folder', 14), t('openFolder'))] : []))),
-        h('p', { className: 'eng-path' }, store.dir),
+        h('p', { className: 'eng-path' }, legible(store.dir)),
         !filtering && checked && findings.length === 0
           ? h('p', { className: 'eng-store-ok' }, icon('check', 13), t('healthOk')) : null,
         attention ? h('div', { className: 'eng-attn', role: 'note' },
@@ -1095,7 +1113,9 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           reply = { ok: false, error: 'failed', message: String(error?.message ?? error) }
         }
         if (!alive.current) return
-        setStatus(reply.ok ? { tone: 'ok', text: t('opened', { name: file === undefined ? store.dir : nameOf(file) }) }
+        // a file shown in its folder rather than opened (an index not named .md) is said to be
+        setStatus(reply.ok ? { tone: 'ok', text: file === undefined ? t('opened', { name: legible(store.dir) })
+          : t(reply.revealed === true ? 'revealed' : 'opened', { name: legible(nameOf(file)) }) }
           : Object.hasOwn(OPEN_FAILURES, reply.error) ? { tone: 'error', text: t(OPEN_FAILURES[reply.error]) }
             : { tone: 'error', text: t('openFailed', { reason: reply.message ?? reply.error ?? '' }) })
       }
@@ -1106,10 +1126,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const present = data === undefined || kind === undefined ||
         data.stores.some((store) => store.notes.some((note) => note.type === kind))
       useEffect(() => { if (!present) setKind(undefined) }, [present])
-      // a name filter over what was listed: case- and width-insensitive, the .md left out
+      // a name filter over what was listed: case- and width-insensitive, the .md left out — by
+      // the name as it is or as the page shows it (legible), so what is on the page can be typed
       const needle = query.trim().normalize('NFKC').toLowerCase()
       const match = needle === '' ? undefined
-        : (file) => nameOf(file).normalize('NFKC').toLowerCase().includes(needle)
+        : (file) => [nameOf(file), legible(nameOf(file))]
+          .some((name) => name.normalize('NFKC').toLowerCase().includes(needle))
       let body
       if (state.phase === 'loading') body = h('p', { className: 'eng-note' }, t('listing'))
       else if (state.phase === 'error') body = h('div', { className: 'eng-banner', 'data-tone': 'error' }, t(state.reason))

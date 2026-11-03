@@ -891,6 +891,32 @@ test('without a session directory, a relative path still resolves against the pr
   }
 })
 
+test('dsh 0.1: with no working-directory service, a session\'s directory is the one it was opened in', async () => {
+  // dsh 0.1's file tools resolve a relative path against the session header's `cwd`
+  // (dsh-tool-fs), which need not be the process's — a session dsh opens for a configured
+  // agent, say: the guard measures that file, and recall finds the project store there.
+  const dir = scratch('header-cwd')
+  writeFileSync(join(dir, INDEX), `HEAD\n${big(210)}`, 'utf8')
+  const agent = { session: { header: { cwd: dir } } }
+  const { guard } = mount()
+  assert.match(guard({ name: 'edit', agent, arguments: { file_path: INDEX, old_string: 'HEAD', new_string: big(30) } }),
+    /lines > 200/)
+  assert.equal(guard({ name: 'write', agent, arguments: { file_path: INDEX, content: big(205) } }), undefined,
+    'and a shrinking rewrite passes')
+  // dsh 0.2's own directory owner still decides: it moves with `cd`
+  const moved = mount({}, { workingDirectory: sessionDirs() })
+  assert.equal(moved.guard({
+    name: 'edit', agent: { session: { cwd: scratch('moved'), header: { cwd: dir } } },
+    arguments: { file_path: INDEX, old_string: 'HEAD', new_string: big(30) },
+  }), undefined, 'no index where the session moved to')
+  const project = scratch('header-recall')
+  store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  mount({}, { systemPrompt: prompt })
+  assert.match(await withDshHome(scratch('home'), () => prompt.recall({ agent: { session: { header: { cwd: project } } } })),
+    /- first$/)
+})
+
 test('a process cwd that is gone never makes the guard throw', () => {
   // process.cwd() throws (ENOENT uv_cwd) once the directory is deleted. An absolute
   // path does not need it, so it must still be measured; a relative one is let go.
@@ -1571,6 +1597,168 @@ test('a read that failed once is tried again on the next step', async (t) => {
   assert.match(await withDshHome(home, () => prompt.recall(at(project))), /- readable again$/)
 })
 
+/** Run the async `fn` while the synchronous fs `call` fails with `code` — for `path`, or for any fd. */
+async function failing(call, code, path, fn) {
+  const saved = fs[call]
+  fs[call] = function (p, ...rest) {
+    if (typeof p !== 'string' || resolve(p) === resolve(path)) {
+      throw Object.assign(new Error(`${code}: ${call}`), { code })
+    }
+    return saved.call(this, p, ...rest)
+  }
+  syncBuiltinESMExports()
+  try {
+    return await fn()
+  } finally {
+    fs[call] = saved
+    syncBuiltinESMExports()
+  }
+}
+
+test('an index found but not read just now is not news that it went away, for a step', async () => {
+  // a lock, a refusal or a disk that hiccupped: the session keeps the copy it holds, rather
+  // than being told no index applies and then sent the whole index again
+  const project = scratch('hiccup')
+  const path = store(project, '- [a](a.md) - first\n')
+  const home = scratch('home')
+  const session = { cwd: project }
+  const stepOf = (prompt) => () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const step = stepOf(prompt)
+  assert.equal((await step()).length, 1)
+  // each time changed meanwhile (its size too), so the step reads it again
+  let version = 1
+  const change = () => writeFileSync(path, `- [a](a.md) - version ${++version} ${'+'.repeat(version)}\n`, 'utf8')
+  const latest = () => new RegExp(`- version ${version} \\+{${version}}$`)
+  for (const [call, code] of [['openSync', 'EBUSY'], ['statSync', 'EACCES'], ['readSync', 'EIO']]) {
+    change()
+    assert.deepEqual(await failing(call, code, path, step), [], `${call} ${code}: nothing sent on that step`)
+    assert.match((await step())[0].content[0].text, latest(), `${call} ${code}: read again, the change whole`)
+  }
+  // nor after dsh restarts, with nothing of the index in memory
+  const restarted = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: restarted })
+  assert.deepEqual(await failing('statSync', 'EACCES', path, stepOf(restarted)), [])
+  // not read on the next step either: told as before, as if it were gone
+  const [held, told] = await failing('statSync', 'EACCES', path, async () => [await step(), await step()])
+  assert.deepEqual(held, [])
+  assert.equal(told[0].source.cleared, true)
+  assert.match((await step())[0].content[0].text, latest(), 'and sent it again once it is read')
+  // one that is gone is withdrawn at once — and a hiccup after that sends nothing back
+  rmSync(path)
+  assert.equal((await step())[0].source.cleared, true)
+  assert.deepEqual(await failing('statSync', 'EACCES', path, async () => [...await step(), ...await step()]), [])
+})
+
+test('a store not read for longer than a step holds back no other store\'s index', async () => {
+  const repo = scratch('two-stores')
+  mkdirSync(join(repo, '.git'))
+  const project = store(repo, '- [p](p.md) - project one\n')
+  const home = scratch('home')
+  const user = store(home, '- [u](u.md) - user\n')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const session = { cwd: repo }
+  const step = () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+  assert.match((await step())[0].content[0].text, /- project one[\s\S]*- user$/)
+  writeFileSync(project, '- [p](p.md) - project two\n', 'utf8')
+  const [held, told, later] = await failing('statSync', 'EACCES', user, async () => {
+    const steps = [await step(), await step()]
+    writeFileSync(project, '- [p](p.md) - project three\n', 'utf8')
+    return [...steps, await step()]
+  })
+  assert.deepEqual(held, [])
+  assert.match(told[0].content[0].text, /- project two$/)
+  assert.doesNotMatch(told[0].content[0].text, /- user/)
+  assert.match(later[0].content[0].text, /- project three$/, 'held back once in a run of such steps, not again')
+  assert.match((await step())[0].content[0].text, /- project three[\s\S]*- user$/, 'read again: the whole index')
+  // a session holding no copy (a compaction took it) is sent what can be read at once
+  const fresh = { cwd: repo }
+  const [first] = await failing('statSync', 'EACCES', user,
+    () => withDshHome(home, () => prompt.sent({ agent: { session: fresh } }, { commit: true })))
+  assert.match(first.content[0].text, /- project three$/)
+})
+
+test('a request dsh retries within a step keeps the index held back on that step', async () => {
+  // dsh retries a request that failed on the network within its step: no compaction took
+  // the copy the session holds, so a store not read just now is still no news
+  const project = scratch('retry-held')
+  const path = store(project, '- [a](a.md) - first\n')
+  const prompt = promptRegistry()
+  const { requestError } = mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = {
+    cwd: project, append: (type, data, options) => session.events.push({ type, data, seq: session.events.length, ...options }),
+  }
+  const context = { agent: { session } }
+  assert.equal((await withDshHome(home, () => prompt.sent(context, { commit: true }))).length, 1)
+  await failing('statSync', 'EACCES', path, async () => {
+    assert.deepEqual(await withDshHome(home, () => prompt.sent(context, { commit: true })), [], 'held back on the step')
+    const before = session.events.length
+    assert.deepEqual(await withDshHome(home, () => requestError(context.agent, { kind: 'retry' })), { kind: 'retry' })
+    assert.equal(session.events.length, before, 'nothing withdrawn by the retry')
+  })
+})
+
+test('a project index once shown, then reached through a link out of the project, is not shown again', async () => {
+  // the check a project store passes is made again whenever it is re-read, and a hiccup
+  // after it was refused brings nothing back
+  const repo = scratch('cached-link')
+  mkdirSync(join(repo, '.git'))
+  const path = store(repo, '- [a](a.md) - first\n')
+  const outside = scratch('outside')
+  writeFileSync(join(outside, INDEX), '- [s](s.md) - secret\n', 'utf8')
+  const prompt = promptRegistry()
+  mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const home = scratch('home')
+  const session = { cwd: repo }
+  const step = () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+  assert.match((await step())[0].content[0].text, /- first$/)
+  renameSync(join(repo, '.engramory-memory'), join(repo, 'moved-away'))
+  symlinkSync(outside, join(repo, '.engramory-memory'), process.platform === 'win32' ? 'junction' : 'dir')
+  const [note] = await step()
+  assert.equal(note.source.cleared, true)
+  assert.doesNotMatch(note.content[0].text, /secret|first/)
+  assert.deepEqual(await failing('statSync', 'EACCES', path, step), [], 'nor does a hiccup bring the old copy back')
+})
+
+test('an index read a few bytes at a time is read whole, into one buffer', async () => {
+  // a file system may answer a read with less than it asked for: every byte is still read,
+  // and no allocation is kept per read
+  const project = scratch('short')
+  const path = store(project, `${big(150)}\n`)
+  const saved = fs.readSync
+  const allocUnsafe = Buffer.allocUnsafe
+  let reads = 0
+  let buffers = 0 // read buffers, not the small ones Node pools
+  fs.readSync = function (fd, buffer, offset, length, position) {
+    reads++
+    return saved.call(this, fd, buffer, offset, Math.min(length, 7), position)
+  }
+  Buffer.allocUnsafe = function (size) {
+    if (size >= 4096) buffers++
+    return allocUnsafe.call(this, size)
+  }
+  syncBuiltinESMExports()
+  try {
+    const prompt = promptRegistry()
+    mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+    assert.match(await withDshHome(scratch('home'), () => prompt.recall(at(project))),
+      /\n\n- line 0\n- line 1\n[\s\S]*\n- line 149$/)
+    const { guard } = mount()
+    assert.match(guard({ name: 'edit', arguments: { file_path: path, old_string: '- line 0\n', new_string: `${big(60)}\n` } }),
+      /lines > 200/)
+    assert.equal(guard(write(path, big(100))), undefined)
+  } finally {
+    fs.readSync = saved
+    Buffer.allocUnsafe = allocUnsafe
+    syncBuiltinESMExports()
+  }
+  assert.ok(reads > 600, `${reads} reads`)
+  assert.ok(buffers <= 6, `${buffers} read buffers for three reads of the index`)
+})
+
 test('recall reads no further than the read ceiling, whatever the configured cap', async () => {
   const project = scratch('inject')
   const row = `- [n](n.md) - ${'x'.repeat(1000)}\n`
@@ -1881,10 +2069,12 @@ test('social mode judges the index as dsh admits a step, so an outsider queued m
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   const { listeners, projections } = mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  // social mode sends no message of its own: nothing of the message path is there
-  for (const event of ['agent/pre-step', 'agent/request-error', 'system-prompt/assemble']) {
+  // social mode sends no message of its own: nothing of the message path is there (the
+  // assembly is still read, to keep the runtime context's text as written on dsh 0.1)
+  for (const event of ['agent/pre-step', 'agent/request-error']) {
     assert.equal(listeners.get(event), undefined, event)
   }
+  assert.equal(listeners.get('system-prompt/assemble').length, 1)
   assert.deepEqual([...projections.units.keys()], ['engramory:speakers'])
   const session = own('first-turn', project)
   const home = scratch('home')
@@ -1894,6 +2084,34 @@ test('social mode judges the index as dsh admits a step, so an outsider queued m
   const admitted = withDshHome(home, () => prompt.render(as(session)))
   assert.doesNotMatch(admitted, /- first/)
   assert.match(admitted, /not the user's own/)
+})
+
+test('social mode keeps the runtime context as written where dsh 0.1 would fill in its `{{` groups', async () => {
+  // dsh 0.1 drops `interpolate: false` as it assembles a runtime context, then fills in
+  // every `{{name}}` group and fails the request over one it does not know: an index with a
+  // template in it took every request of the user's own conversation down with it
+  const project = scratch('braces')
+  store(project, '- [a](a.md) - {{item.name}} and {{{x}}}\n')
+  const prompt = promptRegistry()
+  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  const context = as(own('braces-1', project))
+  const home = scratch('home')
+  const written = withDshHome(home, () => prompt.contexts[0].text(context))
+  assert.equal(prompt.contexts[0].name, 'engramory:memory')
+  assert.match(written, /\{\{item\.name\}\} and \{\{\{x\}\}\}/)
+  const assembled = (keeps) => withDshHome(home, () => prompt.assemble({
+    contexts: [...prompt.contexts.map((spec) => ({
+      name: spec.name, text: spec.text(context), ...(keeps ? { interpolate: spec.interpolate } : {}),
+    })), { name: 'someone-else', text: 'cwd: {{cwd}}' }],
+  }, context))
+  // as dsh 0.1 assembles it: no two braces side by side, nothing else changed
+  const old = await assembled(false)
+  assert.doesNotMatch(old.contexts[0].text, /\{\{/)
+  assert.equal(old.contexts[0].text.replaceAll(String.fromCharCode(0x200b), ''), written)
+  assert.equal(old.contexts.at(-1).text, 'cwd: {{cwd}}', 'another plugin\'s context is its own business')
+  // as dsh 0.2 does: the flag is kept, and so is the text, exactly
+  const now = await assembled(true)
+  assert.equal(now.contexts[0].text, written)
 })
 
 test('companion mode: anyone else\'s conversation gets no memory, only a note', async () => {
@@ -2127,6 +2345,37 @@ test('companion mode: a stranger\'s conversation cannot read, search or write a 
   // and the user's own conversations are untouched
   assert.equal(call(own('own-1', project), 'read', { file_path: userIndex }), undefined)
   assert.equal(call(own('code-1', project), 'grep', { pattern: 'x' }), undefined)
+})
+
+test('companion mode: a stranger cannot list a store\'s files, move into a store, or read the user\'s conversations', () => {
+  const home = scratch('home')
+  const userIndex = store(home, '- [u](u.md) - user\n')
+  const project = scratch('companion')
+  store(project, '- [p](p.md) - project\n')
+  const notes = join(project, 'notes.txt')
+  writeFileSync(notes, 'x', 'utf8')
+  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
+  const call = (session, name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(session) }))
+  const stranger = theirs('bridge-1', project)
+  const closed = /memory store is closed to it/
+  // dsh's `present` lists the files it delivers
+  assert.match(call(stranger, 'present', { files: [{ path: notes }, { path: userIndex }] }), closed)
+  assert.match(call(stranger, 'present', { files: [{ path: join('.engramory-memory', INDEX), description: 'x' }] }), closed)
+  assert.match(call(stranger, 'present', { files: [{ path: notes, file_path: userIndex }] }), closed, 'a stray field too')
+  assert.match(call(stranger, 'present', { files: [join(home, '.engramory-memory', INDEX)] }), closed, 'a list of paths')
+  assert.match(call(stranger, 'present', { files: Array.from({ length: 33 }, () => ({ path: notes })) }), closed,
+    'too many to check one by one')
+  assert.equal(call(stranger, 'present', { files: [{ path: notes }] }), undefined)
+  // `working_directory`: anywhere but into a store
+  assert.match(call(stranger, 'working_directory', { cd: join(home, '.engramory-memory') }), closed)
+  assert.match(call(stranger, 'working_directory', { cd: '.engramory-memory' }), closed)
+  assert.equal(call(stranger, 'working_directory', { cd: scratch('elsewhere') }), undefined, 'a directory is fine to move to')
+  assert.equal(call(stranger, 'working_directory', {}), undefined, 'and to ask where it is')
+  // dsh's session search reads any conversation opened in the same directory, the user's own too
+  for (const name of ['session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read']) {
+    assert.match(call(stranger, name, { query: 'birthday' }), /records of other conversations are closed to it/, name)
+    assert.equal(call(own('own-1', project), name, { query: 'birthday' }), undefined, `${name}: the user's own may`)
+  }
 })
 
 test('companion mode: a subagent is the user\'s own while its live parent is, read afresh every time', () => {
@@ -3558,7 +3807,8 @@ test('memory POST opens a note, the index, an archived note by its real path; sh
       [{ store: 'user' }, { path: join(real, INDEX), action: 'reveal' }],
     ]) {
       const { status, body: reply } = await m.call('POST', body)
-      assert.deepEqual([status, reply], [200, { ok: true }], JSON.stringify(body))
+      assert.deepEqual([status, reply], [200, asked.action === 'reveal' ? { ok: true, revealed: true } : { ok: true }],
+        JSON.stringify(body))
       assert.deepEqual(m.opened.at(-1), asked)
     }
     // a store with no index has nothing to show its folder by (Linux would show the one above)
@@ -3693,18 +3943,41 @@ test('memory POST: a click while a lookup runs is told to wait; the next one ope
   })
 })
 
-test('memory POST: a pinned index of any name opens by that name, and only from the store itself', async () => {
+test('memory POST: a pinned index of any name is found by that name, only in the store itself', async () => {
   const dir = realpathSync.native(scratch('mem-pinname'))
   writeFileSync(join(dir, 'INDEX'), '- one\n', 'utf8')
   mkdirSync(join(dir, 'archive'))
   writeFileSync(join(dir, 'archive', 'INDEX'), '- old\n', 'utf8')
   const m = memoryMount({ indexPath: join(dir, 'INDEX') }, { opener: true })
-  assert.deepEqual((await m.call('POST', { store: 'pinned', file: 'INDEX' })).body, { ok: true })
-  assert.deepEqual(m.opened, [{ path: join(dir, 'INDEX') }])
+  assert.deepEqual((await m.call('POST', { store: 'pinned', file: 'INDEX' })).body, { ok: true, revealed: true })
+  // not a `.md`: shown in its folder, not handed to whatever app its name calls up
+  assert.deepEqual(m.opened, [{ path: join(dir, 'INDEX'), action: 'reveal' }])
   assert.equal((await m.call('POST', { store: 'pinned', file: 'INDEX', archive: true })).status, 404)
   if (process.platform === 'win32') {
     // a case-insensitive disk finds it under any case, and the opener gets its real name
     assert.equal((await m.call('POST', { store: 'pinned', file: 'index' })).status, 200)
-    assert.deepEqual(m.opened.at(-1), { path: join(dir, 'INDEX') })
+    assert.deepEqual(m.opened.at(-1), { path: join(dir, 'INDEX'), action: 'reveal' })
   }
+})
+
+test('memory POST: an index named like a program is shown in its folder, never run', async () => {
+  // a project's checkout may hold a file under any name the user gave the index
+  const { home, dir } = globalStore('mem-cmdname')
+  const real = realpathSync.native(dir)
+  for (const name of ['MEMORY.cmd', 'MEMORY.lnk', 'MEMORY.url']) {
+    writeFileSync(join(dir, name), '- one\n', 'utf8')
+    const m = memoryMount({ indexName: name }, { opener: true })
+    await withHomeAsync(home, async () => {
+      assert.deepEqual((await m.call('POST', { store: 'user', file: name })).body, { ok: true, revealed: true })
+    })
+    assert.deepEqual(m.opened, [{ path: join(real, name), action: 'reveal' }], name)
+  }
+  // a note, and an index that is one, still open in the desktop's own app
+  writeFileSync(join(dir, 'a.md'), noteOf('user'), 'utf8')
+  const m = memoryMount({ indexName: 'Memory.MD' }, { opener: true })
+  writeFileSync(join(dir, 'Memory.MD'), '- one\n', 'utf8')
+  await withHomeAsync(home, async () => {
+    for (const file of ['a.md', 'Memory.MD']) assert.equal((await m.call('POST', { store: 'user', file })).status, 200)
+  })
+  assert.deepEqual(m.opened.map((o) => o.action), [undefined, undefined])
 })
