@@ -10,8 +10,10 @@ Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
 The dsh plugin's global store can be moved to another folder, its memory with it.
 
-- **dsh: move the global store from the settings page.** *Where the memory is*, at the
-  foot of the plugin's settings, takes an empty folder (or one not there yet) and moves
+- **dsh: move the global store from the memory page.** *Move*, beside the global store, takes
+  an empty folder (or one not there yet) — chosen in dsh's own folder chooser where it opens
+  on this computer (a folder that holds something gets an `Engramory` folder inside), or
+  typed — and moves
   the whole store there — notes, index, archive — then clears the old place. The store is
   copied and checked file by file before the switch; the old place is then renamed aside,
   compared with the new one and removed: what was written to it meanwhile is added to the

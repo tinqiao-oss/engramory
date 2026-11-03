@@ -55,7 +55,7 @@ updated: 2026-10-31
 dsh plugin --profile <名字> add dsh-engramory
 ```
 
-dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`（插件的设置页能换位置，插件会整个搬过去），侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
+dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`（侧栏「记忆」页里能换位置，插件会整个搬过去），侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
 
 ![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 

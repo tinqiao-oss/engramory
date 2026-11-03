@@ -70,7 +70,7 @@ dsh plugin --profile <name> add dsh-engramory
 
 In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page. It
 works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default (the
-plugin's settings page can move it, all of it, elsewhere), and
+sidebar's Memory page can move it, all of it, elsewhere), and
 the sidebar gets a read-only Memory page. Settings, companion mode, social mode and the
 cap's rules are in the [plugin README](adapters/dsh/plugin/README.en.md).
 

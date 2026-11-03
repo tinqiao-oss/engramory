@@ -30,6 +30,9 @@ window.__ModuleLoader__.load({
     const SETTINGS_API = 'api/engramory/settings'
     const MEMORY_API = 'api/engramory/memory'
     const STORE_API = 'api/engramory/store'
+    const PICK_API = 'api/engramory/store/pick'
+    /** How long the page waits on dsh's folder chooser: the route closes it after ten minutes. */
+    const PICK_WAIT_MS = 11 * 60 * 1000
     /** How often the page asks after a move it started, and for how long in all. */
     const MOVE_POLL_MS = 500
     const MOVE_WATCH_MS = 120000
@@ -64,7 +67,7 @@ window.__ModuleLoader__.load({
     const TYPES = ['user', 'feedback', 'project', 'reference', 'moment', 'upcoming', 'self', 'other']
 
     const zh = {
-      summary: '大肥鱼模式和记忆权限、索引上限、记忆库位置。',
+      summary: '大肥鱼模式和记忆权限、索引上限。',
       loading: '正在读取设置…',
       loadFailed: '读不到设置。',
       retry: '重试',
@@ -95,8 +98,16 @@ window.__ModuleLoader__.load({
       placeNow: '现在在',
       placeIsDefault: '（默认位置）',
       placeLoadFailed: '读不到记忆库在哪。',
+      placeLoading: '正在读取记忆库位置…',
+      placeChange: '换位置',
+      globalAbsent: '全局记忆还没有建，AI 第一次往全局库存记忆时会自动建好。',
+      placeHide: '收起',
+      placeChoose: '选文件夹…',
+      placeChoosing: '在弹出的窗口里选…',
+      placeChosenInside: '选的文件夹里已经有东西，会在里面新建一个 {name} 文件夹来放记忆。',
+      placeChooseFailed: '打不开选文件夹的窗口：{reason}',
       placeInput: '新位置',
-      placePlaceholder: '一个空文件夹或还不存在的文件夹，例如 D:\\同步盘\\AI记忆',
+      placePlaceholder: '新位置：一个空文件夹或还不存在的文件夹，例如 D:\\同步盘\\AI记忆',
       placeMove: '搬过去',
       placeBack: '搬回默认位置',
       placeHint: '整个记忆库连同归档一起搬过去，搬完旧位置自动清理；这台电脑上的桌面版和命令行都用这个位置。搬的那几秒 AI 存不了记忆，会过一会儿再存。放进网盘的话别让两台电脑同时写；放进 git 仓库会被一起提交；映射的网络盘可能让 dsh 卡顿。',
@@ -135,7 +146,7 @@ window.__ModuleLoader__.load({
       whyChanged: '搬的时候记忆库被别处换了位置。',
       whyInterrupted: '上次搬到一半被打断了，已经撤销，记忆库还在原处。',
       whyFailed: '文件操作出错了。',
-      locationUnknown: '记录记忆库位置的文件读不懂，全局记忆这次没列出来。去「插件 → Engramory 记忆」看看。',
+      locationUnknown: '记录记忆库位置的文件（dsh 主目录下的 .engramory-memory.json）读不懂，全局记忆这次没列出来。把它改对后点刷新。',
       panel: '记忆',
       panelTitle: 'Engramory 记忆',
       refresh: '刷新',
@@ -187,7 +198,7 @@ window.__ModuleLoader__.load({
       howToSay: '想让 AI 记住什么，直接跟它说，比如「记住：我习惯用 pnpm」「把这个决定记下来」。平时它也会尽量自己挑值得长期记住的记下来，比如你纠正过它的做法。',
       howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
       howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
-      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），在「插件 → Engramory 记忆」里换位置，插件会整个搬过去。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
+      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），点「全局记忆」右上角的「换位置」，插件会整个搬过去。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
       howToSocial: '接了 QQ、微信等、别人也能跟你的 AI 聊的话，在上面打开「大肥鱼模式」，再把「记忆权限」改成「社交」：只有认得出是你本人的对话才拿得到记忆。这不是安全隔离，详见插件说明。',
       feedbackLead: '遇到问题或有建议：',
       feedbackIssue: '到 GitHub 提 issue',
@@ -251,7 +262,7 @@ window.__ModuleLoader__.load({
       tidyPrompt: '请按 Engramory 的记忆规则整理这个记忆库：{dir}\n- 索引里指向不存在文件的链接：找得到对应笔记的就改对，确实没有了的只删这个链接；一行里没有别的有效链接了，才删掉整行。\n- 不在索引里的笔记：以后回忆用得上的补进索引，过时的移进 archive/ 或删掉；不要为了补齐全部加进去。\n- 没写类型的笔记补上 type。\n- 索引超出上限就先压缩：合并重复，细节挪回笔记，索引只留指针。\n- 超过约 12 KB 的笔记，按规则拆成几篇。\n- 日期已过的约定别删，问到结果再改写成经历。\n改完再看一遍索引有没有超出上限，然后告诉我改了什么。',
     }
     const en = {
-      summary: 'Companion mode and memory access, the index cap, and where the memory is.',
+      summary: 'Companion mode and memory access, and the index cap.',
       loading: 'Reading the settings…',
       loadFailed: 'Could not read the settings.',
       retry: 'Retry',
@@ -282,8 +293,16 @@ window.__ModuleLoader__.load({
       placeNow: 'Now in',
       placeIsDefault: ' (the default place)',
       placeLoadFailed: 'Could not read where the memory is.',
+      placeLoading: 'Reading where the memory is…',
+      placeChange: 'Move',
+      globalAbsent: 'No global memory yet: the global store is made the first time the AI saves to it.',
+      placeHide: 'Close',
+      placeChoose: 'Choose folder…',
+      placeChoosing: 'Choose in the window that opened…',
+      placeChosenInside: 'That folder holds something already: a {name} folder is made inside it for the memory.',
+      placeChooseFailed: 'The folder chooser did not open: {reason}',
       placeInput: 'New place',
-      placePlaceholder: 'An empty folder, or one not there yet, such as D:\\Sync\\AI memory',
+      placePlaceholder: 'New place: an empty folder, or one not there yet, such as D:\\Sync\\AI memory',
       placeMove: 'Move it there',
       placeBack: 'Move it back to the default place',
       placeHint: 'The whole store moves, archive and all, and the old place is cleared once it has; the desktop app and the command line on this computer both use the new place. For the few seconds it takes, the AI cannot save memory and tries again a little later. In a synced folder, do not let two computers write at once; in a git repository it gets committed with the rest; a mapped network drive may make dsh stall.',
@@ -322,7 +341,7 @@ window.__ModuleLoader__.load({
       whyChanged: 'The store was moved elsewhere while this move ran.',
       whyInterrupted: 'The last move was cut short and has been undone: the store is where it was.',
       whyFailed: 'A file operation failed.',
-      locationUnknown: 'The file that says where the memory is cannot be read as written, so the global memory is not listed this time. See Plugins → Engramory.',
+      locationUnknown: 'The file that says where the memory is (.engramory-memory.json in dsh\'s home folder) cannot be read as written, so the global memory is not listed this time. Correct it, then refresh.',
       panel: 'Memory',
       panelTitle: 'Engramory memory',
       refresh: 'Refresh',
@@ -374,7 +393,7 @@ window.__ModuleLoader__.load({
       howToSay: 'To have the AI remember something, just tell it: "remember that I use pnpm", "note this decision down". It also tries to keep what is worth keeping on its own, such as a way of working you corrected.',
       howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
       howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
-      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), change where it is in Plugins → Engramory, and the plugin moves it all there. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
+      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), click Move at the top right of the global memory, and the plugin moves it all there. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
       howToSocial: 'If others can talk to your AI too (through QQ, WeChat and the like), turn on Companion mode above and set Memory access to Social: only conversations it can tell are yours get the memory. This is not a security boundary; see the plugin\'s README.',
       feedbackLead: 'Found a problem or have an idea? ',
       feedbackIssue: 'Open an issue on GitHub',
@@ -463,6 +482,8 @@ window.__ModuleLoader__.load({
 .eng-cap{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .eng-cap label{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-secondary);font-size:12px;}
 .eng-cap input{width:110px;}
+.eng-empty{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.eng-place{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:14px;}
 .eng-place-now{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;}
 .eng-place-now code{font-family:var(--ds-font-family-code,ui-monospace,monospace);color:var(--dsw-alias-label-primary);}
 .eng-place-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
@@ -610,9 +631,11 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
     }
 
     /** fetch with a deadline: a request the host never answers must not hold the page busy. */
-    async function request(url, init = {}) {
+    async function request(url, { timeout = 15000, signal, ...init } = {}) {
       const deadline = new AbortController()
-      const timer = setTimeout(() => deadline.abort(), 15000)
+      const timer = setTimeout(() => deadline.abort(), timeout)
+      // the caller's own end too (a section closed while dsh's chooser is open)
+      signal?.addEventListener('abort', () => deadline.abort(), { once: true })
       try {
         const response = await fetch(url, { cache: 'no-store', ...init, signal: deadline.signal,
           headers: { accept: 'application/json', ...(init.headers ?? {}) } })
@@ -812,14 +835,23 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || !dirty || !valid, onClick: () => save(next) },
             busy ? t('saving') : t('save')),
           h('button', { type: 'button', className: 'eng-btn', disabled: busy || !dirty, onClick: discard }, t('discard')))
-          : null,
-        // where the store is: moved with a button of its own, not saved with the form above
-        h(PlaceSection, { t }))
+          : null)
     }
 
     function SettingsPage(props) {
       if (props.view === 'summary') return props.t('summary')
       return h(SettingsForm, props)
+    }
+
+    /** "No memory yet", and where the store is to be made: it can be moved before there is any. */
+    function NoMemory({ t, onMoved, note = 'empty' }) {
+      const [placing, setPlacing] = useState(false)
+      return h('div', { className: 'eng-section' },
+        h('div', { className: 'eng-empty' },
+          h('p', { className: 'eng-note' }, t(note === 'global' ? 'globalAbsent' : 'empty')),
+          h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', 'aria-expanded': placing,
+            onClick: () => setPlacing(!placing) }, icon('move', 14), t(placing ? 'placeHide' : 'placeChange'))),
+        placing ? h(PlaceSection, { t, onMoved, showNow: true }) : null)
     }
 
     /** Why the store route turned a move down, or a move stopped (its codes, index.js). */
@@ -838,27 +870,40 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
     }
 
     /**
-     * Where the global store is, and moving it: on the package's page, below the settings, with
-     * a button of its own — a move is not a setting the form saves. The page starts a move and
-     * asks after it until it is done; the plugin carries it on whether or not the page stays.
+     * Moving the global store: on the memory page, opened from the global store's own actions
+     * (or beside "no memory yet"). The folder comes from dsh's own chooser where it opens on this
+     * desktop, or is typed; the page starts a move and asks after it until it is done (the plugin
+     * carries it on whether or not the page stays), then has the listing read again (`onMoved`).
+     * `showNow`: say where the store is, where the page does not show it already.
      */
-    function PlaceSection({ t }) {
+    function PlaceSection({ t, onMoved, showNow = false }) {
       const [state, setState] = useState({ phase: 'loading' })
       const [text, setText] = useState('')
       const [busy, setBusy] = useState(false)
+      const [choosing, setChoosing] = useState(false)
       const [banner, setBanner] = useState(undefined)
       const alive = useRef(true)
       const moving = useRef(false)
-      useEffect(() => () => { alive.current = false }, [])
+      const chooserRequest = useRef(undefined)
+      // a move on record the last time it was read: over now, the listing is read again
+      const wasMoving = useRef(false)
+      useEffect(() => () => {
+        alive.current = false
+        chooserRequest.current?.abort() // closed: the chooser it asked for closes with it
+      }, [])
       const load = useCallback(async () => {
         try {
           const response = await request(STORE_API)
           if (!response.ok || response.body === undefined) throw new Error(`HTTP ${response.status}`)
-          if (alive.current) setState({ phase: 'ready', data: response.body })
+          if (!alive.current) return
+          setState({ phase: 'ready', data: response.body })
+          const under = response.body.moving !== undefined
+          if (wasMoving.current && !under) onMoved?.()
+          wasMoving.current = under
         } catch {
           if (alive.current) setState((s) => (s.phase === 'ready' ? s : { phase: 'error' }))
         }
-      }, [])
+      }, [onMoved])
       useEffect(() => { load() }, [load])
       // a move under way when the page opened (another window's, or one carried on after a
       // restart): asked after until it is over, as one this page starts
@@ -872,6 +917,36 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         }, MOVE_FOLLOW_MS)
         return () => clearTimeout(timer)
       }, [underWay, looks])
+
+      const choose = async () => {
+        if (moving.current || choosing) return
+        setChoosing(true)
+        setBanner(undefined)
+        try {
+          let response
+          const ending = new AbortController()
+          chooserRequest.current = ending
+          try {
+            response = await request(PICK_API, { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: '{}', timeout: PICK_WAIT_MS, signal: ending.signal })
+          } catch (error) {
+            response = { ok: false, body: { message: String(error?.message ?? error) } }
+          } finally {
+            if (chooserRequest.current === ending) chooserRequest.current = undefined
+          }
+          if (!alive.current) return
+          const body = response.body ?? {}
+          if (response.ok && body.cancelled === true) return
+          if (response.ok && typeof body.to === 'string') {
+            setText(body.to)
+            if (typeof body.inside === 'string') setBanner({ tone: 'ok', text: t('placeChosenInside', { name: body.inside }) })
+            return
+          }
+          setBanner({ tone: 'error', text: t('placeChooseFailed', { reason: body.message ?? body.error ?? `HTTP ${response.status}` }) })
+        } finally {
+          if (alive.current) setChoosing(false)
+        }
+      }
 
       const move = async (to) => {
         if (moving.current) return
@@ -892,6 +967,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           if (response.ok && body.same === true) {
             await load() // another dsh may have moved it there: the page shows where it is now
             if (alive.current) setBanner({ tone: 'ok', text: t('placeSame') })
+            onMoved?.()
             return
           }
           if (response.status !== 202 || typeof body.id !== 'string') {
@@ -917,10 +993,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           if (outcome?.done === true && outcome.elsewhere === true) {
             setText('')
             setBanner({ tone: 'ok', text: t('placeEnded') })
+            onMoved?.()
           } else if (outcome?.done === true && outcome.ok === true) {
             setText('')
             setBanner({ tone: 'ok', text: outcome.conflicts > 0
               ? t('placeMovedConflicts', { count: outcome.conflicts }) : t('placeMoved') })
+            onMoved?.()
           } else if (outcome?.done === true) {
             setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, outcome.error, outcome.detail) }) })
           } else {
@@ -932,10 +1010,9 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         }
       }
 
-      if (state.phase === 'loading') return null
+      if (state.phase === 'loading') return h('p', { className: 'eng-note' }, t('placeLoading'))
       if (state.phase === 'error') {
-        return h('section', { className: 'eng-section' },
-          h('h3', { className: 'eng-title' }, t('place')),
+        return h('section', { className: 'eng-place', 'aria-label': t('place') },
           h('p', { className: 'eng-note' }, t('placeLoadFailed')),
           h('div', { className: 'eng-actions' }, h('button', { type: 'button', className: 'eng-btn', onClick: load }, t('retry'))))
       }
@@ -943,9 +1020,8 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const atDefault = typeof data.store === 'string' && data.store === data.default
       const blocked = data.pinned === true ? 'placePinned' : data.remote === true ? 'placeRemote' : undefined
       const stopped = data.moving !== undefined && !busy
-      return h('section', { className: 'eng-section' },
-        h('h3', { className: 'eng-title' }, t('place')),
-        typeof data.store === 'string' ? h('p', { className: 'eng-place-now' },
+      return h('section', { className: 'eng-place', 'aria-label': t('place') },
+        showNow && typeof data.store === 'string' ? h('p', { className: 'eng-place-now' },
           `${t('placeNow')} `, h('code', null, legible(data.store)), atDefault ? t('placeIsDefault') : '') : null,
         data.problem !== undefined ? h('div', { className: 'eng-banner', 'data-tone': 'error' },
           t('placeProblem', { file: legible(data.file ?? '') })) : null,
@@ -953,9 +1029,11 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           data.moving.error === undefined ? '' : ` ${t('placeResumingWhy', { reason: whyNot(t, data.moving.error) })}`) : null,
         blocked !== undefined ? h('p', { className: 'eng-note' }, t(blocked)) : data.problem === undefined ? [
           h('div', { className: 'eng-place-row', key: 'row' },
+            data.chooser === true ? h('button', { type: 'button', className: 'eng-btn', disabled: busy || choosing,
+              onClick: choose }, icon('folder', 14), t(choosing ? 'placeChoosing' : 'placeChoose')) : null,
             h('input', { className: 'eng-input', value: text, disabled: busy, placeholder: t('placePlaceholder'),
               'aria-label': t('placeInput'), spellCheck: false, onChange: (e) => { setText(e.target.value); setBanner(undefined) } }),
-            h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || text.trim() === '',
+            h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || choosing || text.trim() === '',
               onClick: () => move(text.trim()) }, busy ? t('placeMoving') : t('placeMove'))),
           atDefault ? null : h('div', { className: 'eng-actions', key: 'back' },
             h('button', { type: 'button', className: 'eng-btn', disabled: busy, onClick: () => move(null) }, t('placeBack'))),
@@ -1109,6 +1187,8 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       search: [['circle', { cx: 11, cy: 11, r: 7 }], ['path', { d: 'm20 20-3.5-3.5' }]],
       copy: [['rect', { x: 9, y: 9, width: 11, height: 11, rx: 2 }], ['path', { d: 'M5 15V5a2 2 0 0 1 2-2h8' }]],
       folder: [['path', { d: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }]],
+      move: [['path', { d: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }],
+        ['path', { d: 'M9 13h6m-2-2 2 2-2 2' }]],
       index: [['path', { d: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01' }]],
       tidy: [['path', { d: 'm4 20 11-11M14 4l1 2 2 1-2 1-1 2-1-2-2-1 2-1zM19 11l.7 1.3L21 13l-1.3.7L19 15l-.7-1.3L17 13l1.3-.7z' }]],
       archive: [['rect', { x: 3, y: 4, width: 18, height: 5, rx: 1 }], ['path', { d: 'M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4' }]],
@@ -1199,8 +1279,10 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
      * mark, the name, the type and size, and what stands out (a plan's day, a note grown past one
      * fact, one the index leaves out). While the page filters, the rows that match and no more.
      */
-    function StoreSection({ store, cap, canOpen, open, match, kind, now, t }) {
+    function StoreSection({ store, cap, canOpen, open, match, kind, now, t, onMoved }) {
       const [tidy, setTidy] = useState('idle')
+      // the global store's: moving it, opened from its actions
+      const [placing, setPlacing] = useState(false)
       const alive = useRef(true)
       useEffect(() => () => { alive.current = false }, [])
       const title = legible(store.kind === 'user' ? [t('storeUser'), ...store.titles].join(' · ')
@@ -1307,6 +1389,9 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h('span', { className: 'eng-meter-fill', style: { width: `${Math.min(100, Math.floor(fill * 100))}%` } })),
           h('span', { className: 'eng-usage', 'data-over': index?.over === true, title: index?.over ? t('overHint') : undefined }, usage),
           h('div', { className: 'eng-store-actions' },
+            store.kind === 'user' ? h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', key: 'place',
+              'aria-expanded': placing, onClick: () => setPlacing(!placing) },
+            icon('move', 14), t(placing ? 'placeHide' : 'placeChange')) : null,
             attention ? null : tidyButton('eng-btn eng-btn-ghost'),
             // the folder is shown with its index selected: no index, no folder to show
             ...(canOpen && index !== null ? [
@@ -1315,6 +1400,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
               h('button', { type: 'button', className: 'eng-btn eng-btn-ghost', key: 'folder',
                 onClick: () => open(store, undefined, false) }, icon('folder', 14), t('openFolder'))] : []))),
         h('p', { className: 'eng-path' }, legible(store.dir)),
+        placing ? h(PlaceSection, { t, onMoved }) : null,
         !filtering && checked && findings.length === 0
           ? h('p', { className: 'eng-store-ok' }, icon('check', 13), t('healthOk')) : null,
         attention ? h('div', { className: 'eng-attn', role: 'note' },
@@ -1550,7 +1636,10 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           data.location !== undefined ? h('p', { className: 'eng-note', key: 'location' }, t('locationUnknown')) : null,
           data.stores.length === 0 && data.pinned === undefined && data.location === undefined &&
             !(data.unreadable > 0) && data.more !== true
-            ? h('p', { className: 'eng-note', key: 'empty' }, t('empty')) : null,
+            ? h(NoMemory, { key: 'empty', t, onMoved: load })
+            // projects' stores listed, the global one not made yet: still to be moved from here
+            : data.stores.length > 0 && data.global === 'absent'
+              ? h(NoMemory, { key: 'global', t, onMoved: load, note: 'global' }) : null,
           notes.length + archived > 0 ? h('div', { className: 'eng-toolbar', key: 'toolbar' },
             h('div', { className: 'eng-tabs', role: 'group', 'aria-label': t('typeLabel') },
               tab(undefined, t('typeAll'), notes.length),
@@ -1561,7 +1650,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
                 'aria-label': t('filterLabel'), onChange: (event) => setQuery(event.target.value) }))) : null,
           match === undefined ? null : h('p', { className: 'eng-filter-count', key: 'count', role: 'status',
             'aria-live': 'polite' }, t('filterCount', { count: matched })),
-          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, match,
+          ...data.stores.map((store) => h(StoreSection, { key: store.id, store, cap: data.cap, canOpen, open, match, onMoved: load,
             kind: shown, now: state.at, t })),
           data.more ? h('p', { className: 'eng-note', key: 'more' }, t('more')) : null,
         ]

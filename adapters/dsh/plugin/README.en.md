@@ -61,7 +61,7 @@ is unverified.
 **Where the memory lives:**
 
 - **The global store**, by default `~/.dsh/.engramory-memory/` (under `$DSH_HOME` when it
-  is set); the settings page can move it to another folder (see
+  is set); the memory page can move it to another folder (see
   [Moving the store](#moving-the-store)). With the plugin alone this is the only store;
   the AI creates it on its first save.
 - **A project store** (optional), `.engramory-memory/` in a project's root, is created
@@ -157,8 +157,7 @@ owner, so a program forwarding other people's messages must leave it out.
 - **Settings page:** on dsh's *Plugins* page, open *Engramory memory* to set companion
   mode, memory access and the index cap. Saving goes through dsh's own profile editor,
   which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
-  in, can call it, so an agent cannot use it to switch social mode off. At its foot, the
-  global store can be moved: see [Moving the store](#moving-the-store).
+  in, can call it, so an agent cannot use it to switch social mode off.
 - **Memory page:** *Memory* in the sidebar. A banner at the top, the plugin's version
   beside its title, says how many notes, stores and archived files are listed and when
   they were read, with the switches (companion mode, and memory access once it is on)
@@ -169,7 +168,8 @@ owner, so a program forwarding other people's messages must leave it out.
   row gives its day and how far off it is (a passed date is an outcome to confirm, as a
   reminder: nothing is archived), and a note past 12 KB or one the index leaves out is
   marked. Beside each store's name: its index fill as a bar (to the nearer of its two
-  caps), *Open the index* and *Open the folder*. What its check-up finds is listed under
+  caps), *Open the index* and *Open the folder*, and for the global store *Move* (see
+  [Moving the store](#moving-the-store)). What its check-up finds is listed under
   it: the index's links to files that are not there, the notes not in the index (recall
   starts from the index, so the AI will not find them unless another note links to
   them), notes with no type, notes past 12 KB, an index over the cap; *Copy tidy-up
@@ -191,9 +191,17 @@ owner, so a program forwarding other people's messages must leave it out.
 
 ## Moving the store
 
-*Where the memory is*, at the foot of the settings page, moves the global store to another
-folder: a synced one, say, or a private git repository. Give an empty folder (or one not
-there yet) and click *Move it there*:
+*Move*, at the top right of the memory page's global memory (beside *No memory yet* before
+there is any), moves the global store to another folder: a synced one, say, or a private
+git repository. Click *Choose folder…* to pick it in the system's own window, or type the
+path, then click *Move it there*:
+
+- **Choose folder** opens dsh's own chooser, on the screen of the computer dsh runs on.
+  Where dsh takes it that you are not at that computer (dsh on a remote server, say), there
+  is no such button and the path is typed; dsh started locally and opened from elsewhere
+  through an ssh tunnel still takes you to be local, and opens it on that computer's screen. A folder that
+  holds something already (the root of a synced folder, say) gets an `Engramory` folder
+  made inside it for the memory. Choosing only fills the path in; *Move it there* moves.
 
 - **All of it moves, and the old place is cleared.** It is copied to the new place first,
   each file checked, and only then switched to; the old place is then renamed aside,
@@ -277,8 +285,8 @@ writable. This table is pinned by `node --test` in CI.
   some versions and presets carry; a tool of the same name from another plugin is
   judged the same way. Shell tools, MCP file tools and external editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
-- **The global store is found where the settings page put it.** Moved there by hand, it
-  is not (move it back and use the settings page, or set `indexPath`); for a project store
+- **The global store is found where the memory page put it.** Moved there by hand, it
+  is not (move it back and use the memory page, or set `indexPath`); for a project store
   that links out of the project, set `indexPath`. A project's root is found by
   its `.git` only, and a project store created mid-session can take ten seconds to appear.
 - **Social mode knows you by what dsh's window sends.** Apart from a bridge's owner

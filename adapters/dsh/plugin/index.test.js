@@ -3047,10 +3047,10 @@ test('settings routes: none without a web server, one exact route for both metho
   const headless = mount({})
   assert.ok(headless.guard) // a headless dsh mounts the cap as before
   const { routes } = webMount({})
-  // the memory page's route and the store's come with it, from the same row
+  // the memory page's route, the store's and its chooser's come with it, from the same row
   assert.deepEqual(routes.map((r) => [r.path, r.methods.join(), r.requestBody]),
     [['/api/engramory/settings', 'GET,POST', 'buffered'], ['/api/engramory/memory', 'GET,POST', 'buffered'],
-      ['/api/engramory/store', 'GET,POST', 'buffered']])
+      ['/api/engramory/store', 'GET,POST', 'buffered'], ['/api/engramory/store/pick', 'POST', 'buffered']])
 })
 
 test('settings GET: the row settings as the plugin reads them, and whether a save can land', async () => {
@@ -3069,7 +3069,7 @@ test('settings GET: the row settings as the plugin reads them, and whether a sav
 })
 
 test('settings route: served by the bundle\'s own row, never by a second row of the package', () => {
-  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 3) // settings, memory and store
+  assert.equal(webMount({}, { rowId: 'engramory' }).routes.length, 4) // settings, memory, store and its chooser
   // a second row would claim the same paths, or claim them first and have the page save it
   assert.equal(webMount({}, { rowId: 'engramory-2' }).routes.length, 0)
 })
@@ -4066,7 +4066,7 @@ function storeMount(home, config = {}, options = {}) {
     return { status: 202, id: started.body.id, body: outcome }
   }
   const guardAt = (exec) => withDshHome(home, () => m.guard(exec))
-  return { ...m, call, move, guardAt }
+  return { ...m, call, move, guardAt, routes }
 }
 
 test('store: moved with every file, the old place gone, and recall, the skill and the memory page follow it', async () => {
@@ -4671,4 +4671,87 @@ test('store: a move renews its lock whole, leaving nothing beside it', async () 
   const m = storeMount(home)
   assert.equal((await m.move(join(scratch('mv-renew-to'), 'v'))).body.ok, true)
   assert.deepEqual(fs.readdirSync(home).filter((n) => n.includes('.lock')), [], 'no lock, and no renewal left over')
+})
+
+/** dsh's directory chooser as the memory page uses it: `native`, answering with what `choose` gives. */
+const chooserStub = (choose, kind = 'native') => ({
+  capability: () => (kind === 'native' ? { kind, pick: (signal) => choose(signal) } : { kind, list: async () => ({}) }),
+})
+
+/** POST on the chooser route of a storeMount. */
+async function pickOn(m) {
+  const route = m.routes.find((r) => r.path === '/api/engramory/store/pick')
+  const response = await route.fetch(new Request('http://127.0.0.1/api/engramory/store/pick', { method: 'POST', body: '{}' }))
+  return { status: response.status, body: await response.json() }
+}
+
+test('store chooser: dsh\'s own folder chooser, where it opens on this desktop, fills in where the store would go', async () => {
+  const { home, dir } = homeStore('mv-chooser')
+  const empty = scratch('mv-chooser-empty')
+  const full = scratch('mv-chooser-full')
+  writeFileSync(join(full, 'x.txt'), 'x', 'utf8')
+  let signal
+  for (const [chosen, expected] of [
+    [empty, { ok: true, path: empty, to: empty }],
+    [full, { ok: true, path: full, to: join(full, 'Engramory'), inside: 'Engramory' }],
+    [dir, { ok: true, path: dir, to: dir }], // the store itself: the move says it is there already
+    [null, { ok: true, cancelled: true }],
+  ]) {
+    const m = storeMount(home, {}, { services: { directoryPicker: chooserStub(async (s) => { signal = s; return chosen }) } })
+    assert.equal((await m.call('GET')).body.chooser, true)
+    assert.deepEqual(await withHomeAsync(home, () => pickOn(m)), { status: 200, body: expected }, String(chosen))
+    assert.ok(signal instanceof AbortSignal)
+  }
+  assert.equal(fs.existsSync(join(full, 'Engramory')), false, 'nothing is made or moved by choosing')
+  assert.deepEqual(fs.readdirSync(home), ['.engramory-memory'])
+})
+
+test('store chooser: none where dsh has no chooser opening here, one at a time, and a failure said', async () => {
+  const { home } = homeStore('mv-chooser-no')
+  for (const services of [{}, { directoryPicker: chooserStub(async () => null, 'browse') }]) {
+    const m = storeMount(home, {}, { services })
+    assert.equal((await m.call('GET')).body.chooser, undefined)
+    assert.deepEqual(await pickOn(m), { status: 409, body: { ok: false, error: 'unavailable' } })
+  }
+  const failing = storeMount(home, {}, { services: { directoryPicker: chooserStub(async () => { throw new Error('no zenity') }) } })
+  assert.deepEqual(await pickOn(failing), { status: 502, body: { ok: false, error: 'failed', message: 'no zenity' } })
+  let release
+  const held = storeMount(home, {}, { services: { directoryPicker: chooserStub(() => new Promise((done) => { release = done })) } })
+  const route = held.routes.find((r) => r.path === '/api/engramory/store/pick')
+  const first = route.fetch(new Request('http://127.0.0.1/x', { method: 'POST', body: '{}' }))
+  const second = await route.fetch(new Request('http://127.0.0.1/x', { method: 'POST', body: '{}' }))
+  assert.deepEqual([second.status, await second.json()], [409, { ok: false, error: 'busy' }])
+  release(null)
+  assert.equal((await first).status, 200)
+})
+
+test('memory GET: a global store not made yet is said to be absent, beside the projects\' stores listed', async () => {
+  const home = scratch('mem-noglobal')
+  const repo = scratch('mem-noglobal-repo')
+  mkdirSync(join(repo, '.git'))
+  store(repo, '- [p](p.md) - project\n')
+  const listed = await withHomeAsync(home, () => memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'repo' }] }).call())
+  assert.deepEqual(listed.body.stores.map((s) => s.kind), ['project'])
+  assert.equal(listed.body.global, 'absent')
+  mkdirSync(join(home, '.engramory-memory'))
+  const again = await withHomeAsync(home, () => memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'repo' }] }).call())
+  assert.equal(again.body.global, undefined, 'made: listed, not absent')
+})
+
+test('store chooser: a request already gone opens no window; a chosen share is not looked into', async (t) => {
+  const { home } = homeStore('mv-chooser-gone')
+  let opened = 0
+  const m = storeMount(home, {}, { services: { directoryPicker: chooserStub(async () => { opened++; return null }) } })
+  const route = m.routes.find((r) => r.path === '/api/engramory/store/pick')
+  const gone = new AbortController()
+  gone.abort()
+  const response = await route.fetch(new Request('http://127.0.0.1/x', { method: 'POST', body: '{}', signal: gone.signal }))
+  assert.deepEqual([response.status, await response.json()], [409, { ok: false, error: 'gone' }])
+  assert.equal(opened, 0)
+  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
+  const share = '\\\\no-such-host.invalid\\share\\vault'
+  const unc = storeMount(home, {}, { services: { directoryPicker: chooserStub(async () => share) } })
+  const seen = await sharesTouched(() => withHomeAsync(home, () => pickOn(unc)))
+  assert.deepEqual(seen.result.body, { ok: true, path: share, to: share })
+  assert.deepEqual(seen.touched, [], 'no lookup on the share')
 })

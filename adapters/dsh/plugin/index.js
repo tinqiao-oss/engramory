@@ -511,7 +511,8 @@ export function apply(ctx, config = {}) {
   // are optional and may come up late, like the services above: without the registry the
   // page lists the global store only, without the controller it opens nothing.
   const desk = {}
-  for (const service of ['workspaceRegistry', 'sessionController']) {
+  // and the memory page's folder chooser: dsh's own (directoryPicker), when it opens on this desktop
+  for (const service of ['workspaceRegistry', 'sessionController', 'directoryPicker']) {
     ctx.inject([service], (inner) => {
       inner.effect(() => {
         const current = inner[service]
@@ -538,7 +539,7 @@ export function apply(ctx, config = {}) {
     if (rowId !== undefined && rowId !== SETTINGS_ROW) return
     if (typeof inner.connection?.fetch?.register !== 'function') return
     for (const route of [...settingsRoutes(inner, config, fiber), memoryRoute(settings, desk),
-      storeRoute(settings, config)]) {
+      storeRoute(settings, config, desk), pickRoute(desk)]) {
       // A row of the same id in a nested include claims the path first: then this one
       // serves no page, rather than failing to mount.
       inner.effect(() => {
@@ -911,11 +912,17 @@ async function listStores(settings, registry) {
   } catch {
     location = 'unreadable'
   }
+  // the global store not made yet (no note saved to it): said, so that the page still offers
+  // to move it before there is one, beside the projects' stores it lists
+  let globalAbsent = false
   for (const candidate of list) {
     if (candidate.kind === 'user' && location !== undefined) continue
     try {
       const store = await locate(candidate, settings)
-      if (store === undefined) continue
+      if (store === undefined) {
+        if (candidate.kind === 'user') globalAbsent = true
+        continue
+      }
       const twin = stores.find((s) => s.key === store.key)
       if (twin !== undefined) {
         if (candidate.title !== undefined) twin.titles.push(candidate.title)
@@ -929,6 +936,7 @@ async function listStores(settings, registry) {
       // counted once
       // a place by its path, as the disk compares names; one with none by its candidate, as given
       if (!absent(error)) failed.add(error?.at === undefined ? `${candidate.kind}:${candidate.id}` : folded(error.at))
+      else if (candidate.kind === 'user') globalAbsent = true
     }
   }
   return {
@@ -938,6 +946,7 @@ async function listStores(settings, registry) {
     ...(failed.size === 0 ? {} : { unreadable: failed.size }),
     ...(pinned === undefined ? {} : { pinned }),
     ...(location === undefined ? {} : { location }),
+    ...(globalAbsent ? { global: 'absent' } : {}),
   }
 }
 
@@ -2815,16 +2824,96 @@ const heldLocks = new Set()
  * folder, or null for the default place — starts a move and answers with its id at once (202):
  * the page asks again until the move is done. Only the owner reaches it, as the settings route.
  */
-function storeRoute(settings, config) {
+function storeRoute(settings, config, desk) {
   return {
     path: STORE_ROUTE,
     methods: ['GET', 'POST'],
     requestBody: 'buffered',
-    fetch: (request) => (request.method === 'POST' ? startMove(request, settings) : storeStatus(request, settings, config)),
+    fetch: (request) => (request.method === 'POST' ? startMove(request, settings)
+      : storeStatus(request, settings, config, desk)),
   }
 }
 
-async function storeStatus(request, settings, config) {
+/** The memory page's folder chooser route: dsh's own chooser, opened on this desktop (pickRoute). */
+const PICK_ROUTE = '/api/engramory/store/pick'
+/** How long a chooser stays open for: the user may take their time, not for ever. */
+const PICK_MS = 10 * 60 * 1000
+/** The folder a move makes for the store inside a chosen folder that holds something already. */
+const STORE_FOLDER = 'Engramory'
+/** How long a chosen folder's listing is waited on before it is taken as chosen. */
+const PLACE_LIST_MS = 5000
+
+/**
+ * dsh's directory chooser where it opens on this desktop (its `native` capability), else
+ * undefined: remote, a browser elsewhere sees no dialog that opens here — the page then offers
+ * only the text field. An unknown capability is not used, as dsh's own pages do not.
+ */
+function chooserOf(desk) {
+  try {
+    const capability = desk.directoryPicker?.capability?.()
+    return capability?.kind === 'native' && typeof capability.pick === 'function' ? capability : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * POST: open dsh's own folder chooser on this desktop and answer with what was chosen —
+ * `{ path, to }`, `to` where a move would put the store: the folder itself when empty, else
+ * a folder made for it inside (STORE_FOLDER, said as `inside`); `{ cancelled }` when the
+ * chooser was closed. One chooser at a time; it closes after PICK_MS. Nothing is moved: the
+ * page fills the path in, and the user moves the store with the move route. Only the owner
+ * reaches it, as the other routes.
+ */
+function pickRoute(desk) {
+  let choosing = false
+  const choose = async (request) => {
+    const chooser = chooserOf(desk)
+    if (chooser === undefined) return json(409, { ok: false, error: 'unavailable' })
+    if (choosing) return json(409, { ok: false, error: 'busy' })
+    if (request.signal?.aborted === true) return json(409, { ok: false, error: 'gone' })
+    choosing = true
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), PICK_MS)
+    const gone = () => abort.abort() // the page went away: the dialog does not stay open
+    request.signal?.addEventListener?.('abort', gone)
+    try {
+      const chosen = await chooser.pick(abort.signal)
+      if (chosen === null) return json(200, { ok: true, cancelled: true })
+      if (typeof chosen !== 'string' || !isAbsolute(chosen)) return json(502, { ok: false, error: 'failed' })
+      const to = await placeIn(chosen)
+      return json(200, { ok: true, path: chosen, to, ...(to === chosen ? {} : { inside: STORE_FOLDER }) })
+    } catch (error) {
+      return json(502, { ok: false, error: 'failed', message: String(error?.message ?? error) })
+    } finally {
+      clearTimeout(timer)
+      request.signal?.removeEventListener?.('abort', gone)
+      choosing = false
+    }
+  }
+  return { path: PICK_ROUTE, methods: ['POST'], requestBody: 'buffered', fetch: choose }
+}
+
+/**
+ * Where a folder the user chose would hold the store: the folder itself when it is empty, or
+ * is the store already; else a folder for it inside, so that choosing `D:\Sync` works as the
+ * user means it. One that cannot be read is left as chosen: the move says why.
+ */
+async function placeIn(chosen) {
+  // A share is not looked into here (the move refuses it), nor is a folder whose listing does not
+  // come: this runs while the chooser route holds its one turn.
+  if (/^[\\/]{2}/.test(chosen)) return chosen
+  try {
+    if (samePlace(chosen, homeState().store ?? chosen)) return chosen
+    const names = await deadline(fsp.readdir(chosen), PLACE_LIST_MS)
+    if (names === TIMED_OUT || names.length === 0) return chosen
+  } catch {
+    return chosen
+  }
+  return join(chosen, STORE_FOLDER)
+}
+
+async function storeStatus(request, settings, config, desk) {
   const root = dshHome()
   let state
   try {
@@ -2853,6 +2942,7 @@ async function storeStatus(request, settings, config) {
     ...(config.skill === undefined ? {} : { customSkill: true }),
     ...(await legacyRules(root) ? { legacyRules: true } : {}),
     ...(remotePath(root) ? { remote: true } : {}),
+    ...(chooserOf(desk) === undefined ? {} : { chooser: true }),
     ...(moving === undefined ? {} : {
       moving: { id: moving.id, phase: moving.phase, from: moving.from, to: moving.to,
         ...(moving.error === undefined ? {} : { error: moving.error }) },
