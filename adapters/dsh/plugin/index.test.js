@@ -4294,10 +4294,10 @@ test('store: a move cut short after its commit is carried on, settling what chan
   writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
   writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'committed', from: dir, to })
   storeMount(home, { language: 'en' })
-  await until(() => !fs.existsSync(join(home, JOURNAL)), 'the move finished')
+  // the journal goes first, what the move kept of the files just after it
+  await until(() => !fs.existsSync(join(home, JOURNAL)) && !fs.existsSync(join(home, HASHES)), 'the move finished')
   assert.equal(fs.existsSync(dir), false)
   assert.equal(fs.existsSync(join(home, '.engramory-memory-old-abcdefgh')), false)
-  assert.equal(fs.existsSync(join(home, HASHES)), false)
   const tree = treeOf(to)
   assert.equal(tree['a.md'], 'a changed at the new place', 'the copy the move made never wins over a newer one')
   assert.equal(tree['b.md'], 'b as moved', 'nothing is written over a file of the new place')
@@ -4727,7 +4727,8 @@ test('store chooser: none where dsh has no chooser opening here, one at a time, 
 
 test('memory GET: a global store not made yet is said to be absent, beside the projects\' stores listed', async () => {
   const home = scratch('mem-noglobal')
-  const repo = scratch('mem-noglobal-repo')
+  // as dsh records a workspace: its real path (CI's temp folders are reached through 8.3 names, /var)
+  const repo = realpathSync.native(scratch('mem-noglobal-repo'))
   mkdirSync(join(repo, '.git'))
   store(repo, '- [p](p.md) - project\n')
   const listed = await withHomeAsync(home, () => memoryMount({}, { workspaces: [{ id: 'w', path: repo, title: 'repo' }] }).call())
