@@ -156,9 +156,10 @@ owner, so a program forwarding other people's messages must leave it out.
   mode, memory access and the index cap. Saving goes through dsh's own profile editor,
   which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
   in, can call it, so an agent cannot use it to switch social mode off.
-- **Memory page:** *Memory* in the sidebar. A banner at the top says how many notes,
-  stores and archived files are listed and when they were read, with the switches
-  (companion mode, and memory access once it is on) that save as you flip them. Below it,
+- **Memory page:** *Memory* in the sidebar. A banner at the top, the plugin's version
+  beside its title, says how many notes, stores and archived files are listed and when
+  they were read, with the switches (companion mode, and memory access once it is on)
+  that save as you flip them. Below it,
   tabs by note type and a filter by name, over the global store and each workspace's
   project store (with an absolute `indexPath`, that store alone; with a relative one,
   none). Each note is a row: a mark for its type, its name, its type and size; a plan's

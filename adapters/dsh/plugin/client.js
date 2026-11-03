@@ -384,6 +384,7 @@ window.__ModuleLoader__.load({
 .eng-brand{display:flex;align-items:center;gap:14px;}
 .eng-logo{border-radius:12px;box-shadow:0 0 0 1px rgba(110,231,200,.35);}
 .eng-hero-title{margin:0;font-size:21px;font-weight:600;line-height:28px;letter-spacing:.01em;}
+.eng-hero-version{margin-left:10px;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:13px;font-weight:400;letter-spacing:0;color:rgba(232,243,240,.6);}
 .eng-stats{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 0;}
 .eng-stat{display:inline-flex;align-items:baseline;gap:6px;}
 .eng-stat+.eng-stat{margin-left:18px;padding-left:18px;border-left:1px solid rgba(232,243,240,.18);}
@@ -904,10 +905,10 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       minute: '2-digit' })
 
     /**
-     * The banner atop the memory page, in the project's own colours on any theme: its name, the
-     * listing in three numbers as read at `at` with a refresh beside the time, and the two
-     * settings that matter most in a panel of their own. Numbers only once there is a listing
-     * with something to count.
+     * The banner atop the memory page, in the project's own colours on any theme: its name with
+     * the plugin's version, the listing in three numbers as read at `at` with a refresh beside the
+     * time, and the two settings that matter most in a panel of their own. Numbers only once there
+     * is a listing with something to count.
      */
     function Hero({ data, at, refresh, t }) {
       const counted = data !== undefined && (data.stores.length > 0 || data.unreadable > 0)
@@ -916,7 +917,8 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const stat = (n, label) => h('div', { className: 'eng-stat', key: label }, h('b', null, String(n)), h('span', null, label))
       return h('header', { className: 'eng-hero' },
         h('div', { className: 'eng-hero-main' },
-          h('div', { className: 'eng-brand' }, h(Logo), h('h1', { className: 'eng-hero-title' }, t('panelTitle'))),
+          h('div', { className: 'eng-brand' }, h(Logo), h('h1', { className: 'eng-hero-title' }, t('panelTitle'),
+            h('span', { className: 'eng-hero-version' }, `v${VERSION}`))),
           counted ? h('div', { className: 'eng-stats' },
             stat(notes, t(notes === 1 ? 'statNote' : 'statNotes')),
             stat(data.stores.length, t(data.stores.length === 1 ? 'statStore' : 'statStores')),

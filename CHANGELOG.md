@@ -17,7 +17,8 @@ The dsh plugin's memory page can check for a newer version. Nothing else changes
   that install it, the version named — `dsh-engramory@X.Y.Z` on the desktop's Plugins page
   after uninstalling, or `dsh plugin --profile <name> add dsh-engramory@X.Y.Z` — and a link
   to its release notes. An answer from npmmirror is said to be one, as it can trail npm by
-  a few minutes. This is the only time the plugin goes online.
+  a few minutes. This is the only time the plugin goes online. The version is also shown
+  beside the memory page's title.
 - **README: how to upgrade.** Name the version: by name alone, pnpm 11, the desktop app's
   included, by default installs only a version published at least 24 hours ago. dsh has no
   *Update* for a plugin outside its own catalog, so on the desktop it is uninstall, install,

@@ -984,6 +984,9 @@ test('client: the banner counts what was listed, and the page says when that is 
   await view.settle()
   assert.deepEqual(textsOf(view.tree, 'eng-stat'), ['4statNotes', '2statStores', '1statArchive'])
   assert.match(textsOf(view.tree, 'eng-hero-read')[0], /^statsReadAt\{"time":"[^"]+"\}$/)
+  // the title names the plugin's version, as package.json does, while it lists and after
+  assert.deepEqual(textsOf(view.tree, 'eng-hero-title'), [`panelTitlev${INSTALLED}`])
+  assert.deepEqual(textsOf(view.tree, 'eng-hero-version'), [`v${INSTALLED}`])
   assert.deepEqual(textsOf(view.tree, 'eng-caveat'), ['statsPartial']) // the project store's listing was cut short
   // stores it could not read: said, and nothing counted for them
   const missing = await memoryPage({ [`GET ${MEMORY}`]: memoryData({ stores: [], unreadable: 2 }) })
