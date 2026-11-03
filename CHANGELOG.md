@@ -11,18 +11,17 @@ Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 The dsh plugin's global store can be moved to another folder, its memory with it.
 
 - **dsh: move the global store from the memory page.** *Change location*, beside the global
-  store, takes
-  an empty folder (or one not there yet) — chosen in dsh's own folder chooser where it opens
-  on this computer (a folder that holds something gets an `Engramory` folder inside), or
-  typed — and moves
-  the whole store there — notes, index, archive — then clears the old place. The store is
-  copied and checked file by file before the switch; the old place is then renamed aside,
-  compared with the new one and removed: what was written to it meanwhile is added to the
-  new place, and a file changed in both places keeps the new place's version, with the old
-  one's beside it as `<name>.old-<id>` and a line for it at the end of the index. Each step
-  is written down first, so a move cut short is undone (before the switch) or finished
-  (after) by the next dsh to open. For those few seconds dsh's file tools are held off the
-  store; afterwards a save to the old place is refused with the new one named.
+  store, takes an empty folder (or one not there yet) — chosen in dsh's own folder chooser
+  where it opens on this computer (a folder that holds something gets an `Engramory` folder
+  inside), or typed — and moves the whole store there, notes, index and archive, then
+  clears the old place. The store is copied and checked file by file before the switch; the
+  old place is then renamed aside, compared with the new one and removed: what was written
+  to it meanwhile is added to the new place, and a file changed in both places keeps the new
+  place's version, with the old one's beside it as `<name>.old-<id>` and a line for it at the
+  end of the index. Each step is written down first, so a move cut short is undone (before
+  the switch) or finished (after) by the next dsh to open. For those few seconds dsh's file
+  tools are held off the store; afterwards a save to the old place is refused with the new
+  one named. The memory page's *Open the index* is gone; *Open the folder* shows it.
 - **The place belongs to the dsh home, not a profile.** It is kept in
   `$DSH_HOME/.engramory-memory.json`, so the desktop app, the command line and `dsh web` on
   one computer all use the moved store. With no such file the store is at its default place,
