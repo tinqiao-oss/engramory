@@ -3243,6 +3243,82 @@ test('settings POST writes only this plugin own row, never another of the same p
   assert.equal(w.edits.length, 0)
 })
 
+test('settings: the own row found as dsh 0.2.2 keeps its fiber, an awaitable object over it', async () => {
+  // dsh 0.2.2-rc.1 (cordis-plugin-loader 1.1.0) keeps on a row what cordis' plugin() returns,
+  // Object.create(fiber) with a `then`, where 0.2.1 kept `.ctx.fiber`, the fiber itself.
+  // A real fiber's ctx.fiber is the fiber; the plugin's own ctx.fiber is the fiber.
+  const awaitable = (fiber) => {
+    fiber.ctx = { fiber }
+    const held = Object.create(fiber)
+    held.then = (resolve) => resolve(fiber)
+    return held
+  }
+  const w = webMount({}, {
+    editor: (entry, edits) => {
+      const own = { ...entry, fiber: awaitable(entry.fiber) }
+      // another row of the package, held the same way over its own fiber
+      const other = { fiber: awaitable({ name: 'another row' }), options: { ...entry.options, id: 'engramory-2' } }
+      return {
+        entries: () => [other, own],
+        edit: async (target, change) => {
+          assert.equal(target, own)
+          const next = change(structuredClone(target.options.config ?? {}), structuredClone(BUNDLE_ROW))
+          edits.push(next)
+          target.options.config = next
+        },
+      }
+    },
+  })
+  const { body: shown } = await w.call('GET')
+  assert.equal(shown.editable, true)
+  assert.equal(shown.readOnly, undefined)
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision, { audience: 'private' })),
+    { status: 200, body: { ok: true } })
+  assert.equal(w.edits.length, 1)
+  assert.equal(w.edits[0].companion, true)
+})
+
+test('settings: a row held over another fiber is not this plugin own', async () => {
+  const w = webMount({}, {
+    editor: (entry, edits) => {
+      const stranger = { name: 'another row' }
+      stranger.ctx = { fiber: stranger }
+      const held = Object.create(stranger)
+      return {
+        entries: () => [{ ...entry, fiber: held }],
+        edit: async (target, change) => { edits.push(change({}, {})) },
+      }
+    },
+  })
+  const { body: shown } = await w.call('GET')
+  assert.equal(shown.editable, false)
+  assert.equal(shown.readOnly, 'editor')
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision)),
+    { status: 409, body: { ok: false, error: 'unavailable' } })
+  assert.equal(w.edits.length, 0)
+})
+
+test('settings: two rows that both hold this plugin fiber, either way, are neither written', async () => {
+  const w = webMount({}, {
+    editor: (entry, edits) => {
+      const fiber = entry.fiber
+      fiber.ctx = { fiber }
+      const held = Object.create(fiber)
+      const twice = { ...entry, fiber: held, options: { ...entry.options, id: 'engramory-2' } }
+      return {
+        entries: () => [entry, twice],
+        edit: async (target, change) => { edits.push(change({}, {})) },
+      }
+    },
+  })
+  const { body: shown } = await w.call('GET')
+  assert.equal(shown.editable, false)
+  assert.equal(shown.readOnly, 'editor')
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision)),
+    { status: 409, body: { ok: false, error: 'unavailable' } })
+  assert.equal(w.edits.length, 0)
+})
+
 // --- the memory page's route (client.js) ---
 
 /** dsh's session controller as the memory page uses it: it can open, and keeps what it was handed. */

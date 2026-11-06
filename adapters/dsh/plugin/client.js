@@ -39,7 +39,7 @@ window.__ModuleLoader__.load({
     /** How often the page looks again at a move it did not start, while one is under way. */
     const MOVE_FOLLOW_MS = 2000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.5.0'
+    const VERSION = '1.5.1'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */

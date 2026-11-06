@@ -6,6 +6,21 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.1 — 2026-11-06
+
+The dsh plugin's settings can be changed again on dsh 0.2.2.
+
+- **dsh: companion mode, memory access and the index cap could not be changed on dsh
+  0.2.2-alpha.3 and 0.2.2-rc.1.** The switches atop the memory page were greyed out with
+  *Cannot be changed here*, and the plugin's page in the Plugins page said this dsh has no
+  config editor. The plugin finds its own row in the profile by the row's fiber; from these
+  releases dsh's loader (cordis-plugin-loader 1.0.7-alpha.2 / 1.1.0) keeps on the row the
+  awaitable object cordis hands back for a fiber instead of the fiber itself, so the row
+  was never found. It is now found either way, still by identity, never by name. Settings
+  already saved, by hand or before, were never affected.
+- **dsh 0.2.2-alpha.3 and 0.2.2-rc.1 declared compatible**, after the end-to-end run passed
+  on them, as on the twelve releases declared before.
+
 ## 1.5.0 — 2026-11-03
 
 The dsh plugin's global store can be moved to another folder, its memory with it.

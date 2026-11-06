@@ -667,11 +667,22 @@ function settingsRoutes(ctx, config, fiber) {
 function ownEntry(editor, fiber) {
   try {
     if (fiber === undefined || typeof editor?.entries !== 'function') return undefined
-    const mine = editor.entries().filter((entry) => entry?.fiber === fiber)
+    const mine = editor.entries().filter((entry) => holds(entry?.fiber, fiber))
     return mine.length === 1 ? mine[0] : undefined
   } catch {
     return undefined
   }
+}
+
+/**
+ * Whether what a row keeps as its fiber is `fiber`. A row keeps either the fiber itself
+ * (dsh 0.2.1's loader, cordis-plugin-loader 1.0.6, unwraps it) or what cordis' `plugin()`
+ * hands back (dsh 0.2.2-alpha.3 and 0.2.2-rc.1, loader 1.0.7-alpha.2 and 1.1.0): an object
+ * made with the fiber as its prototype, so that it can be awaited. Its `ctx.fiber` is the
+ * fiber, which is how 1.0.6 unwraps it.
+ */
+function holds(held, fiber) {
+  return held !== undefined && held !== null && (held === fiber || held.ctx?.fiber === fiber)
 }
 
 /** The settings the page edits, read the way apply() reads them. */
