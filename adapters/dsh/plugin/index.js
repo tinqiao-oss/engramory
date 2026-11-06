@@ -1496,8 +1496,9 @@ async function fileIn(store, name, archived) {
  * so a restored older log reads the same. Two carry text without an author, and only the
  * owner can send either on that dsh (it grants a caller other than the owner nothing):
  * an answer to the agent's question (`user-question-reply`) and a scheduled prompt
- * (`schedule`). `webhook`, input from outside, is left out. A kind not named here — a
- * later dsh's, or any plugin's — is someone else's unless its source says otherwise.
+ * (`schedule`). `webhook`, input from outside, is left out. dsh 0.2.2-rc.1 adds one,
+ * `action-cards` (ACTION_CARD_NOTICE). A kind not named here — a later dsh's, or any
+ * plugin's — is someone else's unless its source says otherwise.
  */
 const INERT_PRODUCERS = new Set([
   'runtime-context', 'system-prompt', 'time-context', 'tmux-context', 'working-directory',
@@ -1508,6 +1509,17 @@ const INERT_PRODUCERS = new Set([
   'subagent-settled', 'subagent-report', 'agent-message', 'team-message', 'coordinator',
   'dsh-session-title-llm', 'hooks-codex', 'hooks-claude-code', 'model', 'tool',
 ])
+
+/**
+ * dsh 0.2.2-rc.1's `action-cards` messages (dsh-action-cards, in the optional personalized
+ * recommendations bundle): what became of the cards the agent proposed, sent as a notice
+ * (`form: 'notice'`) before the agent's next step. Its text is dsh's own preamble and the
+ * cards' receipts — a card's title, the agent's own, and what each kind reports, such as a
+ * place the owner typed — none of it written by an outsider: on that dsh only the owner
+ * decides a card (`actionCards/act` is granted to no one else). Only the notice is nobody's;
+ * any other form of the kind is someone else's, until a later dsh is read again.
+ */
+const ACTION_CARD_NOTICE = 'action-cards'
 
 /**
  * Who wrote one user message, by the source dsh stamps on it (a message queued in
@@ -1524,7 +1536,7 @@ const INERT_PRODUCERS = new Set([
  *              cannot be read. Anyone in a group, the owner included: a `speaker` whose
  *              `chat` is set to anything but 'private' ('group' is the standard) — the whole
  *              group reads the reply, even before anyone else there has spoken;
- *   undefined  nobody: dsh's own producers (INERT_PRODUCERS) and a plugin's own message
+ *   undefined  nobody: dsh's own producers (INERT_PRODUCERS, ACTION_CARD_NOTICE) and a plugin's own message
  *              declared `speaker: { role: 'none' }` — a report or a reminder no outsider
  *              wrote. These decide nothing. (SPEAKERS also lets through two bare `user`
  *              messages dsh writes itself.)
@@ -1541,6 +1553,7 @@ function speakerOf(source) {
     return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
       source.principal === undefined ? 'owner' : 'other'
   }
+  if (kind === ACTION_CARD_NOTICE) return source.form === 'notice' ? undefined : 'other'
   return typeof kind === 'string' && INERT_PRODUCERS.has(kind) ? undefined : 'other'
 }
 
@@ -1644,8 +1657,9 @@ const SPEAKERS = {
   // Bumped whenever the state's fields or the fold change, so dsh refolds a session from its
   // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes;
   // 3: a message in a group chat is someone else's, the owner's included; 4: dsh 0.1's own
-  // `{ kind: 'plugin' }` messages are nobody's, no longer an outsider's).
-  stateVersion: 4,
+  // `{ kind: 'plugin' }` messages are nobody's, no longer an outsider's; 5: dsh 0.2.2's
+  // `action-cards` notices are nobody's, no longer an outsider's, ACTION_CARD_NOTICE).
+  stateVersion: 5,
   // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
   stateSchema: {
     parse(value) {

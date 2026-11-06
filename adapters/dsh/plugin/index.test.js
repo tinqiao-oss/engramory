@@ -2214,6 +2214,13 @@ test('companion mode: who wrote a message is read from the source dsh stamped on
     assert.equal(owner(TYPED, said({ kind })), true, kind)
     assert.equal(owner(said({ kind })), false, `${kind} alone`)
   }
+  // dsh 0.2.2-rc.1's action-card status, as dsh-action-cards stamps it: only that notice is nobody's
+  const cards = { kind: 'action-cards', through: 12, form: 'notice', summary: 'Action card status updated' }
+  assert.equal(owner(TYPED, said(cards)), true, 'an action-card notice')
+  assert.equal(owner(said(cards)), false, 'an action-card notice alone')
+  for (const form of [undefined, 'relay', 'snapshot', 'NOTICE']) {
+    assert.equal(owner(TYPED, said({ ...cards, form })), false, `action-cards, form ${form}`)
+  }
   // dsh 0.1's producers wrote `{ kind: 'plugin', plugin: <name> }` — its clock on every step
   // of a conversation — lifted as dsh 0.2's migration lifts them; a bridge's stays theirs
   for (const plugin of ['time-context', 'compact', 'dsh-compaction-basic', 'agent-instructions', 'schedule']) {
@@ -2280,10 +2287,11 @@ test('companion mode: the speakers unit is one dsh can fold, checkpoint and rest
   assert.ok(unit, 'registered with dsh\'s session projections')
   assert.equal(unit.wire, undefined, 'host-only: nothing of it reaches a client')
   assert.ok(Number.isInteger(unit.stateVersion) && unit.stateVersion >= 0)
-  // dsh seeds a session from a checkpoint of the same version without refolding: 4 is the
-  // fold that reads dsh 0.1's `{ kind: 'plugin' }` messages as nobody's, and a checkpoint
-  // folded before it (the owner marked an outsider by the clock) must be refolded
-  assert.equal(unit.stateVersion, 4)
+  // dsh seeds a session from a checkpoint of the same version without refolding: 5 is the
+  // fold that reads dsh 0.2.2's `action-cards` notices as nobody's (4: dsh 0.1's
+  // `{ kind: 'plugin' }` messages), and a checkpoint folded before it (the owner marked an
+  // outsider by a card's notice) must be refolded
+  assert.equal(unit.stateVersion, 5)
   const start = unit.init({}, 0)
   assert.deepEqual(start, { owner: false, other: false })
   // an event that changes nothing returns the same state, as dsh requires

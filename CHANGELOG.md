@@ -6,6 +6,19 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.2 — 2026-11-06
+
+Social mode keeps telling the owner's conversations apart on dsh 0.2.2.
+
+- **dsh: with social mode on, an action card's status made the owner's conversation an
+  outsider's.** dsh 0.2.2-rc.1 adds a notice of its own, `action-cards`: when the
+  personalized recommendations (an optional bundle, off unless switched on) are on, it
+  tells the agent what became of the cards it proposed. The plugin did not know the kind,
+  read it as someone else's message, and from then on gave that conversation no memory —
+  refused, never leaked. That notice now counts as nobody's, as dsh's other notices do; any
+  other form of the kind still counts as someone else's. A conversation already marked by
+  one is judged again from its log once dsh loads this version.
+
 ## 1.5.1 — 2026-11-06
 
 The dsh plugin's settings can be changed again on dsh 0.2.2.
