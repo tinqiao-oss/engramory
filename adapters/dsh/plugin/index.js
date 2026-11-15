@@ -232,6 +232,23 @@ export function apply(ctx, config = {}) {
       return undefined
     }
   })
+  // A move is judged again at dsh's last hook before a write lands (refuseMovingTarget): a
+  // file tool may wait for the user's approval inside its call, after the guard has passed it.
+  // dsh's write and edit run these hooks from 0.1.5 on; refusing is throwing, which dsh reports
+  // to the model as the tool's error. Ahead of the others: dsh's own read-before-write policy
+  // (dsh-fs-observation-policy) answers these hooks without passing them on.
+  for (const hook of ['fs/write-intent', 'fs/edit-intent']) {
+    ctx.on(hook, (target, exec, next) => {
+      let reason
+      try {
+        reason = refuseMovingTarget(target, settings)
+      } catch {
+        reason = undefined // every write in dsh passes here: an unexpected error must not stop them all
+      }
+      if (reason !== undefined) throw new Error(reason)
+      return next()
+    }, { prepend: true })
+  }
 
   // The skill registry is optional AND may activate after this plugin — fiber order
   // between unrelated providers is not guaranteed, so a one-shot probe here would
@@ -2778,6 +2795,42 @@ function refuseMoving(exec, settings, sessionCwd) {
   if (!args || typeof args !== 'object') return undefined
   // every editor command but a view (another plugin's tool of the name may have more than dsh's)
   if (!gatedWrite(tool, args) && !(tool === 'str_replace_editor' && args.command !== 'view')) return undefined
+  const held = heldPlaces(settings)
+  if (held === undefined) return undefined
+  try {
+    const cwd = sessionCwd(exec)
+    return heldReason(held, [args.file_path, args.path].filter((v) => typeof v === 'string').map((p) => hostPath(cwd, p)))
+  } catch {
+    return held.moving ? settings.text.storeMoving : undefined
+  }
+}
+
+/**
+ * The same judgement at dsh's last hook before it writes (`fs/write-intent`, `fs/edit-intent`,
+ * on the resolved target): a file tool may wait for the user inside its own call, after the
+ * guard — an approval to widen its sandbox (`sandbox_permissions`) is asked for there — and a
+ * move started meanwhile would otherwise not hold that write off. A move's drain
+ * (MOVE_DRAIN_MS) covers what passes this hook just before the move's journal is written.
+ */
+function refuseMovingTarget(target, settings) {
+  const held = heldPlaces(settings)
+  if (held === undefined) return undefined
+  try {
+    const paths = [target?.displayPath, target?.targetKey].filter((v) => typeof v === 'string' && isAbsolute(v))
+    // a target dsh did not resolve to an absolute path cannot be placed: as the guard does
+    if (paths.length === 0) return held.moving ? settings.text.storeMoving : undefined
+    return heldReason(held, paths)
+  } catch {
+    return held.moving ? settings.text.storeMoving : undefined
+  }
+}
+
+/**
+ * The places a move holds dsh's writes off, each with what to tell the model, and whether a
+ * move runs (`moving`); undefined while none is held. As the home last read whole where it
+ * cannot be read now.
+ */
+function heldPlaces(settings) {
   let state
   try {
     state = homeState()
@@ -2801,15 +2854,16 @@ function refuseMoving(exec, settings, sessionCwd) {
   if (state.store !== undefined) {
     for (const dir of state.retired) closed.push([dir, t.storeMoved(state.store)])
   }
-  try {
-    for (const p of new Set([args.file_path, args.path].filter((v) => typeof v === 'string'))) {
-      const target = pathKey(hostPath(sessionCwd(exec), p))
-      for (const [dir, reason] of closed) {
-        if (under(target, pathKey(dir))) return reason
-      }
+  return { closed, moving: moving !== undefined }
+}
+
+/** The reason the first of `paths` (absolute) inside a held place is refused, or undefined. Throws on a path it cannot key. */
+function heldReason(held, paths) {
+  for (const p of new Set(paths)) {
+    const target = pathKey(p)
+    for (const [dir, reason] of held.closed) {
+      if (under(target, pathKey(dir))) return reason
     }
-  } catch {
-    return moving === undefined ? undefined : t.storeMoving
   }
   return undefined
 }
@@ -3127,23 +3181,33 @@ async function sourceProblem(state) {
 /**
  * Carry a move on from where its journal says, then let the home's lock (`lockId`) go; what
  * became of it is kept for the page (outcomes). `fresh`: started just now, by this request.
+ * A move that stops after its switch (the old place held open, say) has still moved the
+ * store: `moved` tells the page so, rather than "not moved"; what is left of the old place is
+ * carried on later (resumeMove).
  */
 async function run(root, journal, settings, lockId, fresh) {
   outcomes.set(journal.id, { done: false })
   if (outcomes.size > 16) outcomes.delete(outcomes.keys().next().value)
   let outcome
+  const progress = { switched: false }
   try {
-    outcome = { done: true, ...await advance(root, journal, settings, fresh, lockId) }
+    outcome = { done: true, ...await advance(root, journal, settings, fresh, lockId, progress) }
   } catch (error) {
-    outcome = { done: true, ok: false, ...problemOf(error) }
+    // Failed past the switch, or the home's file names the new place now (a commit can land
+    // and then fail on its way out). That file unreadable just now does not undo a switch.
+    const moved = progress.switched || await pointsTo(root, journal.to).catch(() => false)
+    outcome = { done: true, ok: false, ...problemOf(error), ...(moved ? { moved: true } : {}) }
   }
   // done only once the lock is let go: the page may start the next move at once
   await releaseLock(root, lockId).catch(() => {})
   outcomes.set(journal.id, outcome)
 }
 
-/** The steps of a move (MOVE_STEPS), from the one its journal is at. */
-async function advance(root, journal, settings, fresh, lockId) {
+/**
+ * The steps of a move (MOVE_STEPS), from the one its journal is at. `progress.switched` is set
+ * once the home's file names the new place: whatever fails after that, the store has moved.
+ */
+async function advance(root, journal, settings, fresh, lockId, progress) {
   if (BEFORE_COMMIT.has(journal.phase)) {
     if (!fresh) {
       // Cut short before its commit — partway through the copy, say — a move is undone, and the
@@ -3153,6 +3217,7 @@ async function advance(root, journal, settings, fresh, lockId) {
         await undo(root, journal)
         throw moveError('interrupted')
       }
+      progress.switched = true
     } else {
       try {
         await wait(MOVE_DRAIN_MS)
@@ -3164,6 +3229,7 @@ async function advance(root, journal, settings, fresh, lockId) {
         journal = await stepTo(root, journal, 'published')
         await held(root, lockId)
         await commit(root, journal)
+        progress.switched = true
       } catch (error) {
         if (error?.moveCode !== 'lost') await undo(root, journal)
         throw error
@@ -3171,6 +3237,7 @@ async function advance(root, journal, settings, fresh, lockId) {
     }
     journal = await stepTo(root, journal, 'committed')
   }
+  progress.switched = true
   try {
     // carried on: its error is cleared, so that the new place is held off again while it runs —
     // and a write dsh let through while it was open lands before anything is settled

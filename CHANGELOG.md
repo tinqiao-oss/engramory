@@ -6,6 +6,28 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.3 — 2026-11-15
+
+Moving the dsh plugin's global store: a save waiting for approval is held off too, and a
+move that has switched no longer says it did not.
+
+- **dsh: a save that waited for your approval could land in the store's old place.** When
+  dsh's sandbox needs your approval for a file write (the write asks to widen it), dsh
+  asks inside the tool call, after the plugin's guard has let the call through. A move
+  started while that approval was pending did not hold the write off: approved after the
+  move, the note was written to the old place, which the move had cleared, and the AI was
+  told it was saved. dsh's write and edit are now judged again at the last step before
+  they write, after any approval: during a move the write is refused with the usual
+  "try again shortly", and after one it is refused with the new place named.
+- **dsh: a move that had switched could say "Not moved".** When clearing the old place
+  failed after the switch (a file there held open by another program, say), the memory
+  page said *Not moved* and kept listing the old place, though the memory was already in
+  the new one; acting on that, someone might have deleted the new folder. The page now
+  says the memory has moved and the old place is not cleared yet, which dsh carries on
+  with every minute, and lists the store where it is.
+- **README.en no longer mentions an *Open the index* button** the memory page dropped in
+  1.5.0.
+
 ## 1.5.2 — 2026-11-06
 
 Social mode keeps telling the owner's conversations apart on dsh 0.2.2.

@@ -1411,6 +1411,22 @@ test('client: a place the plugin turns down says why, and a move that stopped sa
     await settleUntil(view, /placeMoveFailed/)
     assert.match(textOf(view.tree), /placeMoveFailed\{"reason":"whyFailed \(EBUSY\)"\}/)
   })
+  // stopped after its switch (the old place held open): moved, not "not moved", and the
+  // listing follows the store to where it is now
+  const sent = placeFetch({
+    GET: (log) => placeData(log.some((s) => s.url.includes('?id='))
+      ? { outcome: { done: true, ok: false, error: 'failed', detail: 'EBUSY', moved: true } } : {}),
+    POST: { status: 202, body: { ok: true, id: 'abcd1234' } },
+  })
+  await withPlacePage(async (view) => {
+    await typeIn(view, 'D:\\vault')
+    button(view.tree, 'placeMove').props.onClick()
+    await settleUntil(view, /placeMovedUnfinished/)
+    assert.match(textOf(view.tree), /placeMovedUnfinished\{"reason":"whyFailed \(EBUSY\)"\}/)
+    assert.doesNotMatch(textOf(view.tree), /placeMoveFailed/)
+    assert.equal(placeInput(view.tree).props.value, '')
+    assert.equal(sent.filter((s) => s.url === MEMORY).length, 2, 'the listing is read again')
+  })
 })
 
 test('client: back to the default place, a pinned index, a broken record, a move left to finish', async () => {

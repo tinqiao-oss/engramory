@@ -33,7 +33,7 @@ Intl.DateTimeFormat.prototype.resolvedOptions = function (...args) {
   return { ...resolvedOptions.apply(this, args), locale: systemLocale }
 }
 
-function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId, projections = projectionRegistry(), services: extra = {} } = {}) {
+function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt, rowId, projections = projectionRegistry(), services: extra = {}, listeners: early = {} } = {}) {
   let guard
   const skills = []
   const skillRegistry = {
@@ -62,8 +62,9 @@ function mount(config = {}, { withSkills = true, workingDirectory, systemPrompt,
     name: 'engramory fiber',
     ...(rowId === undefined ? {} : { entry: { id: `include:${rowId}`, options: { id: rowId } } }),
   }
-  // Cordis' event listeners: `prepend` puts one ahead of those already there.
-  const listeners = new Map()
+  // Cordis' event listeners: `prepend` puts one ahead of those already there. `early`: dsh's
+  // own, registered before this plugin's.
+  const listeners = new Map(Object.entries(early).map(([event, list]) => [event, [...list]]))
   const on = (event, listener, options) => {
     const list = listeners.get(event) ?? []
     if (options?.prepend === true) list.unshift(listener)
@@ -4335,6 +4336,107 @@ test('store: dsh\'s file tools are held off both places while a move runs, and t
   assert.match(reason, /has moved to/)
   assert.ok(reason.includes(to))
   assert.equal(m.guardAt(write(join(to, 'a.md'), 'x')), undefined)
+})
+
+test('store: a write is judged again at dsh\'s last hook before it lands, after any approval it waited for', async () => {
+  // dsh-tool-fs asks to widen the sandbox inside the call, after the guard; a move started
+  // while that waits must still hold the write off (fs/write-intent, fs/edit-intent)
+  const { home, dir } = homeStore('mv-intent')
+  const to = join(scratch('mv-intent-to'), 'vault')
+  // dsh's read-before-write policy (dsh-fs-observation-policy) is there first and answers
+  // these hooks without passing them on: this plugin's listener must run ahead of it
+  const policy = () => 'intent'
+  const hooks = ['fs/write-intent', 'fs/edit-intent']
+  const m = storeMount(home, { language: 'en' }, { listeners: Object.fromEntries(hooks.map((h) => [h, [policy]])) })
+  for (const hook of hooks) assert.deepEqual([m.listeners.get(hook)?.length, m.listeners.get(hook)?.[1]], [2, policy], hook)
+  // a dsh waterfall: each listener gets the target, the actor and the rest of the chain
+  const intent = (hook, target) => withDshHome(home, () => {
+    const list = m.listeners.get(hook)
+    const run = (i) => (i < list.length ? list[i](target, {}, () => run(i + 1)) : undefined)
+    return { passed: true, value: run(0) }
+  })
+  const at = (p) => ({ displayPath: p, targetKey: p })
+  // no move: every write goes on, with what the rest of the chain decides
+  for (const hook of hooks) assert.deepEqual(intent(hook, at(join(dir, 'a.md'))), { passed: true, value: 'intent' })
+  // a move under way: both places refused, the guard's reason, the chain not run
+  liveLock(home)
+  writeJson(join(home, JOURNAL), { version: 1, id: 'abcdefgh', phase: 'staged', from: dir, to })
+  for (const hook of hooks) {
+    for (const path of [join(dir, 'a.md'), join(to, 'b.md')]) {
+      assert.throws(() => intent(hook, at(path)), /being moved/, `${hook} ${path}`)
+    }
+    // the resolved key alone is enough: a link spelled elsewhere that dsh resolved into the store
+    assert.throws(() => intent(hook, { displayPath: join(scratch('mv-intent-link'), 'a.md'), targetKey: join(dir, 'a.md') }),
+      /being moved/)
+    assert.deepEqual(intent(hook, at(join(scratch('mv-intent-else'), 'a.md'))), { passed: true, value: 'intent' })
+    // a target dsh did not resolve cannot be placed while a move runs
+    assert.throws(() => intent(hook, { displayPath: 'a.md' }), /being moved/)
+  }
+  // done: the old place turns the write to the new one; the new one takes it
+  writeJson(join(home, POINTER), { version: 1, store: to, retired: [dir] })
+  rmSync(join(home, JOURNAL))
+  assert.throws(() => intent('fs/write-intent', at(join(dir, 'a.md'))), (error) => error.message.includes(to))
+  assert.deepEqual(intent('fs/write-intent', at(join(to, 'a.md'))), { passed: true, value: 'intent' })
+  assert.deepEqual(intent('fs/write-intent', { displayPath: 'a.md' }), { passed: true, value: 'intent' },
+    'after a move, a target that cannot be placed goes on, as at the guard')
+})
+
+test('store: a move that stops after its switch tells the page the store has moved', async () => {
+  const { home, dir } = homeStore('mv-after')
+  const to = join(scratch('mv-after-to'), 'vault')
+  const m = storeMount(home, { language: 'en' })
+  // the old place cannot be set aside (a disk error, not a file held open: no retries)
+  const { syncBuiltinESMExports } = await import('node:module')
+  const promises = (await import('node:fs/promises')).default
+  const native = promises.rename
+  const nativeStat = promises.stat
+  // refuse renaming `from` (the old place set aside), or anything onto `onto` (the copy
+  // published); once refused, the home's file cannot be read either (`blind`)
+  const failing = async (refuse, fn, blind = false) => {
+    let refused = false
+    promises.rename = async (from, onto, ...rest) => {
+      if (refuse(resolve(String(from)), resolve(String(onto)))) {
+        refused = true
+        throw Object.assign(new Error('EIO: refused'), { code: 'EIO' })
+      }
+      return native(from, onto, ...rest)
+    }
+    promises.stat = async (p, ...rest) => {
+      if (blind && refused && basename(String(p)) === POINTER) throw Object.assign(new Error('EACCES: refused'), { code: 'EACCES' })
+      return nativeStat(p, ...rest)
+    }
+    syncBuiltinESMExports()
+    try {
+      return await fn()
+    } finally {
+      promises.rename = native
+      promises.stat = nativeStat
+      syncBuiltinESMExports()
+    }
+  }
+  // the home's file unreadable when the page is told: failed past the switch is moved all the same
+  const result = await failing((from) => from === resolve(dir), () => m.move(to), true)
+  assert.equal(result.status, 202)
+  assert.deepEqual(result.body, { done: true, ok: false, error: 'failed', detail: 'EIO', moved: true })
+  assert.equal(JSON.parse(fs.readFileSync(join(home, POINTER), 'utf8')).store, to, 'the switch held')
+  // switched, then its journal cannot record it, and the home's file is unreadable after that:
+  // moved all the same
+  const { home: home3 } = homeStore('mv-commit')
+  const to3 = join(scratch('mv-commit-to'), 'vault')
+  const m3 = storeMount(home3, { language: 'en' })
+  let pointed = false
+  const atSwitch = await failing((_, onto) => {
+    if (onto === resolve(join(home3, POINTER))) pointed = true
+    return pointed && onto === resolve(join(home3, JOURNAL))
+  }, () => m3.move(to3), true)
+  assert.deepEqual(atSwitch.body, { done: true, ok: false, error: 'failed', detail: 'EIO', moved: true })
+  // one that fails before its switch is still "not moved", and the store stays where it was
+  const { home: home2, dir: dir2 } = homeStore('mv-before')
+  const to2 = join(scratch('mv-before-to'), 'vault')
+  const m2 = storeMount(home2, { language: 'en' })
+  const refused = await failing((_, onto) => onto === resolve(to2), () => m2.move(to2))
+  assert.deepEqual(refused.body, { done: true, ok: false, error: 'failed', detail: 'EIO' })
+  assert.ok(fs.existsSync(join(dir2, INDEX)), 'the store is where it was')
 })
 
 test('store: a move cut short while it copied is undone when a dsh opens', async () => {

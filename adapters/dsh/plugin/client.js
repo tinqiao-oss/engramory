@@ -39,7 +39,7 @@ window.__ModuleLoader__.load({
     /** How often the page looks again at a move it did not start, while one is under way. */
     const MOVE_FOLLOW_MS = 2000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.5.2'
+    const VERSION = '1.5.3'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -118,6 +118,7 @@ window.__ModuleLoader__.load({
       placeStillMoving: '还在搬，过一会儿刷新这一页看看。',
       placeEnded: '这次搬家已经结束，记忆库现在在上面写的位置。',
       placeMoveFailed: '没搬成：{reason}',
+      placeMovedUnfinished: '已经搬到新位置，记忆库现在在上面写的位置；旧位置还没清理完：{reason} dsh 每分钟会自动接着清理，不用再搬一次。',
       placeResuming: '有一次搬家还没做完，dsh 会自动接着做完。',
       placeResumingWhy: '上次停在：{reason}会自动再试。',
       placePinned: '配置里固定了索引（indexPath），记忆库就在它所在的文件夹，这里不能搬。',
@@ -312,6 +313,7 @@ window.__ModuleLoader__.load({
       placeStillMoving: 'Still moving. Refresh this page in a little while.',
       placeEnded: 'The move is over: the memory is where it says above.',
       placeMoveFailed: 'Not moved: {reason}',
+      placeMovedUnfinished: 'Moved: the memory is where it says above. Clearing the old place did not finish: {reason} dsh carries on with it every minute; there is nothing to move again.',
       placeResuming: 'A move is not finished yet; dsh finishes it on its own.',
       placeResumingWhy: 'It last stopped at: {reason} It will try again.',
       placePinned: 'An index is pinned (indexPath): the memory is in its folder, and is not moved here.',
@@ -996,6 +998,11 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
             setText('')
             setBanner({ tone: 'ok', text: outcome.conflicts > 0
               ? t('placeMovedConflicts', { count: outcome.conflicts }) : t('placeMoved') })
+            onMoved?.()
+          } else if (outcome?.done === true && outcome.moved === true) {
+            // stopped after the switch: the store has moved, the old place is cleared later
+            setText('')
+            setBanner({ tone: 'error', text: t('placeMovedUnfinished', { reason: whyNot(t, outcome.error, outcome.detail) }) })
             onMoved?.()
           } else if (outcome?.done === true) {
             setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, outcome.error, outcome.detail) }) })

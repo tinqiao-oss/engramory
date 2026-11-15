@@ -47,7 +47,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.5.2`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@1.5.3`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
 for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
 install that, then quit dsh from the tray and open it again. Your memory and settings stay.
@@ -178,9 +178,9 @@ owner, so a program forwarding other people's messages must leave it out.
   never through a symbolic link, and is skipped when the index is over the cap, there is
   too much to check, or a file cannot be read; `engramory_doctor.py` still does the full
   check. Where the listing was cut short or a store could not be read, the page says so,
-  rather than counting that as nothing. Read-only, never a note's text; a name, *Open
-  the index* and *Open the folder* open on the machine dsh runs on; a machine with no
-  desktop (a headless server, a session over SSH) shows none of them. A short *How to use
+  rather than counting that as nothing. Read-only, never a note's text; a name and *Open
+  the folder* open on the machine dsh runs on; a machine with no desktop (a headless
+  server, a session over SSH) shows neither. A short *How to use
   it* follows, open while there is no memory yet. At the foot, the plugin's version and
   *Check for updates*: only when clicked, it asks npm (npmmirror when npm cannot be
   reached) for the latest version number, with nothing from your memory, and lists the
@@ -211,7 +211,10 @@ path, then click *Move it there*:
   at the end of the index. Nothing in the new place is written over.
 - **Cut short, nothing is lost.** Each step is written down first: dsh closed before the
   switch, the move is undone when it opens again and the memory stays where it was;
-  closed after, the move is finished when it opens again.
+  closed after, the move is finished when it opens again. An error after the switch (a
+  file in the old place held open by another program, say) leaves the memory moved: the
+  page says so, and that the old place is not cleared yet, which dsh carries on with every
+  minute.
 - **Every dsh on this computer moves with it.** The place is kept in
   `.engramory-memory.json` in dsh's home folder, which the desktop app, the command line
   and `dsh web` all follow (their plugin configs are their own; the global store is
