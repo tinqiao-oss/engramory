@@ -2222,6 +2222,21 @@ test('companion mode: who wrote a message is read from the source dsh stamped on
   for (const form of [undefined, 'relay', 'snapshot', 'NOTICE']) {
     assert.equal(owner(TYPED, said({ ...cards, form })), false, `action-cards, form ${form}`)
   }
+  // dsh 0.2.2-rc.2's Continue generating: the empty prompt, stamped `retry` with the marks a
+  // typed one carries (dsh-api-session-controller `prompt`), is judged by those same marks
+  const resumed = { kind: 'retry', rpcId: 'r-5', clientTimeZone: 'Asia/Shanghai' }
+  assert.equal(owner(TYPED, said(resumed)), true, 'the owner continuing in dsh\'s window')
+  assert.equal(owner(said(resumed)), true, 'continuing from dsh\'s window is the owner\'s alone too')
+  for (const [source, why] of [
+    [{ kind: 'retry' }, 'a retry with no marks'],
+    [{ kind: 'retry', rpcId: 'r-6' }, 'a program continuing through dsh web\'s API'],
+    [{ ...resumed, principal: { kind: 'liveshare' } }, 'a caller dsh names continuing'],
+    [{ ...resumed, speaker: { role: 'guest' } }, 'declared a guest'],
+    [{ ...resumed, speaker: { role: 'owner', chat: 'group' } }, 'in a group'],
+    [{ kind: 'plugin', plugin: 'retry', rpcId: 'r-7', clientTimeZone: 'UTC' }, 'a 0.1 producer named retry'],
+  ]) {
+    assert.equal(owner(TYPED, said(source)), false, why)
+  }
   // dsh 0.1's producers wrote `{ kind: 'plugin', plugin: <name> }` — its clock on every step
   // of a conversation — lifted as dsh 0.2's migration lifts them; a bridge's stays theirs
   for (const plugin of ['time-context', 'compact', 'dsh-compaction-basic', 'agent-instructions', 'schedule']) {
@@ -2252,6 +2267,15 @@ test('companion mode: a message counts from the moment it is queued, before dsh 
   assert.equal(owner(TYPED, queued(QQ), claimed), false, 'an outsider\'s first message, before it is committed')
   assert.equal(owner(TYPED, queued(said({ kind: 'time-context' }), TYPED)), true)
   assert.equal(owner(TYPED, { type: 'agent/inbox/spliced', data: { inserted: 'not a list' } }), true)
+  // Continue generating (dsh 0.2.2-rc.2's `retry`), judged as soon as it is queued
+  const resumed = (more) => said({ kind: 'retry', rpcId: 'r-q', clientTimeZone: 'UTC', ...more })
+  assert.equal(owner(TYPED, queued(resumed()), claimed), true, 'the owner continuing, queued')
+  assert.equal(owner(TYPED, queued(resumed({ principal: { kind: 'share-viewer' } })), claimed), false,
+    'a caller dsh names continuing, queued')
+  assert.equal(owner(TYPED, queued(said({ kind: 'retry', rpcId: 'r-q' })), claimed), false,
+    'a program continuing, queued')
+  // continuing never takes a conversation back from someone else
+  assert.equal(owner(TYPED, QQ, resumed()), false, 'the owner continuing after an outsider')
 })
 
 test('companion mode: a message a slash command adds is dsh\'s own, and only while it runs', () => {
@@ -2274,6 +2298,8 @@ test('companion mode: a message a slash command adds is dsh\'s own, and only whi
   assert.equal(owner(TYPED, run('c-5'), QQ, done('c-5')), false, 'only bare messages are let through')
   assert.equal(owner(TYPED, run('c-6'), said({ kind: 'user', clientTimeZone: 'UTC' }), done('c-6')), false,
     'only a source that is nothing but the user kind')
+  assert.equal(owner(TYPED, run('c-7'), said({ kind: 'retry' }), done('c-7')), false,
+    'a bare retry is no command\'s message')
   // overlapping commands: one ending does not close the other's window
   assert.equal(owner(TYPED, run('a'), run('b'), done('b'), said({ kind: 'user' }), done('a')), true)
   // a command whose `command/done` was never logged closes its window by itself
@@ -2288,11 +2314,14 @@ test('companion mode: the speakers unit is one dsh can fold, checkpoint and rest
   assert.ok(unit, 'registered with dsh\'s session projections')
   assert.equal(unit.wire, undefined, 'host-only: nothing of it reaches a client')
   assert.ok(Number.isInteger(unit.stateVersion) && unit.stateVersion >= 0)
-  // dsh seeds a session from a checkpoint of the same version without refolding: 5 is the
-  // fold that reads dsh 0.2.2's `action-cards` notices as nobody's (4: dsh 0.1's
-  // `{ kind: 'plugin' }` messages), and a checkpoint folded before it (the owner marked an
-  // outsider by a card's notice) must be refolded
-  assert.equal(unit.stateVersion, 5)
+  // dsh seeds a session from a checkpoint of the same version without refolding: 6 is the
+  // fold that reads dsh 0.2.2-rc.2's `retry` by the owner's marks (5: dsh 0.2.2's
+  // `action-cards` notices; 4: dsh 0.1's `{ kind: 'plugin' }` messages), and a checkpoint
+  // folded before it (the owner marked an outsider by continuing) must be refolded
+  assert.equal(unit.stateVersion, 6)
+  // the owner's Continue generating, folded: no longer someone else's
+  assert.deepEqual(unit.apply(unit.apply(unit.init({}, 0), TYPED),
+    said({ kind: 'retry', rpcId: 'r-8', clientTimeZone: 'UTC' })), { owner: true, other: false })
   const start = unit.init({}, 0)
   assert.deepEqual(start, { owner: false, other: false })
   // an event that changes nothing returns the same state, as dsh requires
@@ -2425,6 +2454,9 @@ test('companion mode: a subagent is the user\'s own while its live parent is, re
   const queuedTask = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [task.data] } }
   assert.equal(call(sessionOf('kid-8', project, { origin: 'subagent', parentSession: 'own-9' }, [queuedTask, task])), undefined)
   assert.match(call(kid('kid-9', 'own-9', said({ kind: 'user' }))), /closed to it/)
+  // a bare retry is never a child's task, even as its first message
+  assert.match(call(sessionOf('kid-12', project, { origin: 'subagent', parentSession: 'own-9' },
+    [said({ kind: 'retry' })])), /closed to it/)
   // a fork-backed child inherits its parent's history, the parent's own task included: those
   // events are the parent's, so the child's own task is still its first
   const inherited = [task, said({ kind: 'agent-message' }), TYPED].map((e, seq) => ({ ...e, seq }))

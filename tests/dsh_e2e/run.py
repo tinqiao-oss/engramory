@@ -99,6 +99,9 @@ REVIEWED_TOOLS = {
     # other agents: their file writes go through these same guarded tools
     "subagent": "agents", "subagent_fork": "agents", "send_message": "agents",
     "interrupt_agent": "agents", "list_agents": "agents",
+    # dsh 0.2.2-rc.2 (dsh-tool-subagent-control): waits for the agent's own inbox, takes
+    # only `timeout_ms`, touches no file
+    "wait_agent": "agents",
     # session state, not files
     "todo_write": "state", "create_goal": "state", "get_goal": "state",
     "update_goal": "state", "exit_plan_mode": "state",

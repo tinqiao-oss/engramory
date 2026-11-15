@@ -6,6 +6,23 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.4 — 2026-11-15
+
+Social mode keeps the owner's conversation after Continue generating, on dsh 0.2.2-rc.2
+and later.
+
+- **dsh: with social mode on, Continue generating made the owner's conversation an
+  outsider's.** From dsh 0.2.2-rc.2, after a failed request the send button becomes
+  *Continue generating*, which sends an empty prompt of a new kind, `retry`. The plugin
+  did not know the kind, read it as someone else's message, and from then on gave that
+  conversation no memory — refused, never leaked. dsh stamps it with the same marks as a
+  typed prompt, and it is now judged by them: the owner's from the owner's own dsh
+  window, anyone else's otherwise. A conversation already marked by one is judged again
+  from its log once dsh loads this version.
+- **dsh 0.2.2-rc.2 and 0.2.2-rc.3 declared compatible**, after the end-to-end run passed
+  on them, as on the fourteen releases declared before. Their new `wait_agent` tool waits
+  for the agent's own messages and touches no file.
+
 ## 1.5.3 — 2026-11-15
 
 Moving the dsh plugin's global store: a save waiting for approval is held off too, and a

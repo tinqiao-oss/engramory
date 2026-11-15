@@ -47,7 +47,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.5.3`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@1.5.4`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
 for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
 install that, then quit dsh from the tray and open it again. Your memory and settings stay.
@@ -293,8 +293,8 @@ writable. This table is pinned by `node --test` in CI.
   that links out of the project, set `indexPath`. A project's root is found by
   its `.git` only, and a project store created mid-session can take ten seconds to appear.
 - **Social mode knows you by what dsh's window sends.** Apart from a bridge's owner
-  messages, only what you type in dsh's own window is yours, and not when the browser's
-  time zone cannot be read. A kind of
+  messages, only what you type in dsh's own window (and its Continue generating) is
+  yours, and not when the browser's time zone cannot be read. A kind of
   message a later dsh adds counts as someone else's until this plugin knows it: your
   conversation may lose the memory, never the other way round.
 - **What the memory page opens is checked by path.** dsh's opener resolves the path once

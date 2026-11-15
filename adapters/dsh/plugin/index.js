@@ -1539,16 +1539,26 @@ const INERT_PRODUCERS = new Set([
 const ACTION_CARD_NOTICE = 'action-cards'
 
 /**
+ * dsh 0.2.2-rc.2's `retry` kind: the empty prompt its window sends from Continue generating
+ * after a failed request. dsh-api-session-controller's `prompt` stamps it as it stamps a
+ * typed prompt — kind `retry` for empty content, `user` otherwise, the same request id,
+ * time zone and `principal` — so it is judged by the same marks: the owner's from the
+ * owner's own window, anyone else's otherwise.
+ */
+const RETRY = 'retry'
+
+/**
  * Who wrote one user message, by the source dsh stamps on it (a message queued in
  * `agent/inbox/spliced` or committed in `user/message`):
- *   'owner'    the signed-in owner, typing in dsh's own window (desktop or web): dsh's
- *              browser client sends every prompt with a request id and the browser's time
- *              zone, and dsh records any caller other than the owner as `principal`. Or a
+ *   'owner'    the signed-in owner, typing in dsh's own window (desktop or web), or asking
+ *              it to continue (RETRY): dsh's browser client sends every prompt with a
+ *              request id and the browser's time zone, and dsh records any caller other
+ *              than the owner as `principal`. Or a
  *              plugin declared the message the owner's: `speaker: { role: 'owner' }` on its
  *              source — the standard a chat bridge follows for the owner's own chat (README);
- *   'other'    anyone else: dsh's `user` kind without both marks (a program calling dsh
- *              web's API, `dsh headless`, an editor or terminal client, a bridge writing that
- *              kind), any kind dsh's own producers do not use (`plugin:<name>`, as chat
+ *   'other'    anyone else: dsh's `user` or `retry` kind without both marks (a program
+ *              calling dsh web's API, `dsh headless`, an editor or terminal client, a bridge
+ *              writing that kind), any kind dsh's own producers do not use (`plugin:<name>`, as chat
  *              bridges write, or any other), `speaker: { role: 'guest' }`, and a source that
  *              cannot be read. Anyone in a group, the owner included: a `speaker` whose
  *              `chat` is set to anything but 'private' ('group' is the standard) — the whole
@@ -1566,7 +1576,7 @@ function speakerOf(source) {
   if (speaker?.role === 'owner') return 'owner'
   if (speaker?.role === 'guest') return 'other'
   const kind = source.kind === 'plugin' ? legacyKind(source.plugin) : source.kind
-  if (kind === 'user') {
+  if (kind === 'user' || kind === RETRY) {
     return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
       source.principal === undefined ? 'owner' : 'other'
   }
@@ -1675,8 +1685,9 @@ const SPEAKERS = {
   // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes;
   // 3: a message in a group chat is someone else's, the owner's included; 4: dsh 0.1's own
   // `{ kind: 'plugin' }` messages are nobody's, no longer an outsider's; 5: dsh 0.2.2's
-  // `action-cards` notices are nobody's, no longer an outsider's, ACTION_CARD_NOTICE).
-  stateVersion: 5,
+  // `action-cards` notices are nobody's, no longer an outsider's, ACTION_CARD_NOTICE; 6: dsh
+  // 0.2.2-rc.2's `retry` is judged as a typed prompt is, no longer always an outsider's, RETRY).
+  stateVersion: 6,
   // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
   stateSchema: {
     parse(value) {
