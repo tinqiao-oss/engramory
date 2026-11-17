@@ -6,6 +6,16 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.5 — 2026-11-17
+
+The dsh plugin now declares the dsh it needs, with a floor only.
+
+- **`engines.dsh` is `>=0.1.0-rc.7`.** Plugin markets read this field, and without it
+  they labelled the plugin "no host requirement declared". It has no upper bound, so a
+  newer dsh does not refuse the install: dsh 0.2.1-alpha.4 and later check the range
+  with prereleases included, and earlier releases do not check it at all. The releases actually
+  run end to end are still the ones in `dsh.compatibility.dshReleases`. No code changed.
+
 ## 1.5.4 — 2026-11-15
 
 Social mode keeps the owner's conversation after Continue generating, on dsh 0.2.2-rc.2

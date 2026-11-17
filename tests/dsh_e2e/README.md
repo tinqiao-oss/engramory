@@ -81,9 +81,12 @@ runs already cover every release; what the published run adds is that the regist
 tarball carries the runtime digest that was tested, which any release shows, and each
 release costs about a minute.
 
-`dsh.compatibility.dsh` is a display range for directories, not evidence. The plugin
-deliberately declares no `engines.dsh` or `@deepseek-ai/dsh*` peer range, so an
-untested future dsh is not refused outright. DSH-Store installs only on an exact
+`dsh.compatibility.dsh` is a display range for directories, not evidence. From 1.5.5
+`engines.dsh` declares a floor only (`>=0.1.0-rc.7`) and still no `@deepseek-ai/dsh*`
+peer range, so an untested future dsh is not refused outright: dsh 0.2.1-alpha.4
+and later check `engines.dsh` with prereleases included, and earlier releases do not
+check it. Never add an upper bound there; it would turn "not run on this release
+yet" into a hard refusal. DSH-Store installs only on an exact
 `compatible` record and reviews a rolling window (npm `latest` plus the two
 undeprecated releases before it; see its
 [registry README](https://github.com/AI-Scarlett/DSH-Store/blob/main/registry/README.md)).

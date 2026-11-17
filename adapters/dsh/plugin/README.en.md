@@ -47,7 +47,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.5.4`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@1.5.5`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
 for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
 install that, then quit dsh from the tray and open it again. Your memory and settings stay.
@@ -56,7 +56,8 @@ these steps.
 
 Compatible dsh releases are listed in
 `dsh.compatibility.dshReleases` in [`package.json`](https://github.com/tinqiao-oss/engramory/blob/master/adapters/dsh/plugin/package.json); an unlisted release
-is unverified.
+is unverified. `engines.dsh` gives only a floor (`>=0.1.0-rc.7`), so a newer dsh does
+not refuse the install; it is just not verified yet.
 
 **Where the memory lives:**
 
