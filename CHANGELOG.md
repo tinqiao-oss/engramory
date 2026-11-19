@@ -6,6 +6,21 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.6 — 2026-11-19
+
+Moving the dsh plugin's global store: a place whose last name ends in a space is refused,
+instead of starting a move that cannot run.
+
+- **dsh: on Linux and macOS, a place whose last name ends in a space started a move that
+  failed at once.** A place typed as `/home/me/notes /` passed the check on the text as
+  typed, but resolved it is `/home/me/notes `, which a move's journal may not name. The
+  move was written down and reported as started, then failed with an error nothing
+  caught, and held the home's lock for fifteen minutes, or until that dsh stopped; the
+  next check after that, within a minute, set the journal it left aside, and the store
+  stayed where it was. A journal is now checked as it will be read back before it is
+  written, and such a place is refused like any other a move does not take. Windows
+  already refused it by name.
+
 ## 1.5.5 — 2026-11-17
 
 The dsh plugin now declares the dsh it needs, with a floor only.

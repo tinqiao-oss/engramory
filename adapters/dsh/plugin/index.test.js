@@ -4244,6 +4244,16 @@ test('store: with no store yet, a move names the new place and makes its folder'
     { status: 400, body: { ok: false, error: 'source', reason: 'unavailable' } })
 })
 
+test('store: a move its journal could not name is refused, leaving no journal and no lock', async () => {
+  // a dsh home so deep that its default place is past the depth a journal may name
+  const home = join(scratch('mv-deep'), ...Array.from({ length: 32 }, () => 'd'))
+  mkdirSync(home, { recursive: true })
+  const m = storeMount(home)
+  assert.deepEqual(await m.call('POST', { to: join(scratch('mv-deep-to'), 'v') }),
+    { status: 400, body: { ok: false, error: 'place', reason: 'invalid' } })
+  assert.deepEqual(fs.readdirSync(home), [], 'no journal, and the lock let go')
+})
+
 test('store: a place a move refuses, by name or as the disk has it, and nothing is written', async () => {
   const { home, dir } = homeStore('mv-bad')
   const m = storeMount(home)
@@ -4255,6 +4265,8 @@ test('store: a place a move refuses, by name or as the disk has it, and nothing 
   const cases = [
     ['relative/vault', 'relative'],
     [` ${join(full, 'v')}`, 'invalid'],
+    // a last name ending in a space once resolved (refused by name on Windows, as read back elsewhere)
+    [`${join(full, 'v ')}${process.platform === 'win32' ? '\\' : '/'}`, 'invalid'],
     [resolve('/'), 'root'],
     [home, 'reserved'],
     [join(home, 'profiles', 'web'), 'reserved'],

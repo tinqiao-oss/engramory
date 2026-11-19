@@ -3100,9 +3100,13 @@ async function startMove(request, settings) {
     const source = await sourceProblem(state).catch(() => 'unreadable')
     if (source !== undefined) return json(400, { ok: false, error: 'source', reason: source })
     const written = { version: 1, id, phase: 'prepared', from: state.store, to: place.to }
+    // a journal is written only as it reads back (journalOf): a place that is fine as typed
+    // but not once resolved — a last name ending in a space, say — is refused here instead
+    const journal = journalOf(written, root, state.fallback)
+    if (journal === undefined) return json(400, { ok: false, error: 'place', reason: 'invalid' })
     await writeHomeJson(root, JOURNAL_FILE, written)
     handedOver = true
-    run(root, journalOf(written, root, state.fallback), settings, id, true)
+    run(root, journal, settings, id, true)
     return json(202, { ok: true, id })
   } catch (error) {
     return json(500, { ok: false, error: 'failed', message: String(error?.message ?? error) })
