@@ -9,13 +9,14 @@ Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 ## 2.1.0 — 2026-11-21
 
 The dsh plugin's memory page no longer checks npm for a newer version: from dsh 0.2.2 the
-desktop app's Plugins page updates the plugin itself. The plugin now makes no request to
+desktop app's Plugins page updates the plugin itself, installed from npm under its name. The plugin now makes no request to
 anywhere outside dsh.
 
 - **dsh: "Check for updates" is removed from the memory page**, with the upgrade steps it
   listed and the plugin's version line in the page's footer (the banner still shows the
-  version). On dsh 0.2.2 and later use *Update* on the Plugins page; on 0.2.1, uninstall
-  and install `dsh-engramory@<version>` (plugin README, *Install*).
+  version). On dsh 0.2.2 and later use *Update* on the Plugins page, for a plugin installed
+  from npm as `dsh-engramory` (a linked copy has none); on 0.2.1, uninstall and
+  install `dsh-engramory@<version>` (plugin README, *Install*).
 
 ## 2.0.0 — 2026-11-21
 

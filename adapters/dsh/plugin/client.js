@@ -1070,7 +1070,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       book: [['path', { d: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z' }], ['path', { d: 'M4 19V5' }]],
       issue: [['path', { d: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z' }]],
       mail: [['rect', { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ['path', { d: 'm3 7 9 6 9-6' }]],
-      package: [['path', { d: 'M12 3 4 7v10l8 4 8-4V7z' }], ['path', { d: 'm4 7 8 4 8-4M12 11v10' }]],
       user: [['circle', { cx: 12, cy: 8.6, r: 3.6 }], ['path', { d: 'M5 19.5c1.2-3.3 3.9-5 7-5s5.8 1.7 7 5z' }]],
       feedback: [['path', { d: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4 3v-3h-.5a2 2 0 0 1-2-2z' }],
         ['path', { d: 'm9 10.3 2 2 4-4' }]],
