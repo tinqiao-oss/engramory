@@ -179,9 +179,8 @@ with the installer, run the same host and paths again with `--uninstall` (add
 python tools/engramory_init.py codex --uninstall
 ```
 
-It removes only what the installer put there: the rules block, the skill copy, the
-Codex hooks. **The memory store is never removed**; delete it yourself if you want it
-gone.
+It removes only what the installer put there: the rules block and the skill copy.
+**The memory store is never removed**; delete it yourself if you want it gone.
 
 ## Security & privacy
 

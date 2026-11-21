@@ -94,7 +94,8 @@ const INDEX_CONTEXT_ORDER = 300
  * is one where others talk to the character, and the private recall left would hand them the
  * memory: it gets none in any conversation — no index, no skill, no companion rules, no
  * reminder — until `audience` is taken out (a save on the settings page does that). The cap
- * still holds. A bridge that brings others in belongs in a profile of its own.
+ * still holds. A bridge that brings others in belongs under a dsh home of its own: every
+ * profile of one home shares the global store.
  */
 const closedBySocial = (config) => config.companion === true && config.audience === 'social'
 
@@ -1892,8 +1893,9 @@ function dshHome() {
  * The memory page moves it (storeRoute): the store is copied to the new place, the file is
  * switched to name it, and the old place is kept as a backup beside where it was — renamed
  * aside, `<name>.backup-<date>`, or left as it is where it cannot be — for the user to delete.
- * Nothing is deleted, so nothing is undone or carried on: a move cut short leaves at most a
- * copy (`.engramory-memory-moving-<id>`) beside the new place, and the store where it was.
+ * Nothing of the user's is deleted, so nothing is undone or carried on: a move cut short
+ * leaves a copy beside the new place (`.engramory-memory-moving-<id>`) or at it, and the store
+ * where it was until the switch; after the switch, the old place where it was, not renamed.
  * The places it moved from stay listed, the latest MAX_RETIRED: dsh's file tools are turned
  * from them to where it is now (refuseMoving), for a model still holding an old path in its
  * conversation.
@@ -2458,26 +2460,28 @@ async function moveStore(request, settings) {
     if (source !== undefined) return json(400, { ok: false, error: 'source', reason: source })
     const move = { from: state.store, to: place.to, staging: join(dirname(place.to), `${STORE_DIR}-moving-${moveId()}`) }
     moveInProgress = move
+    const made = { staging: false, published: false }
     let copied = false
-    let published = false
     try {
       await wait(MOVE_DRAIN_MS)
-      copied = await copyStore(move.from, move.staging, state.fallback)
-      await publish(move, copied)
-      published = copied
+      copied = await copyStore(move.from, move.staging, state.fallback, made)
+      await publish(move, copied, made)
       await switchTo(root, move.from, move.to)
     } catch (error) {
-      // before the switch: the store stays where it was, and the copy goes
-      await removeOwn(published ? move.to : move.staging).catch(() => {})
-      return json(500, { ok: false, ...problemOf(error) })
+      // Before the switch: the store stays where it was. The copy goes only while it is still in
+      // the folder this move made for it, which nothing else writes to; once at the new place, a
+      // sync client may have added to it, so it is left there, and the page is told.
+      if (made.staging && !made.published) await removeOwn(move.staging).catch(() => {})
+      return json(500, { ok: false, ...problemOf(error), ...(made.published ? { left: move.to } : {}) })
     }
     let backup
     let kept = false
     if (copied) {
-      backup = await backupOf(move.from)
       try {
+        backup = await backupOf(move.from)
         await persist(() => fsp.rename(move.from, backup))
       } catch {
+        // held open, or a name past what the disk takes: the switch is done all the same
         backup = move.from
         kept = true
       }
@@ -2495,11 +2499,12 @@ async function moveStore(request, settings) {
 const moveId = () => randomUUID().replace(/-/g, '').slice(0, 8)
 
 /**
- * Copy the store at `from` into `staging`, a folder not there yet; false where there is no
- * store to copy, which only the default place may be (sourceProblem): a moved store gone since
- * it was looked at (a drive pulled out) stops the move ('unavailable').
+ * Copy the store at `from` into `staging`, a folder this move makes (`made.staging` once it
+ * has); false where there is no store to copy, which only the default place may be
+ * (sourceProblem): a moved store gone since it was looked at (a drive pulled out) stops the
+ * move ('unavailable').
  */
-async function copyStore(from, staging, fallback) {
+async function copyStore(from, staging, fallback, made) {
   let stat
   try {
     stat = await fsp.lstat(from)
@@ -2510,17 +2515,18 @@ async function copyStore(from, staging, fallback) {
   }
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('link')
   await fsp.mkdir(dirname(staging), { recursive: true })
+  await fsp.mkdir(staging) // not there already: a folder of the same name is not this move's
+  made.staging = true
   await copyInto(from, staging, 0, { entries: 0, bytes: 0 })
   return true
 }
 
 /**
- * Copy the folder `src` into `dst`, a folder not there yet, file by file — each read once,
+ * Copy what the folder `src` holds into `dst`, an empty folder, file by file — each read once,
  * written new, read back and compared. Only folders and regular files: a link, or anything
  * else, stops the move, as does a store past the bounds.
  */
 async function copyInto(src, dst, depth, budget) {
-  await fsp.mkdir(dst)
   for (const name of await fsp.readdir(src)) {
     if (++budget.entries > MAX_MOVE_ENTRIES) throw moveError('tooMany')
     const from = join(src, name)
@@ -2529,6 +2535,7 @@ async function copyInto(src, dst, depth, budget) {
     if (stat.isSymbolicLink()) throw moveError('link')
     if (stat.isDirectory()) {
       if (depth >= MAX_MOVE_DEPTH) throw moveError('tooDeep')
+      await fsp.mkdir(to)
       await copyInto(from, to, depth + 1, budget)
     } else if (stat.isFile()) {
       if (budget.bytes + stat.size > MAX_MOVE_BYTES) throw moveError('tooBig') // before it is read
@@ -2545,13 +2552,22 @@ async function copyInto(src, dst, depth, budget) {
 }
 
 /**
- * The copy renamed to the new place, an empty folder there taken out first. With no copy (no
- * store yet), the new place's folder is made, so that a moved store always has one.
+ * The copy renamed to the new place, an empty folder there taken out first (`made.published`
+ * once it is there). With no copy (no store yet), the new place's folder is made, so that a
+ * moved store always has one — still empty, as placeFor found it: one a sync client filled in
+ * meanwhile is not taken for the store.
  */
-async function publish(move, copied) {
+async function publish(move, copied, made) {
   await fsp.mkdir(dirname(move.to), { recursive: true })
   if (!copied) {
-    await fsp.mkdir(move.to, { recursive: true })
+    try {
+      await fsp.mkdir(move.to)
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+      const stat = await fsp.lstat(move.to)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw moveError('notDir')
+      if ((await fsp.readdir(move.to)).length > 0) throw moveError('notEmpty')
+    }
     return
   }
   try {
@@ -2562,6 +2578,7 @@ async function publish(move, copied) {
     if (!absent(error)) throw error
   }
   await persist(() => fsp.rename(move.staging, move.to))
+  made.published = true
 }
 
 /**

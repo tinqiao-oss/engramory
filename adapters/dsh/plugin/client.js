@@ -72,7 +72,7 @@ window.__ModuleLoader__.load({
       expression: '配置文件里有设置是用 !!js 表达式写的，这里显示不了它的实际值，所以只读。请直接改 cordis.patch.yml。',
       companion: '大肥鱼模式',
       companionHint: '多记三类：经历、约定、我自己，用角色口吻回忆。',
-      closedSocial: '社交模式在 2.0 去掉了。这个 profile 还设着它，所以 Engramory 现在不给任何对话记忆。接 QQ、微信等让别人也能聊的机器人，请给它单独开一个 dsh profile；在这里保存一次设置，记忆就恢复。',
+      closedSocial: '社交模式在 2.0 去掉了。这个 profile 还设着它，所以 Engramory 现在不给任何对话记忆。接 QQ、微信等让别人也能聊的机器人，请给它另用一个 dsh 主目录（同一个主目录下的 profile 共用记忆库）；在这里保存一次设置，记忆就恢复。',
       reopen: '恢复记忆',
       cap: '索引上限',
       capHint: '默认 200 行 / 25600 字节，超过后 AI 要先压缩才能再写。',
@@ -111,6 +111,7 @@ window.__ModuleLoader__.load({
       placeMovedKept: '搬好了。旧库有文件正被占用，没能改名，原样留在 {backup} 作备份；确认新位置没问题后可以删掉。AI 不会再往那里写。',
       placeSame: '记忆库已经在这里了。',
       placeMoveFailed: '没搬成：{reason}',
+      placeCopyLeft: '新位置 {left} 留下了一份副本，用不着的话可以删掉。',
       placePinned: '配置里固定了索引（indexPath），记忆库就在它所在的文件夹，这里不能搬。',
       placeRemote: 'dsh 主目录在网络位置上，这里不能搬。',
       placeProblem: '记录记忆库位置的文件读不懂，暂时找不到记忆库：{file}。把它改对后刷新这一页。',
@@ -188,7 +189,7 @@ window.__ModuleLoader__.load({
       howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
       howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
       howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），点「全局记忆」右上角的「更换存储地址」，插件会整个复制过去，旧库留作备份。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
-      howToSocial: '想让别人也能跟你的 AI 聊（接了 QQ、微信等）？给那个机器人单独开一个 dsh profile，别接进这个 profile：这里的每个对话都能用你的记忆。',
+      howToSocial: '想让别人也能跟你的 AI 聊（接了 QQ、微信等）？给那个机器人另用一个 dsh 主目录（设 DSH_HOME），或者它在的 profile 里不装这个插件：同一个主目录下的 profile 共用记忆库，这里的每个对话都能用你的记忆。',
       feedbackLead: '遇到问题或有建议：',
       feedbackIssue: '到 GitHub 提 issue',
       feedbackMail: '，或发邮件到',
@@ -259,7 +260,7 @@ window.__ModuleLoader__.load({
       expression: 'A setting in the config is written as a !!js expression, whose value this page cannot show, so it is read-only. Edit cordis.patch.yml directly.',
       companion: 'Companion mode (大肥鱼模式)',
       companionHint: 'Keeps three more kinds of note — moments, plans, the character itself — and recalls in character.',
-      closedSocial: 'Social mode was removed in 2.0. This profile is still set to it, so Engramory gives no conversation any memory now. Give a bot others talk to (through QQ, WeChat and the like) a dsh profile of its own; save the settings here once and the memory is back.',
+      closedSocial: 'Social mode was removed in 2.0. This profile is still set to it, so Engramory gives no conversation any memory now. Run a bot others talk to (through QQ, WeChat and the like) under a dsh home of its own (the profiles of one home share the store); save the settings here once and the memory is back.',
       reopen: 'Restore memory',
       cap: 'Index cap',
       capHint: 'Default 200 lines / 25600 bytes; past it the AI must compact before writing more.',
@@ -298,6 +299,7 @@ window.__ModuleLoader__.load({
       placeMovedKept: 'Moved. A file in the old store was held open, so it could not be renamed: it stays at {backup} as the backup. Delete it once the new place looks right; the AI no longer writes there.',
       placeSame: 'The memory is there already.',
       placeMoveFailed: 'Not moved: {reason}',
+      placeCopyLeft: 'A copy was left at the new place, {left}: delete it if you do not need it.',
       placePinned: 'An index is pinned (indexPath): the memory is in its folder, and is not moved here.',
       placeRemote: 'dsh\'s home folder is on a network place: the memory is not moved here.',
       placeProblem: 'The file that says where the memory is cannot be read as written, so the memory cannot be found for now: {file}. Correct it, then refresh this page.',
@@ -375,7 +377,7 @@ window.__ModuleLoader__.load({
       howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
       howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
       howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), click Change location at the top right of the global memory: the plugin copies it all there and keeps the old store as a backup. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
-      howToSocial: 'Want others to talk to your AI too (through QQ, WeChat and the like)? Give that bot a dsh profile of its own rather than bridging it into this one: every conversation here gets your memory.',
+      howToSocial: 'Want others to talk to your AI too (through QQ, WeChat and the like)? Run that bot under a dsh home of its own (DSH_HOME), or without this plugin in its profile: the profiles of one home share the store, and every conversation here gets your memory.',
       feedbackLead: 'Found a problem or have an idea? ',
       feedbackIssue: 'Open an issue on GitHub',
       feedbackMail: ', or email ',
@@ -844,13 +846,16 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         alive.current = false
         chooserRequest.current?.abort() // closed: the chooser it asked for closes with it
       }, [])
+      // where the store is, as the plugin says now (undefined when that cannot be read)
       const load = useCallback(async () => {
         try {
           const response = await request(STORE_API)
           if (!response.ok || response.body === undefined) throw new Error(`HTTP ${response.status}`)
           if (alive.current) setState({ phase: 'ready', data: response.body })
+          return response.body
         } catch {
           if (alive.current) setState((s) => (s.phase === 'ready' ? s : { phase: 'error' }))
+          return undefined
         }
       }, [])
       useEffect(() => { load() }, [load])
@@ -887,6 +892,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
 
       const move = async (to) => {
         if (moving.current) return
+        const before = state.phase === 'ready' ? state.data.store : undefined
         moving.current = true
         setBusy(true)
         setBanner(undefined)
@@ -908,10 +914,18 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
             onMoved?.()
             return
           }
-          await load() // where the store is now, moved or not
+          const now = await load() // where the store is now, moved or not
           if (!alive.current) return
           if (!response.ok || body.ok !== true) {
-            setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, body.reason ?? body.error, body.detail) }) })
+            // the answer lost on its way back: where the store is now says it moved after all
+            if (typeof before === 'string' && typeof now?.store === 'string' && now.store !== before) {
+              setText('')
+              setBanner({ tone: 'ok', text: t('placeMoved') })
+              onMoved?.()
+              return
+            }
+            const left = typeof body.left === 'string' ? ` ${t('placeCopyLeft', { left: legible(body.left) })}` : ''
+            setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, body.reason ?? body.error, body.detail) }) + left })
             return
           }
           setText('')

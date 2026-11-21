@@ -10,7 +10,7 @@ Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
 A trimmed release: features whose cost outran their use are gone, and moving the dsh
 plugin's store no longer deletes anything. A major version because the Codex hooks and a
-tool go, and `engramory_init.py` loses a host and two flags (README, *Versioning*).
+tool go, and `engramory_init.py` loses a host and three flags (README, *Versioning*).
 
 **If you used one of these:**
 
@@ -18,14 +18,20 @@ tool go, and `engramory_init.py` loses a host and two flags (README, *Versioning
   still set to it gets no memory in any conversation — no index, no rules, no reminder —
   until you save once on the plugin's settings page (or the memory page's *Restore
   memory*), which takes the setting out; both pages say so. The cap still holds. A
-  character others talk to through a bridge belongs in a dsh profile of its own.
-- **The Codex lifecycle hooks** (`engramory_init.py codex --install-hooks`, `--mode`) are
-  removed, with `tools/engramory_sync.py`. Hooks you installed keep running from their
-  copy in your project until you take them out: delete `.codex/engramory/` and the
-  Engramory handlers in `.codex/hooks.json`, or run the 1.5.7 installer's
-  `codex --uninstall`. Codex stays a host through its `AGENTS.md` block and the skill.
-- **Kiro**: `adapters/kiro/` and the `kiro-reader` host are removed. Delete
-  `.kiro/steering/engramory-recall.md` by hand.
+  character others talk to through a bridge needs a dsh home of its own (`DSH_HOME`), or
+  no Engramory where it runs: every profile under one dsh home shares the global store.
+- **The Codex lifecycle hooks** (`engramory_init.py codex --install-hooks`, `--mode`,
+  `--hook-python`) are removed, with `tools/engramory_sync.py`; 2.0's `--uninstall` does
+  not know them. Hooks you installed keep running from their copy in your project until
+  you take them out: run the 1.5.7 installer's `codex --uninstall`, or by hand delete
+  `engramory_codex_hook.py` and `engramory_sync.py` from `.codex/engramory/` (and the
+  folder only if nothing else is in it — it may be where you keep a store), the Engramory
+  handlers in `.codex/hooks.json`, and `.engramory-codex-state.json` / `.lock` in your
+  store. Codex stays a host through its `AGENTS.md` block and the skill.
+- **Kiro**: `adapters/kiro/` and the `kiro-reader` host are removed. Delete by hand what
+  they put in place: `.kiro/steering/engramory-recall.md` (the reader), and the steering
+  file copied from the adapter, `.kiro/steering/engramory.md` or
+  `~/.kiro/steering/engramory.md`.
 - **dsh 0.1** is no longer supported: `engines.dsh` is `>=0.2.1-alpha.5`.
 - **A store move a 1.5 plugin left unfinished** is not taken up again: let 1.5.7 finish it
   (open dsh once) before upgrading. Whatever it had not settled stays on disk in its
@@ -51,6 +57,8 @@ tool go, and `engramory_init.py` loses a host and two flags (README, *Versioning
 - **dsh 0.2.1-rc.5 and 0.2.2-rc.3 to rc.5 are declared compatible**, the last of the 0.2.1
   line and the newest three, which DSH-Store reviews; others are no longer listed, and an
   unlisted release is unverified, not refused (tests/dsh_e2e/README.md).
+- **The installer replaces or removes a skill copy an earlier release installed**, its
+  `tools/engramory_sync.py` included, instead of taking that file for one of yours.
 - **Tests:** in `tests/test_tools.py` and `tests/test_uninstall.py` the direct runner sat
   above some tests, which CI therefore never ran; it is at the end now, and they run.
 

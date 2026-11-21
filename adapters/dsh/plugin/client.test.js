@@ -244,9 +244,11 @@ test('client: a profile still set to social mode says the memory is closed, and 
   // gone in 2.0 (index.js closedBySocial): the settings shown are unchanged, so the save is
   // offered as it is, and done only once the reloaded plugin no longer says closed
   const { slots, react } = await applied()
+  // the plugin reloads after a save: the first read after it may still be the old one
   let posted = false
+  let readsAfter = 0
   const sent = fakeFetch({
-    GET: () => (posted ? settingsData({ companion: true }) : settingsData({ companion: true, closed: true })),
+    GET: () => (posted && ++readsAfter > 1 ? settingsData({ companion: true }) : settingsData({ companion: true, closed: true })),
     POST: () => { posted = true; return { ok: true } },
   })
   const realTimeout = globalThis.setTimeout
@@ -262,6 +264,7 @@ test('client: a profile still set to social mode says the memory is closed, and 
       { revision: 'r1', companion: true, maxLines: 200, maxBytes: 25600 })
     assert.match(textOf(page.tree), /saved/)
     assert.doesNotMatch(textOf(page.tree), /closedSocial/)
+    assert.ok(readsAfter >= 2, 'waited past a read that still said closed')
   } finally {
     globalThis.setTimeout = realTimeout
   }
@@ -1434,6 +1437,26 @@ test('client: a place the plugin turns down says why, and so does a move that fa
     await settleUntil(view, /placeMoveFailed/)
     assert.match(textOf(view.tree), /placeMoveFailed\{"reason":"whyFailed \(EBUSY\)"\}/)
     assert.equal(placeInput(view.tree).props.value, 'D:\\vault', 'kept, to try again')
+  })
+  // a copy left at the new place is named
+  placeFetch({ GET: placeData(), POST: { status: 500, body: { ok: false, error: 'pointer', left: 'D:\\vault' } } })
+  await withPlacePage(async (view) => {
+    await typeIn(view, 'D:\\vault')
+    button(view.tree, 'placeMove').props.onClick()
+    await settleUntil(view, /placeMoveFailed/)
+    assert.match(textOf(view.tree), /placeCopyLeft\{"left":"D:\\\\vault"\}/)
+  })
+  // the answer lost on its way back, the store moved all the same: said so, from where it is now
+  placeFetch({
+    GET: (log) => (log.some((s) => s.method === 'POST') ? placeData({ store: 'D:\\vault' }) : placeData()),
+    POST: () => new Error('the connection dropped'),
+  })
+  await withPlacePage(async (view) => {
+    await typeIn(view, 'D:\\vault')
+    button(view.tree, 'placeMove').props.onClick()
+    await settleUntil(view, /placeMoved/)
+    assert.match(textOf(view.tree), /placeMoved/)
+    assert.doesNotMatch(textOf(view.tree), /placeMoveFailed/)
   })
 })
 

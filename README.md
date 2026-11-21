@@ -122,7 +122,7 @@ dsh 插件：`dsh plugin --profile <名字> remove dsh-engramory`。用安装脚
 python tools/engramory_init.py codex --uninstall
 ```
 
-只删安装器自己的东西：规则块、skill 副本、Codex hook。**记忆库永远不删**，真想清空请自己删。
+只删安装器自己的东西：规则块、skill 副本。**记忆库永远不删**，真想清空请自己删。
 
 ## 安全与隐私
 

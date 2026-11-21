@@ -2065,32 +2065,6 @@ test('companion rules name the three life headings and keep "delete only when as
   }
 })
 
-test('companion mode: a link inside the pinned directory is closed by the name it is called by', (t) => {
-  const pins = scratch('pins')
-  writeFileSync(join(pins, 'pinned.md'), '- x\n', 'utf8')
-  const outside = scratch('outside')
-  writeFileSync(join(outside, 'private.md'), 'secret\n', 'utf8')
-  if (fileLink(join(outside, 'private.md'), join(pins, 'link.md')) === null) {
-    return t.skip('no symlink privilege here')
-  }
-  const { guard } = mount({ ...COMPANION, indexPath: join(pins, 'pinned.md') }, { workingDirectory: sessionDirs() })
-  const reason = withDshHome(scratch('home'), () => guard({ name: 'read', arguments: { file_path: join(pins, 'link.md') },
-    ...as(theirs('douyin-11', scratch('companion'))) }))
-  assert.match(reason, /closed to it/)
-})
-
-test('companion mode: a pinned index that is a link guards the directory it points into', (t) => {
-  const real = scratch('real')
-  const target = join(real, 'notes.md')
-  writeFileSync(target, '- x\n', 'utf8')
-  const pins = scratch('pins')
-  if (fileLink(target, join(pins, 'pinned.md')) === null) return t.skip('no symlink privilege here')
-  const { guard } = mount({ ...COMPANION, indexPath: join(pins, 'pinned.md') }, { workingDirectory: sessionDirs() })
-  const reason = withDshHome(scratch('home'), () => guard({ name: 'read', arguments: { file_path: join(real, 'other.md') },
-    ...as(theirs('douyin-7', scratch('companion'))) }))
-  assert.match(reason, /closed to it/)
-})
-
 test('companion mode tells the skill a companion conversation is the exception to "not a task"', () => {
   for (const [language, mark] of [['en', 'Companion mode is the exception'], ['zh', '大肥鱼模式是例外']]) {
     const on = mount({ ...COMPANION, language }).skills[0]
@@ -3923,6 +3897,32 @@ test('store: a store gone between the ask and the copy (a drive pulled out) is n
   assert.equal(fs.existsSync(to), false)
 })
 
+test('store: a switch that fails once the copy is at the new place leaves the copy there, and says so', async () => {
+  // a sync client may have added to it by then: nothing at the new place is deleted
+  const { home, dir } = homeStore('mv-left')
+  const before = treeOf(dir)
+  const to = join(scratch('mv-left-to'), 'vault')
+  const m = storeMount(home)
+  const answer = await duringMove(m, to, () => writeFileSync(join(home, POINTER), '{ not json', 'utf8'))
+  assert.deepEqual(answer, { status: 500, body: { ok: false, error: 'pointer', left: to } })
+  assert.deepEqual(treeOf(to), before, 'the copy is left where it is')
+  assert.deepEqual(treeOf(dir), before, 'and the store too')
+  assert.deepEqual(fs.readdirSync(dirname(to)), ['vault'], 'no other copy beside it')
+})
+
+test('store: with no store yet, a new place something filled in meanwhile is not taken for the store', async () => {
+  const home = scratch('mv-none-filled')
+  const to = join(scratch('mv-none-filled-to'), 'vault')
+  const m = storeMount(home)
+  const answer = await duringMove(m, to, () => {
+    mkdirSync(to, { recursive: true })
+    writeFileSync(join(to, INDEX), '- [x](x.md) - someone else\'s\n', 'utf8')
+  })
+  assert.deepEqual(answer, { status: 500, body: { ok: false, error: 'notEmpty' } })
+  assert.equal(fs.existsSync(join(home, POINTER)), false, 'not switched')
+  assert.deepEqual(fs.readdirSync(to), [INDEX], 'and what was there is left')
+})
+
 test('store: an old place something holds open is kept where it is, as the backup, and the page is told', async () => {
   const { home, dir } = homeStore('mv-kept')
   const before = treeOf(dir)
@@ -3990,32 +3990,6 @@ test('store: a place the store moved from, spelled through a link, does not hold
   writeJson(join(home, POINTER), { version: 1, store, retired: [join(alias, 'A')] })
   const m = storeMount(home)
   assert.equal(m.guardAt(write(join(store, 'a.md'), 'x')), undefined)
-})
-
-test('store: a pinned index linked into a place not there yet is closed there too', () => {
-  const home = scratch('mv-pin-dangling')
-  const future = join(scratch('mv-pin-drive'), 'future')
-  const alias = join(scratch('mv-pin-link'), 'alias')
-  symlinkSync(future, alias, linkKind)
-  const pinDir = scratch('mv-pin-dir')
-  const pin = join(pinDir, INDEX)
-  try {
-    symlinkSync(join(alias, 'notes', INDEX), pin, 'file')
-  } catch {
-    return // no file links here (Windows without the right to make them): nothing to check
-  }
-  const { guard } = withDshHome(home, () => mount({ ...COMPANION, indexPath: pin }, { workingDirectory: sessionDirs() }))
-  const reason = withDshHome(home, () => guard({ name: 'write',
-    arguments: { file_path: join(future, 'notes', INDEX), content: 'x' },
-    ...as(theirs('qq-p', scratch('mv-pin-cwd'))) }))
-  assert.match(reason ?? '', /closed to it/)
-})
-
-test('store: a move renews its lock whole, leaving nothing beside it', async () => {
-  const { home } = homeStore('mv-renew')
-  const m = storeMount(home)
-  assert.equal((await m.move(join(scratch('mv-renew-to'), 'v'))).body.ok, true)
-  assert.deepEqual(fs.readdirSync(home).filter((n) => n.includes('.lock')), [], 'no lock, and no renewal left over')
 })
 
 /** dsh's directory chooser as the memory page uses it: `native`, answering with what `choose` gives. */

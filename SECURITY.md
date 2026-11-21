@@ -38,12 +38,12 @@ with details and a minimal repro. We aim to acknowledge within a few business da
   `apply_patch` (dsh 0.2.2-alpha.3 on, off by default), whose paths are in its patch
   text. Shell tools (Bash, PowerShell, background commands), MCP file tools, external
   editors and sync clients go past both.
-- **The dsh plugin gives the memory to every conversation in a profile.** A bridge that
-  brings other people into a profile (a chat bot, say) brings them to the memory too:
-  keep it in a profile of its own. That keeps the memory and its rules out of their
-  conversations; a shell tool still reads any file, and another profile on the same
-  account can read the store, so real isolation needs filesystem permissions or a
-  sandbox. Social mode, which tried to tell the owner's conversations apart within one
+- **The dsh plugin gives the memory to every conversation, in every profile of a dsh
+  home.** A bridge that brings other people in (a chat bot, say) brings them to the
+  memory too: run it under a dsh home of its own (`DSH_HOME`), or without Engramory —
+  another profile in the same home shares the global store. That keeps the memory and
+  its rules out of their conversations; a shell tool still reads any file the account
+  can, so real isolation needs filesystem permissions or a sandbox. Social mode, which tried to tell the owner's conversations apart within one
   profile, was removed in 2.0; a profile still set to it gets no memory at all until
   the setting is taken out.
 - **Moving the dsh plugin's global store deletes nothing.** The store route copies

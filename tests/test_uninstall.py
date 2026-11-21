@@ -386,6 +386,21 @@ def test_force_reinstall_replaces_only_the_skills_own_files(tmp_path):
     assert (skill / "SKILL.md").is_file() and (skill / "tools").is_dir()
 
 
+def test_a_copy_an_older_release_installed_is_replaced_and_removed_whole(tmp_path):
+    """1.x shipped tools/engramory_sync.py: not taken for a user's file when it is gone."""
+    code, out = _run("codex", tmp_path, "--install-skill")
+    assert code == 0, out
+    tools = tmp_path / ".agents" / "skills" / "engramory" / "tools"
+    (tools / "engramory_sync.py").write_text("# the 1.x sync tool\n", encoding="utf-8")
+    code, out = _run("codex", tmp_path, "--install-skill", "--force")
+    assert code == 0, out
+    assert not (tools / "engramory_sync.py").exists()
+    (tools / "engramory_sync.py").write_text("# the 1.x sync tool\n", encoding="utf-8")
+    code, out = _run("codex", tmp_path, "--uninstall")
+    assert code == 0, out
+    assert not tools.exists(), out
+
+
 def test_force_reinstall_refuses_a_store_inside_a_payload_dir(tmp_path):
     code, out = _run("codex", tmp_path, "--install-skill")
     assert code == 0, out

@@ -329,6 +329,11 @@ _PAYLOAD_FILES = {
     "tools": ("engramory_check.py", "engramory_doctor.py", "engramory_init.py",
               "engramory_trace.py"),
 }
+# Payload files an earlier release shipped and this one does not: still ours to replace or
+# remove, so that a reinstall over, or an uninstall of, an older copy is not refused for them.
+_FORMER_PAYLOAD_FILES = {
+    "tools": ("engramory_sync.py",),  # 1.x: the Codex lifecycle hooks' sync tool, gone in 2.0
+}
 # Every version of every file in templates/ a release has shipped (sha256, line
 # endings as LF). One that matches none has been edited and may be a store's index
 # or note (`--memory-root .agents/skills/engramory/templates`). A test checks the
@@ -378,7 +383,8 @@ def _not_ours(skill_root, name):
                         not f.is_file() or f.is_symlink() or f.suffix != ".pyc"
                         for f in entry.iterdir()):
                     others.append(entry.name + "/")
-            elif entry.name not in _PAYLOAD_FILES[name] or not entry.is_file():
+            elif (entry.name not in _PAYLOAD_FILES[name] + _FORMER_PAYLOAD_FILES.get(name, ())
+                  or not entry.is_file()):
                 # not a regular file (a FIFO would block the read below): not ours
                 others.append(entry.name)
             elif name == "templates":

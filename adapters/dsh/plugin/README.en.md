@@ -102,13 +102,14 @@ companion switch on the settings page, or set `companion: true`.
 
 ## Bridges and other people's accounts
 
-The memory goes to every conversation in a profile. A bridge plugin that brings other
-people's messages in from QQ, WeChat, Douyin or Bilibili gives their conversations your
-memory too: give such a character a dsh profile of its own (its own plugin config and
-store, if you like) rather than bridging it into the profile you use. Their conversations
-then get neither your memory nor its rules; the store is plain files, though, which a
-shell tool or another profile on the same account can read, so full isolation still
-takes filesystem permissions or a sandbox.
+The memory goes to every conversation, and every profile under one dsh home shares the
+global store. A bridge plugin that brings other people's messages in from QQ, WeChat,
+Douyin or Bilibili gives their conversations your memory too: run such a character under
+a dsh home of its own (`DSH_HOME`), or without Engramory in its profile — another
+profile in the same home is not enough. Their conversations then get neither your memory
+nor its rules; the store is plain files, though, which a shell tool can read like any
+file the account can, so full isolation still takes filesystem permissions or a
+sandbox.
 
 Social mode (`audience: social`), which until 2.0 tried to tell your own conversations
 apart within one profile, was removed: every review found a way past it. A profile still
