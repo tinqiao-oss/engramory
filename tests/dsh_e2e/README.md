@@ -74,18 +74,18 @@ endings normalised), every check's outcome, the wire format and the tool list.
 plugin version **and** runtime digest, a contradicting failure, or a map with no
 compatible release. Declare only what passed.
 
-After a release, run the published package (`--plugin dsh-engramory@<version>
---record`) on three releases, not every declared one: the oldest declared (the OpenAI
-wire), a 0.1.7 (the Anthropic wire, the 0.1 agent loop) and the newest declared. The repo
-runs already cover every release; what the published run adds is that the registry
-tarball carries the runtime digest that was tested, which any release shows, and each
+From 2.0.0 the map declares few releases, each run on every plugin change: the last of
+each dsh minor line still supported (0.2.1-rc.5) and the newest three, which are what
+DSH-Store reviews (below) and installs on. A release left out is not refused, only
+not verified. After a release, run the published package (`--plugin
+dsh-engramory@<version> --record`) on the same releases: what it adds to the repo runs
+is that the registry tarball carries the runtime digest that was tested, and each
 release costs about a minute.
 
-`dsh.compatibility.dsh` is a display range for directories, not evidence. From 1.5.5
-`engines.dsh` declares a floor only (`>=0.1.0-rc.7`) and still no `@deepseek-ai/dsh*`
-peer range, so an untested future dsh is not refused outright: dsh 0.2.1-alpha.4
-and later check `engines.dsh` with prereleases included, and earlier releases do not
-check it. Never add an upper bound there; it would turn "not run on this release
+`dsh.compatibility.dsh` is a display range for directories, not evidence. `engines.dsh`
+declares a floor only (`>=0.2.1-alpha.5` from 2.0.0, which dropped dsh 0.1) and no
+`@deepseek-ai/dsh*` peer range, so an untested future dsh is not refused outright: dsh
+0.2.1-alpha.4 and later check `engines.dsh` with prereleases included. Never add an upper bound there; it would turn "not run on this release
 yet" into a hard refusal. DSH-Store installs only on an exact
 `compatible` record and reviews a rolling window (npm `latest` plus the two
 undeprecated releases before it; see its
