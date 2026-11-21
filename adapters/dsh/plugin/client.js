@@ -75,11 +75,8 @@ window.__ModuleLoader__.load({
       expression: '配置文件里有设置是用 !!js 表达式写的，这里显示不了它的实际值，所以只读。请直接改 cordis.patch.yml。',
       companion: '大肥鱼模式',
       companionHint: '多记三类：经历、约定、我自己，用角色口吻回忆。',
-      audience: '记忆权限',
-      audiencePrivate: '专属',
-      audienceSocial: '社交',
-      audiencePrivateHint: '只有你用这个 dsh：每个对话都能用记忆。',
-      audienceSocialHint: '别人也能跟你的 AI 聊（接了 QQ、微信等）：只有你本人聊、没有别人插过话的对话能用记忆。',
+      closedSocial: '社交模式在 2.0 去掉了。这个 profile 还设着它，所以 Engramory 现在不给任何对话记忆。接 QQ、微信等让别人也能聊的机器人，请给它单独开一个 dsh profile；在这里保存一次设置，记忆就恢复。',
+      reopen: '恢复记忆',
       cap: '索引上限',
       capHint: '默认 200 行 / 25600 字节，超过后 AI 要先压缩才能再写。',
       capLines: '行',
@@ -199,7 +196,7 @@ window.__ModuleLoader__.load({
       howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
       howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
       howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），点「全局记忆」右上角的「更换存储地址」，插件会整个搬过去。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
-      howToSocial: '接了 QQ、微信等、别人也能跟你的 AI 聊的话，在上面打开「大肥鱼模式」，再把「记忆权限」改成「社交」：只有认得出是你本人的对话才拿得到记忆。这不是安全隔离，详见插件说明。',
+      howToSocial: '想让别人也能跟你的 AI 聊（接了 QQ、微信等）？给那个机器人单独开一个 dsh profile，别接进这个 profile：这里的每个对话都能用你的记忆。',
       feedbackLead: '遇到问题或有建议：',
       feedbackIssue: '到 GitHub 提 issue',
       feedbackMail: '，或发邮件到',
@@ -270,11 +267,8 @@ window.__ModuleLoader__.load({
       expression: 'A setting in the config is written as a !!js expression, whose value this page cannot show, so it is read-only. Edit cordis.patch.yml directly.',
       companion: 'Companion mode (大肥鱼模式)',
       companionHint: 'Keeps three more kinds of note — moments, plans, the character itself — and recalls in character.',
-      audience: 'Memory access',
-      audiencePrivate: 'Private',
-      audienceSocial: 'Social',
-      audiencePrivateHint: 'Only you use this dsh: every conversation gets the memory.',
-      audienceSocialHint: 'Others can talk to your AI too (through QQ, WeChat…): only conversations you alone have written in get the memory.',
+      closedSocial: 'Social mode was removed in 2.0. This profile is still set to it, so Engramory gives no conversation any memory now. Give a bot others talk to (through QQ, WeChat and the like) a dsh profile of its own; save the settings here once and the memory is back.',
+      reopen: 'Restore memory',
       cap: 'Index cap',
       capHint: 'Default 200 lines / 25600 bytes; past it the AI must compact before writing more.',
       capLines: 'lines',
@@ -394,7 +388,7 @@ window.__ModuleLoader__.load({
       howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
       howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
       howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), click Change location at the top right of the global memory, and the plugin moves it all there. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
-      howToSocial: 'If others can talk to your AI too (through QQ, WeChat and the like), turn on Companion mode above and set Memory access to Social: only conversations it can tell are yours get the memory. This is not a security boundary; see the plugin\'s README.',
+      howToSocial: 'Want others to talk to your AI too (through QQ, WeChat and the like)? Give that bot a dsh profile of its own rather than bridging it into this one: every conversation here gets your memory.',
       feedbackLead: 'Found a problem or have an idea? ',
       feedbackIssue: 'Open an issue on GitHub',
       feedbackMail: ', or email ',
@@ -467,10 +461,6 @@ window.__ModuleLoader__.load({
 .eng-banner{padding:8px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);font-size:12px;}
 .eng-banner[data-tone="error"]{color:var(--dsw-alias-state-error-primary);}
 .eng-banner[data-tone="ok"]{color:var(--dsw-alias-state-success-primary);}
-.eng-segment{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);align-self:flex-start;}
-.eng-segment button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:6px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;}
-.eng-segment button[aria-pressed="true"]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12);}
-.eng-segment button:disabled{cursor:default;}
 .eng-switch{position:relative;width:32px;height:18px;border-radius:999px;border:0;padding:0;cursor:pointer;background:var(--dsw-alias-border-l2);flex:none;}
 .eng-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary);}
 .eng-switch:disabled{opacity:.5;cursor:default;}
@@ -523,9 +513,6 @@ window.__ModuleLoader__.load({
 .eng-hero .eng-switch[aria-checked="true"]::after{transform:translateX(20px);}
 .eng-hero .eng-switch[aria-checked="true"]{background:#6ee7c8;}
 .eng-hero .eng-switch[aria-checked="true"]::after{background:#0f1b2d;}
-.eng-hero .eng-segment{border:0;border-radius:999px;background:rgba(0,0,0,.25);}
-.eng-hero .eng-segment button{border-radius:999px;padding:3px 14px;font-size:12.5px;line-height:18px;color:rgba(232,243,240,.62);}
-.eng-hero .eng-segment button[aria-pressed="true"]{background:#6ee7c8;color:#0f1b2d;box-shadow:none;}
 .eng-hero .eng-btn,.eng-hero-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid rgba(232,243,240,.22);border-radius:999px;background:transparent;color:#e8f3f0;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;}
 .eng-hero .eng-btn:hover:not(:disabled),.eng-hero-btn:hover{background:rgba(255,255,255,.08);}
 .eng-hero :focus-visible{outline:2px solid #6ee7c8;outline-offset:2px;}
@@ -618,7 +605,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
     /** The settings the page edits, in the order the host computes its revision from. */
     const settingsOf = (data) => ({
       companion: data.companion === true,
-      audience: data.audience === 'social' ? 'social' : 'private',
       maxLines: data.maxLines,
       maxBytes: data.maxBytes,
     })
@@ -709,13 +695,14 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
               await new Promise((resolve) => setTimeout(resolve, 400))
               try {
                 fresh = await fetchSettings()
-                if (revisionOf(settingsOf(fresh)) === wanted) break
+                // a save also takes social mode out (`closed`), with the settings shown unchanged
+                if (revisionOf(settingsOf(fresh)) === wanted && fresh.closed !== true) break
               } catch { /* still reloading */ }
             }
             if (!alive.current) return
             if (fresh !== undefined) adopt(fresh)
             // The save landed either way; say so plainly when what came back differs.
-            setBanner(fresh !== undefined && revisionOf(settingsOf(fresh)) === wanted
+            setBanner(fresh !== undefined && revisionOf(settingsOf(fresh)) === wanted && fresh.closed !== true
               ? { tone: 'ok', text: t('saved') }
               : { tone: 'error', text: t('savedUnconfirmed') })
           } else if (result.error === 'stale') {
@@ -750,14 +737,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       })
     }
 
-    /** A host-styled two-way choice: buttons with aria-pressed in one group. */
-    function Segment({ label, value, options, disabled, onChange }) {
-      return h('div', { className: 'eng-segment', role: 'group', 'aria-label': label },
-        options.map(([key, text]) => h('button', {
-          type: 'button', key, 'aria-pressed': value === key, disabled, onClick: () => onChange(key),
-        }, text)))
-    }
-
     function CompanionSection({ draft, t, disabled, update }) {
       return h('section', { className: 'eng-section' },
         h('div', { className: 'eng-heading' },
@@ -765,15 +744,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h(Switch, { checked: draft.companion, disabled, label: t('companion'),
             onChange: (on) => update({ companion: on }) })),
         h('p', { className: 'eng-hint' }, t('companionHint')))
-    }
-
-    function AudienceSection({ draft, t, disabled, update }) {
-      return h('section', { className: 'eng-section' },
-        h('h3', { className: 'eng-title' }, t('audience')),
-        h(Segment, { label: t('audience'), value: draft.audience, disabled,
-          options: [['private', t('audiencePrivate')], ['social', t('audienceSocial')]],
-          onChange: (audience) => update({ audience }) }),
-        h('p', { className: 'eng-hint' }, t(draft.audience === 'social' ? 'audienceSocialHint' : 'audiencePrivateHint')))
     }
 
     function CapSection({ caps, t, disabled, setCaps }) {
@@ -826,13 +796,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       return h('div', { className: 'eng-page' },
         editable ? null : h('div', { className: 'eng-banner' },
           t(data.readOnly === 'expression' ? 'expression' : 'unavailable')),
+        data.closed === true ? h('div', { className: 'eng-banner', 'data-tone': 'error' }, t('closedSocial')) : null,
         h(CompanionSection, { draft, t, disabled, update }),
-        // memory access is a choice inside companion mode: off, it changes nothing
-        draft.companion ? h(AudienceSection, { draft, t, disabled, update }) : null,
         h(CapSection, { caps, t, disabled, setCaps }),
         banner ? h('div', { className: 'eng-banner', 'data-tone': banner.tone, role: 'status' }, banner.text) : null,
         editable ? h('div', { className: 'eng-actions' },
-          h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || !dirty || !valid, onClick: () => save(next) },
+          h('button', { type: 'button', className: 'eng-btn eng-btn-primary', disabled: busy || !(dirty || data.closed === true) || !valid, onClick: () => save(next) },
             busy ? t('saving') : t('save')),
           h('button', { type: 'button', className: 'eng-btn', disabled: busy || !dirty, onClick: discard }, t('discard')))
           : null)
@@ -1069,14 +1038,11 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           h('span', null, t('companion')),
           h(Switch, { checked: settings.companion, disabled, label: t('companion'),
             onChange: (on) => change({ companion: on }) })),
-        // memory access is a choice inside companion mode: off, it changes nothing
-        settings.companion ? h('div', { className: 'eng-strip-item' },
-          h('span', null, t('audience')),
-          h(Segment, { label: t('audience'), value: settings.audience, disabled,
-            options: [['private', t('audiencePrivate')], ['social', t('audienceSocial')]],
-            onChange: (audience) => { if (audience !== settings.audience) change({ audience }) } })) : null,
+        data.closed === true ? h('button', { type: 'button', className: 'eng-btn', disabled,
+          onClick: () => change({}) }, t('reopen')) : null,
         h('p', { className: 'eng-strip-note', role: banner ? 'status' : undefined },
-          busy ? t('saving') : banner ? banner.text : t(data.editable === true ? 'stripNote' : 'stripReadOnly')))
+          busy ? t('saving') : banner ? banner.text
+            : data.closed === true ? t('closedSocial') : t(data.editable === true ? 'stripNote' : 'stripReadOnly')))
     }
 
     /** The memory route's listing, read again on `load`; a reply that a later read overtook is dropped. */

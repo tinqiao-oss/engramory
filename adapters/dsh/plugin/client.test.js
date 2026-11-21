@@ -150,7 +150,7 @@ async function applied() {
 }
 
 const settingsData = (patch = {}) => ({
-  companion: false, audience: 'private', maxLines: 200, maxBytes: 25600, editable: true,
+  companion: false, maxLines: 200, maxBytes: 25600, editable: true,
   ...patch,
   revision: 'r1',
 })
@@ -210,12 +210,10 @@ test('client: the summary view is one line, and the page reads the settings rout
   assert.equal(sent[0].url, 'api/engramory/settings')
 })
 
-test('client: switches companion mode on, chooses social, and saves exactly the settings the host edits', async () => {
+test('client: switches companion mode on and saves exactly the settings the host edits', async () => {
   const { slots, react } = await applied()
   const sent = fakeFetch({
-    GET: (log) => (log.some((s) => s.method === 'POST')
-      ? settingsData({ companion: true, audience: 'social' })
-      : settingsData()),
+    GET: (log) => (log.some((s) => s.method === 'POST') ? settingsData({ companion: true }) : settingsData()),
     POST: { ok: true },
   })
   const realTimeout = globalThis.setTimeout
@@ -223,31 +221,47 @@ test('client: switches companion mode on, chooses social, and saves exactly the 
   try {
     const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
     await page.settle()
-    // memory access is a choice inside companion mode, shown only while it is on
     assert.match(textOf(page.tree), /companionHint/)
-    assert.equal(button(page.tree, 'audiencePrivate'), undefined)
+    assert.doesNotMatch(textOf(page.tree), /closedSocial/)
     const companion = switchFor(page.tree, 'companion')
     assert.equal(companion.props['aria-checked'], false)
     assert.equal(button(page.tree, 'save').props.disabled, true) // nothing changed yet
     companion.props.onClick()
     await page.settle()
     assert.equal(switchFor(page.tree, 'companion').props['aria-checked'], true)
-    assert.match(textOf(page.tree), /audiencePrivateHint/)
-    // private or social: one choice of two, its line says what it means
-    assert.equal(button(page.tree, 'audiencePrivate').props['aria-pressed'], true)
-    button(page.tree, 'audienceSocial').props.onClick()
-    await page.settle()
-    assert.equal(button(page.tree, 'audienceSocial').props['aria-pressed'], true)
-    assert.equal(button(page.tree, 'audiencePrivate').props['aria-pressed'], false)
-    assert.match(textOf(page.tree), /audienceSocialHint/)
-    assert.doesNotMatch(textOf(page.tree), /audiencePrivateHint/)
     button(page.tree, 'save').props.onClick()
     // the page polls until the reloaded plugin answers with the saved settings
     for (let i = 0; i < 20 && !/\bsaved\b/.test(textOf(page.tree)); i++) await page.settle()
     const post = sent.find((s) => s.method === 'POST')
-    assert.deepEqual(post.body,
-      { revision: 'r1', companion: true, audience: 'social', maxLines: 200, maxBytes: 25600 })
+    assert.deepEqual(post.body, { revision: 'r1', companion: true, maxLines: 200, maxBytes: 25600 })
     assert.match(textOf(page.tree), /saved/)
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
+})
+
+test('client: a profile still set to social mode says the memory is closed, and one save brings it back', async () => {
+  // gone in 2.0 (index.js closedBySocial): the settings shown are unchanged, so the save is
+  // offered as it is, and done only once the reloaded plugin no longer says closed
+  const { slots, react } = await applied()
+  let posted = false
+  const sent = fakeFetch({
+    GET: () => (posted ? settingsData({ companion: true }) : settingsData({ companion: true, closed: true })),
+    POST: () => { posted = true; return { ok: true } },
+  })
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn) => realTimeout(fn, 0)
+  try {
+    const page = react.mount(react.React.createElement(slots[0].component, { view: 'page', t: (k) => k }))
+    await page.settle()
+    assert.match(textOf(page.tree), /closedSocial/)
+    assert.equal(button(page.tree, 'save').props.disabled, false, 'saved as it is')
+    button(page.tree, 'save').props.onClick()
+    for (let i = 0; i < 20 && !/\bsaved\b/.test(textOf(page.tree)); i++) await page.settle()
+    assert.deepEqual(sent.find((s) => s.method === 'POST').body,
+      { revision: 'r1', companion: true, maxLines: 200, maxBytes: 25600 })
+    assert.match(textOf(page.tree), /saved/)
+    assert.doesNotMatch(textOf(page.tree), /closedSocial/)
   } finally {
     globalThis.setTimeout = realTimeout
   }
@@ -638,7 +652,7 @@ test('client: the switches atop the memory page save as they are switched, with 
       [`POST ${SETTINGS}`]: (log) => { current = settingsData({ ...log.at(-1).body }); return { ok: true } },
     })
     await view.settle()
-    assert.equal(button(view.tree, 'audienceSocial'), undefined) // a choice inside companion mode
+    assert.equal(button(view.tree, 'reopen'), undefined) // only for a profile still set to social mode
     const saved = async () => {
       for (let i = 0; i < 40 && textsOf(view.tree, 'eng-strip-note')[0] !== 'saved'; i++) await view.settle()
       assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['saved'])
@@ -647,17 +661,8 @@ test('client: the switches atop the memory page save as they are switched, with 
     switchFor(view.tree, 'companion').props.onClick()
     switchFor(view.tree, 'companion').props.onClick() // a second click before the page re-renders
     await saved()
-    assert.deepEqual(posts(), [{ revision: 'r1', companion: true, audience: 'private', maxLines: 150, maxBytes: 25600 }])
+    assert.deepEqual(posts(), [{ revision: 'r1', companion: true, maxLines: 150, maxBytes: 25600 }])
     assert.equal(switchFor(view.tree, 'companion').props['aria-checked'], true)
-    button(view.tree, 'audienceSocial').props.onClick()
-    await view.settle() // the line shows the save under way, then that it is done
-    await saved()
-    assert.deepEqual(posts()[1], { revision: 'r1', companion: true, audience: 'social', maxLines: 150, maxBytes: 25600 })
-    assert.equal(button(view.tree, 'audienceSocial').props['aria-pressed'], true)
-    // choosing what is already chosen saves nothing
-    button(view.tree, 'audienceSocial').props.onClick()
-    await view.settle()
-    assert.equal(posts().length, 2)
   } finally {
     globalThis.setTimeout = realTimeout
   }
@@ -667,6 +672,28 @@ test('client: the switches atop the memory page save as they are switched, with 
   await view.settle()
   assert.equal(switchFor(view.tree, 'companion').props.disabled, true)
   assert.match(textOf(view.tree), /stripReadOnly/)
+})
+
+test('client: atop the memory page, a profile still set to social mode is said closed, with a button that saves it as it is', async () => {
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn) => realTimeout(fn, 0)
+  try {
+    let current = settingsData({ companion: true, closed: true })
+    const { view, sent } = await memoryPage({
+      [`GET ${SETTINGS}`]: () => current,
+      [`POST ${SETTINGS}`]: (log) => { current = settingsData({ ...log.at(-1).body }); return { ok: true } },
+    })
+    await view.settle()
+    assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['closedSocial'])
+    button(view.tree, 'reopen').props.onClick()
+    for (let i = 0; i < 40 && textsOf(view.tree, 'eng-strip-note')[0] !== 'saved'; i++) await view.settle()
+    assert.deepEqual(sent.filter((s) => s.method === 'POST').map((s) => s.body),
+      [{ revision: 'r1', companion: true, maxLines: 200, maxBytes: 25600 }])
+    assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['saved'])
+    assert.equal(button(view.tree, 'reopen'), undefined)
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
 })
 
 test('client: settings that could not be read are offered again, not hidden', async () => {

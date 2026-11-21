@@ -1951,45 +1951,6 @@ test('the skill says where the store is: the global one the AI creates, a projec
   }
 })
 
-test('in social mode the skill, which every conversation reads, names no store; the user\'s own learn it', async () => {
-  const home = scratch('socialhome')
-  const global = join(home, '.engramory-memory')
-  const prompt = promptRegistry()
-  const { skills } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt }))
-  const skill = skills[0].content.replace(/\s+/g, ' ')
-  assert.ok(!skill.includes(global), 'no path a stranger could be told')
-  assert.match(skill, /in the user's own conversations your context gives its full path/)
-  assert.match(skill, /If your runtime context says a conversation is not the user's own, the store is closed to it: do not read, create, write or name a store there/)
-  const project = scratch('socialws')
-  // no store yet: the user's own conversation is told where it will be
-  const mine = await withDshHome(home, () => prompt.seen(as(own('own-store', project))))
-  assert.ok(mine.includes(`Engramory: your memory store is \`${global}\`, its index \`MEMORY.md\``), mine)
-  // anyone else's: the note that the store is closed, and no path
-  const theirsText = await withDshHome(home, () => prompt.seen(as(theirs('qq-store', project))))
-  assert.ok(!theirsText.includes(global), theirsText)
-  assert.match(theirsText, /not the user's own/)
-  // only a project's index shown: the global store, where the rest goes, is still named
-  // (another project: recall remembers for a few seconds that the first one has no store)
-  const withStore = scratch('socialws2')
-  store(withStore, '- [p](p.md) - project\n')
-  const partly = await withDshHome(home, () => prompt.seen(as(own('own-store-3', withStore))))
-  assert.match(partly, /Project memory index/)
-  assert.ok(partly.includes(`your memory store is \`${global}\``), partly)
-  // with the global store, its index shows the path as before, and the line is not repeated
-  // — both in the runtime context, which social mode keeps the index in (judged again as
-  // dsh admits a step's messages: no message of the plugin's own is sent at all)
-  store(home, '- [u](u.md) - user\n')
-  const shown = withDshHome(home, () => prompt.render(as(own('own-store-2', project))))
-  assert.match(shown, /User memory index/)
-  assert.doesNotMatch(shown, /your memory store is/)
-  assert.deepEqual(await withDshHome(home, () => prompt.sent(as(own('own-store-2', project)))), [])
-  // a pin relative to the working directory is named as this session resolves it
-  const pinPrompt = promptRegistry()
-  mount({ ...COMPANION, indexPath: 'notes/INDEX.md' }, { workingDirectory: sessionDirs(), systemPrompt: pinPrompt })
-  const pinned = await withDshHome(home, () => pinPrompt.seen(as(own('own-pin', project))))
-  assert.ok(pinned.includes(`your memory store is \`${join(project, 'notes')}\`, its index \`INDEX.md\``), pinned)
-})
-
 test('a store path with backticks in it stays one code span', () => {
   const home = join(scratch('tick'), 'odd`name')
   const content = withDshHome(home, () => mount({ language: 'en' })).skills[0].content
@@ -2037,115 +1998,36 @@ const TYPED = said({ kind: 'user', rpcId: 'r-1', clientTimeZone: 'Asia/Shanghai'
 const QQ = said({ kind: 'plugin:dsh-onebot' })
 const own = (id, cwd, ...more) => sessionOf(id, cwd, {}, [TYPED, ...more])
 const theirs = (id, cwd) => sessionOf(id, cwd, {}, [QQ])
-const COMPANION = { companion: true, audience: 'social' }
+const COMPANION = { companion: true }
 
-test('companion mode: the user\'s own conversation gets the index and the rules', async () => {
+test('companion mode: the rules in the runtime context, the index in a message after it', async () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const session = own('own-1', project)
-  // social mode: the index and the rules in the runtime context, judged as dsh admits the
-  // step's messages
-  const text = withDshHome(scratch('home'), () => prompt.render(as(session)))
-  assert.match(text, /^Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
-  assert.match(text, /Companion mode \(大肥鱼模式\) is on[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
-  assert.deepEqual(await withDshHome(scratch('home'), () => prompt.sent(as(session))), [], 'no message of its own')
-  // dsh's own producers decide nothing: context, skills and the like come and go — and the
-  // plugin's own index message is nobody's either (sent outside social mode, but a session
-  // may hold one from before the switch)
-  const busy = own('own-2', project, said({ kind: 'time-context', form: 'notice' }),
-    said({ kind: 'skill-catalog', form: 'catalog' }), said({ kind: 'engramory', speaker: { role: 'none' } }), TYPED)
-  assert.match(withDshHome(scratch('home'), () => prompt.render(as(busy))), /- first/)
-  // private companion mode: the rules in the runtime context, the index in a message after it
-  const solo = promptRegistry()
-  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: solo })
-  const mine = own('own-3', project)
-  assert.doesNotMatch(withDshHome(scratch('home'), () => solo.render(as(mine))), /- first/)
-  assert.match(await withDshHome(scratch('home'), () => solo.seen(as(mine))),
+  const mine = as(own('own-1', project))
+  const home = scratch('home')
+  const rules = withDshHome(home, () => prompt.render(mine))
+  assert.match(rules, /^Companion mode \(大肥鱼模式\) is on[\s\S]*`moment`[\s\S]*`upcoming`[\s\S]*`self`/)
+  assert.doesNotMatch(rules, /- first/)
+  assert.match(await withDshHome(home, () => prompt.seen(mine)),
     /`self`[\s\S]*\n\nEngramory memory index, as it stands now[\s\S]*Project memory index[\s\S]*- \[a\]\(a\.md\) - first/)
 })
 
-test('social mode judges the index as dsh admits a step, so an outsider queued meanwhile gets none', async () => {
-  // a bridge queues someone else's message while the step's request is being prepared: dsh
-  // refreshes the runtime context just before it commits the step's messages, and social
-  // mode keeps the index there, so the step that commits already carries the note instead
-  const project = scratch('race')
+test('a profile still set to social mode, gone in 2.0, gets no memory anywhere; the cap holds', async () => {
+  // companion mode with `audience: social` was a character others talk to: the private recall
+  // left would hand them the memory, so none at all until a save on the settings page
+  const project = scratch('closed')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
-  const { listeners, projections } = mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  // social mode sends no message of its own: nothing of the message path is there (the
-  // assembly is still read, to keep the runtime context's text as written on dsh 0.1)
-  for (const event of ['agent/pre-step', 'agent/request-error']) {
-    assert.equal(listeners.get(event), undefined, event)
-  }
-  assert.equal(listeners.get('system-prompt/assemble').length, 1)
-  assert.deepEqual([...projections.units.keys()], ['engramory:speakers'])
-  const session = own('first-turn', project)
+  const m = mount({ companion: true, audience: 'social' }, { workingDirectory: sessionDirs(), systemPrompt: prompt })
+  assert.equal(m.skills.length, 0, 'no skill')
+  assert.deepEqual(prompt.contexts, [], 'no rules, no index context, no reminder')
   const home = scratch('home')
-  await withDshHome(home, () => prompt.assembleFor(as(session)))
-  assert.match(withDshHome(home, () => prompt.render(as(session))), /- first/, 'the user\'s own at the start of the step')
-  session.events.push(QQ) // queued while the request is prepared
-  const admitted = withDshHome(home, () => prompt.render(as(session)))
-  assert.doesNotMatch(admitted, /- first/)
-  assert.match(admitted, /not the user's own/)
-})
-
-test('social mode keeps the runtime context as written where dsh 0.1 would fill in its `{{` groups', async () => {
-  // dsh 0.1 drops `interpolate: false` as it assembles a runtime context, then fills in
-  // every `{{name}}` group and fails the request over one it does not know: an index with a
-  // template in it took every request of the user's own conversation down with it
-  const project = scratch('braces')
-  store(project, '- [a](a.md) - {{item.name}} and {{{x}}}\n')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const context = as(own('braces-1', project))
-  const home = scratch('home')
-  const written = withDshHome(home, () => prompt.contexts[0].text(context))
-  assert.equal(prompt.contexts[0].name, 'engramory:memory')
-  assert.match(written, /\{\{item\.name\}\} and \{\{\{x\}\}\}/)
-  const assembled = (keeps) => withDshHome(home, () => prompt.assemble({
-    contexts: [...prompt.contexts.map((spec) => ({
-      name: spec.name, text: spec.text(context), ...(keeps ? { interpolate: spec.interpolate } : {}),
-    })), { name: 'someone-else', text: 'cwd: {{cwd}}' }],
-  }, context))
-  // as dsh 0.1 assembles it: no two braces side by side, nothing else changed
-  const old = await assembled(false)
-  assert.doesNotMatch(old.contexts[0].text, /\{\{/)
-  assert.equal(old.contexts[0].text.replaceAll(String.fromCharCode(0x200b), ''), written)
-  assert.equal(old.contexts.at(-1).text, 'cwd: {{cwd}}', 'another plugin\'s context is its own business')
-  // as dsh 0.2 does: the flag is kept, and so is the text, exactly
-  const now = await assembled(true)
-  assert.equal(now.contexts[0].text, written)
-})
-
-test('companion mode: anyone else\'s conversation gets no memory, only a note', async () => {
-  const project = scratch('companion')
-  const home = scratch('home')
-  store(project, '- [a](a.md) - first\n')
-  store(home, '- [u](u.md) - user\n')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (context) => withDshHome(home, () => prompt.seen(context))
-  for (const context of [
-    as(theirs('onebot-private-42', project)),
-    as(sessionOf('quiet', project)), // nobody has written yet
-    as(sessionOf('scheduled', project, {}, [said({ kind: 'schedule' })])), // an automation
-    // once anyone else has written, the conversation is theirs for good, either order
-    as(own('mixed', project, QQ)),
-    as(sessionOf('mixed-2', project, {}, [QQ, TYPED])),
-    {}, // no session to tell by: fails closed
-    as({ cwd: project, header: {}, events: [TYPED] }),
-  ]) {
-    const text = await see(context)
-    assert.doesNotMatch(text, /- first|- user|memory index/)
-    assert.match(text, /not the user's own/)
-  }
-  // the user's own until someone else writes in it, then the note in place of the index
-  const session = own('turned', project)
-  assert.match(withDshHome(home, () => prompt.render(as(session))), /- first/)
-  session.events.push(QQ)
-  assert.doesNotMatch(withDshHome(home, () => prompt.render(as(session))), /- first|- user/)
+  assert.doesNotMatch(await withDshHome(home, () => prompt.seen(as(own('own-1', project)))), /first|Companion/)
+  assert.match(m.guard(write(`/s/${INDEX}`, big(300))), /200/)
+  // without companion mode the old setting never did anything, and still does not
+  assert.equal(mount({ audience: 'social' }).skills.length, 1)
 })
 
 test('outside social mode, an index the session should no longer see is withdrawn by a note', async () => {
@@ -2164,473 +2046,6 @@ test('outside social mode, an index the session should no longer see is withdraw
   assert.equal(withdrawn.source.cleared, true)
   assert.deepEqual(await step(), [])
   assert.match(prompt.render(as(session)), /Companion mode/, 'its own message made nobody a stranger')
-})
-
-test('companion mode: who wrote a message is read from the source dsh stamped on it', () => {
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
-    () => prompt.render(as(sessionOf('s', project, {}, events)))))
-  assert.equal(owner(TYPED), true)
-  for (const [source, why] of [
-    [{ kind: 'user' }, 'dsh headless, or a bridge writing dsh\'s user kind'],
-    [{ kind: 'user', rpcId: 'r-2' }, 'a program calling dsh web\'s API'],
-    [{ kind: 'user', rpcId: 'r-3', clientTimeZone: 'UTC', principal: { kind: 'liveshare' } }, 'a caller dsh names'],
-    [{ kind: 'plugin:dsh-onebot' }, 'a bridge under its own kind'],
-    [{ kind: 'user', rpcId: 'r-4', clientTimeZone: 'UTC', speaker: { role: 'guest' } }, 'declared a guest'],
-    [{ kind: '' }, 'no kind'],
-    [null, 'no source'],
-    [{ kind: 'qq-bridge' }, 'a bridge under a kind of its own without the plugin: prefix'],
-    [{ kind: 'webhook' }, 'input from outside dsh'],
-  ]) {
-    assert.equal(owner(said(source)), false, why)
-    assert.equal(owner(TYPED, said(source)), false, `${why}, after the user`)
-  }
-  // the bridge standard: a bridge declares the owner's own messages, and its own notices
-  assert.equal(owner(said({ kind: 'plugin:dsh-onebot', speaker: { role: 'owner' } })), true)
-  assert.equal(owner(said({ kind: 'user', speaker: { role: 'owner' } })), true)
-  assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'private' } })), true)
-  // the owner in a group: the whole group reads the reply, before anyone else has spoken too
-  assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'group' } })), false,
-    'the owner speaking first in a group')
-  assert.equal(owner(TYPED, said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat: 'group' } })), false,
-    'a group message in the owner\'s own conversation')
-  assert.equal(owner(TYPED, said({ kind: 'plugin:aurabot', speaker: { role: 'none', chat: 'group' } })), true,
-    'a notice decides nothing, wherever it is posted')
-  // a chat that is set but not 'private' is a group's, whatever else the source says
-  for (const chat of ['GROUP', null, 0, '', 'channel']) {
-    assert.equal(owner(said({ kind: 'plugin:aurabot', speaker: { role: 'owner', chat } })), false,
-      `chat: ${JSON.stringify(chat)}`)
-  }
-  assert.equal(owner(said({ ...TYPED.data.source, speaker: { chat: 'group' } })), false,
-    'dsh\'s own owner marks, in a group')
-  assert.equal(owner(TYPED, said({ kind: 'plugin:life', speaker: { role: 'none' } })), true)
-  assert.equal(owner(said({ kind: 'plugin:life', speaker: { role: 'none' } })), false, 'nobody yet')
-  assert.equal(owner(TYPED, said({ kind: 'qq-bridge', speaker: { role: 'none' } })), true)
-  // dsh's own producers decide nothing, the two that carry text without an author included
-  for (const kind of ['runtime-context', 'skill-invocation', 'compact-checkpoint', 'goal', 'agent-message',
-    'session-reference', 'model-selection', 'user-question-reply', 'schedule']) {
-    assert.equal(owner(TYPED, said({ kind })), true, kind)
-    assert.equal(owner(said({ kind })), false, `${kind} alone`)
-  }
-  // dsh 0.2.2-rc.1's action-card status, as dsh-action-cards stamps it: only that notice is nobody's
-  const cards = { kind: 'action-cards', through: 12, form: 'notice', summary: 'Action card status updated' }
-  assert.equal(owner(TYPED, said(cards)), true, 'an action-card notice')
-  assert.equal(owner(said(cards)), false, 'an action-card notice alone')
-  for (const form of [undefined, 'relay', 'snapshot', 'NOTICE']) {
-    assert.equal(owner(TYPED, said({ ...cards, form })), false, `action-cards, form ${form}`)
-  }
-  // dsh 0.2.2-rc.2's Continue generating: the empty prompt, stamped `retry` with the marks a
-  // typed one carries (dsh-api-session-controller `prompt`), is judged by those same marks
-  const resumed = { kind: 'retry', rpcId: 'r-5', clientTimeZone: 'Asia/Shanghai' }
-  assert.equal(owner(TYPED, said(resumed)), true, 'the owner continuing in dsh\'s window')
-  assert.equal(owner(said(resumed)), true, 'continuing from dsh\'s window is the owner\'s alone too')
-  for (const [source, why] of [
-    [{ kind: 'retry' }, 'a retry with no marks'],
-    [{ kind: 'retry', rpcId: 'r-6' }, 'a program continuing through dsh web\'s API'],
-    [{ ...resumed, principal: { kind: 'liveshare' } }, 'a caller dsh names continuing'],
-    [{ ...resumed, speaker: { role: 'guest' } }, 'declared a guest'],
-    [{ ...resumed, speaker: { role: 'owner', chat: 'group' } }, 'in a group'],
-    [{ kind: 'plugin', plugin: 'retry', rpcId: 'r-7', clientTimeZone: 'UTC' }, 'a 0.1 producer named retry'],
-  ]) {
-    assert.equal(owner(TYPED, said(source)), false, why)
-  }
-  // dsh 0.1's producers wrote `{ kind: 'plugin', plugin: <name> }` — its clock on every step
-  // of a conversation — lifted as dsh 0.2's migration lifts them; a bridge's stays theirs
-  for (const plugin of ['time-context', 'compact', 'dsh-compaction-basic', 'agent-instructions', 'schedule']) {
-    assert.equal(owner(TYPED, said({ kind: 'plugin', plugin, form: 'snapshot' })), true, `0.1 ${plugin}`)
-  }
-  for (const source of [{ kind: 'plugin', plugin: 'dsh-onebot' }, { kind: 'plugin', plugin: 'webhook' },
-    { kind: 'plugin' }, { kind: 'plugin', plugin: 42 }, { kind: 'plugin', plugin: 'constructor' }]) {
-    assert.equal(owner(TYPED, said(source)), false, JSON.stringify(source))
-  }
-  // only the user's messages count: replies and other events are not judged
-  assert.equal(owner(TYPED, { type: 'assistant/message', data: { role: 'assistant', source: { kind: 'model' } } },
-    { type: 'session/title-llm-request', data: { messages: [{ role: 'user', source: { kind: 'user' } }] } }), true)
-})
-
-test('companion mode: a message counts from the moment it is queued, before dsh commits it', () => {
-  // dsh computes a step's runtime context before it commits the messages that step
-  // delivers; judged on commits alone, a turn went without its own message (dsh 0.2.1-rc.5)
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const queued = (...messages) => ({ type: 'agent/inbox/spliced',
-    data: { target: 'next-turn', start: 0, removedCount: 0, inserted: messages.map((m) => m.data) } })
-  const claimed = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } }
-  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
-    () => prompt.render(as(sessionOf('s', project, {}, events)))))
-  assert.equal(owner(queued(TYPED), claimed), true, 'the user\'s first message, before it is committed')
-  assert.equal(owner(TYPED, queued(QQ), claimed), false, 'an outsider\'s first message, before it is committed')
-  assert.equal(owner(TYPED, queued(said({ kind: 'time-context' }), TYPED)), true)
-  assert.equal(owner(TYPED, { type: 'agent/inbox/spliced', data: { inserted: 'not a list' } }), true)
-  // Continue generating (dsh 0.2.2-rc.2's `retry`), judged as soon as it is queued
-  const resumed = (more) => said({ kind: 'retry', rpcId: 'r-q', clientTimeZone: 'UTC', ...more })
-  assert.equal(owner(TYPED, queued(resumed()), claimed), true, 'the owner continuing, queued')
-  assert.equal(owner(TYPED, queued(resumed({ principal: { kind: 'share-viewer' } })), claimed), false,
-    'a caller dsh names continuing, queued')
-  assert.equal(owner(TYPED, queued(said({ kind: 'retry', rpcId: 'r-q' })), claimed), false,
-    'a program continuing, queued')
-  // continuing never takes a conversation back from someone else
-  assert.equal(owner(TYPED, QQ, resumed()), false, 'the owner continuing after an outsider')
-})
-
-test('companion mode: a message a slash command adds is dsh\'s own, and only while it runs', () => {
-  // `/plan <text>` and `/goal` attachments write a bare `user` message between the
-  // command's `command/run` and `command/done`; dsh records no one as having run it
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const owner = (...events) => /Companion mode \(大肥鱼模式\) is on/.test(withDshHome(scratch('home'),
-    () => prompt.render(as(sessionOf('s', project, {}, events)))))
-  const run =(commandId) => ({ type: 'command/run', data: { commandId, name: 'plan', source: { kind: 'user' } } })
-  const done = (commandId) => ({ type: 'command/done', data: { commandId, kind: 'success' } })
-  const planText = said({ kind: 'user' })
-  const queued = { type: 'agent/inbox/spliced', data: { target: 'next-step', start: 0, inserted: [planText.data] } }
-  assert.equal(owner(TYPED, run('c-1'), queued, done('c-1'), planText), true, 'queued in the command, committed after it')
-  assert.equal(owner(TYPED, run('c-2'), done('c-2'), said({ kind: 'user' })), false, 'after the command: someone else\'s')
-  assert.equal(owner(TYPED, run('c-3'), done('c-other'), said({ kind: 'user' })), true, 'still running')
-  assert.equal(owner(run('c-4'), queued, done('c-4')), false, 'a command alone makes nobody the owner')
-  assert.equal(owner(TYPED, run('c-5'), QQ, done('c-5')), false, 'only bare messages are let through')
-  assert.equal(owner(TYPED, run('c-6'), said({ kind: 'user', clientTimeZone: 'UTC' }), done('c-6')), false,
-    'only a source that is nothing but the user kind')
-  assert.equal(owner(TYPED, run('c-7'), said({ kind: 'retry' }), done('c-7')), false,
-    'a bare retry is no command\'s message')
-  // overlapping commands: one ending does not close the other's window
-  assert.equal(owner(TYPED, run('a'), run('b'), done('b'), said({ kind: 'user' }), done('a')), true)
-  // a command whose `command/done` was never logged closes its window by itself
-  const filler = Array.from({ length: 32 }, () => ({ type: 'step/start', data: {} }))
-  assert.equal(owner(TYPED, run('lost'), ...filler, said({ kind: 'user' })), false)
-  assert.equal(owner(TYPED, run('slow'), ...filler.slice(0, 30), said({ kind: 'user' }), done('slow')), true)
-})
-
-test('companion mode: the speakers unit is one dsh can fold, checkpoint and restore', () => {
-  const { projections } = mount(COMPANION)
-  const unit = projections.units.get('engramory:speakers')
-  assert.ok(unit, 'registered with dsh\'s session projections')
-  assert.equal(unit.wire, undefined, 'host-only: nothing of it reaches a client')
-  assert.ok(Number.isInteger(unit.stateVersion) && unit.stateVersion >= 0)
-  // dsh seeds a session from a checkpoint of the same version without refolding: 6 is the
-  // fold that reads dsh 0.2.2-rc.2's `retry` by the owner's marks (5: dsh 0.2.2's
-  // `action-cards` notices; 4: dsh 0.1's `{ kind: 'plugin' }` messages), and a checkpoint
-  // folded before it (the owner marked an outsider by continuing) must be refolded
-  assert.equal(unit.stateVersion, 6)
-  // the owner's Continue generating, folded: no longer someone else's
-  assert.deepEqual(unit.apply(unit.apply(unit.init({}, 0), TYPED),
-    said({ kind: 'retry', rpcId: 'r-8', clientTimeZone: 'UTC' })), { owner: true, other: false })
-  const start = unit.init({}, 0)
-  assert.deepEqual(start, { owner: false, other: false })
-  // an event that changes nothing returns the same state, as dsh requires
-  assert.equal(unit.apply(start, { type: 'assistant/message', data: { role: 'assistant' } }), start)
-  const heard = unit.apply(start, TYPED)
-  assert.deepEqual(heard, { owner: true, other: false })
-  assert.equal(unit.apply(heard, TYPED), heard)
-  assert.deepEqual(unit.stateSchema.parse({ owner: true, other: true }), { owner: true, other: true })
-  for (const bad of [null, {}, { owner: 'yes', other: false }]) {
-    assert.throws(() => unit.stateSchema.parse(bad))
-  }
-  assert.deepEqual(unit.init({ origin: 'subagent', parentSession: 'p' }, 0), { owner: false, other: false, child: true, from: 0 })
-  assert.deepEqual(unit.init({ origin: 'subagent', parentSession: 'p' }, 7), { owner: false, other: false, child: true, from: 7 })
-  // every state the fold makes survives a checkpoint, and nothing incoherent is taken back
-  const full = { owner: true, other: false, child: true, from: 3, tasked: true, commands: ['c-1'], since: 2, byDsh: ['m-1'] }
-  assert.deepEqual(unit.stateSchema.parse(full), full)
-  for (const bad of [
-    { owner: false, other: false, child: 'yes', from: 0 },
-    { owner: false, other: false, child: true }, // no `from`
-    { owner: false, other: false, tasked: true }, // a task outside a subagent
-    { owner: false, other: false, commands: ['c-1'] }, // no `since`
-    { owner: false, other: false, commands: ['c-1'], since: 32 }, // a window already closed
-    { owner: false, other: false, byDsh: [] },
-    { owner: false, other: false, byDsh: [''] },
-    { owner: false, other: false, extra: 1 },
-  ]) assert.throws(() => unit.stateSchema.parse(bad), JSON.stringify(bad))
-  assert.equal(mount({}).projections.units.has('engramory:speakers'), false, 'not registered with companion mode off')
-  assert.equal(mount({ companion: true }).projections.units.has('engramory:speakers'), false, 'nor in private companion mode')
-})
-
-test('companion mode: a stranger\'s conversation cannot read, search or write a store', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  store(project, '- [p](p.md) - project\n')
-  const notes = join(project, 'notes.txt')
-  writeFileSync(notes, 'x', 'utf8')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const call = (session, name, args) =>
-    withDshHome(home, () => guard({ name, arguments: args, ...(session ? as(session) : {}) }))
-  const stranger = theirs('douyin-1', project)
-  const closed = /closed to it/
-  assert.match(call(stranger, 'read', { file_path: userIndex }), closed)
-  assert.match(call(stranger, 'read', { file_path: join('.engramory-memory', INDEX) }), closed)
-  assert.match(call(stranger, 'read_image', { file_path: join(home, '.engramory-memory', 'a.png') }), closed)
-  assert.match(call(stranger, 'grep', { pattern: 'x' }), closed, 'the session directory holds a store')
-  assert.match(call(stranger, 'glob', { pattern: '**/*.md', path: home }), closed)
-  assert.match(call(stranger, 'write', { file_path: join(home, '.engramory-memory', 'x.md'), content: 'x' }), closed)
-  assert.match(call(undefined, 'read', { file_path: userIndex }), closed, 'no session: fails closed')
-  // a directory may hold a store this filter cannot see: another project's, say
-  const other = scratch('other-project')
-  store(other, '- [o](o.md) - theirs\n')
-  assert.match(call(stranger, 'glob', { pattern: '**/*.md', path: other }), closed)
-  assert.match(call(stranger, 'grep', { pattern: 'x', path: scratch('elsewhere') }), closed)
-  assert.match(call(stranger, 'str_replace_editor', { command: 'view', path: other }), closed)
-  // a stray argument the tool ignores does not stand in for the root it walks
-  assert.match(call(stranger, 'grep', { pattern: 'x', file_path: notes }), closed)
-  assert.match(call(stranger, 'glob', { pattern: '*', target: notes }), closed)
-  // files outside every store stay open to it
-  assert.equal(call(stranger, 'read', { file_path: notes }), undefined)
-  assert.equal(call(stranger, 'grep', { pattern: 'x', path: notes }), undefined)
-  assert.equal(call(stranger, 'todo_write', { todos: [] }), undefined)
-  // and the user's own conversations are untouched
-  assert.equal(call(own('own-1', project), 'read', { file_path: userIndex }), undefined)
-  assert.equal(call(own('code-1', project), 'grep', { pattern: 'x' }), undefined)
-})
-
-test('companion mode: a stranger cannot list a store\'s files, move into a store, or read the user\'s conversations', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  store(project, '- [p](p.md) - project\n')
-  const notes = join(project, 'notes.txt')
-  writeFileSync(notes, 'x', 'utf8')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const call = (session, name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(session) }))
-  const stranger = theirs('bridge-1', project)
-  const closed = /memory store is closed to it/
-  // dsh's `present` lists the files it delivers
-  assert.match(call(stranger, 'present', { files: [{ path: notes }, { path: userIndex }] }), closed)
-  assert.match(call(stranger, 'present', { files: [{ path: join('.engramory-memory', INDEX), description: 'x' }] }), closed)
-  assert.match(call(stranger, 'present', { files: [{ path: notes, file_path: userIndex }] }), closed, 'a stray field too')
-  assert.match(call(stranger, 'present', { files: [join(home, '.engramory-memory', INDEX)] }), closed, 'a list of paths')
-  assert.match(call(stranger, 'present', { files: Array.from({ length: 33 }, () => ({ path: notes })) }), closed,
-    'too many to check one by one')
-  assert.equal(call(stranger, 'present', { files: [{ path: notes }] }), undefined)
-  // `working_directory`: anywhere but into a store
-  assert.match(call(stranger, 'working_directory', { cd: join(home, '.engramory-memory') }), closed)
-  assert.match(call(stranger, 'working_directory', { cd: '.engramory-memory' }), closed)
-  assert.equal(call(stranger, 'working_directory', { cd: scratch('elsewhere') }), undefined, 'a directory is fine to move to')
-  assert.equal(call(stranger, 'working_directory', {}), undefined, 'and to ask where it is')
-  // dsh's session search reads any conversation opened in the same directory, the user's own too
-  for (const name of ['session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read']) {
-    assert.match(call(stranger, name, { query: 'birthday' }), /records of other conversations are closed to it/, name)
-    assert.equal(call(own('own-1', project), name, { query: 'birthday' }), undefined, `${name}: the user's own may`)
-  }
-})
-
-test('companion mode: a subagent is the user\'s own while its live parent is, read afresh every time', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  const { guard, mountLate } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const call = (session) =>
-    withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) }))
-  const parents = { 'own-1': { session: own('own-1', project) }, 'douyin-2': { session: theirs('douyin-2', project) } }
-  // the task a parent agent hands its child is a bare `user` message, then agent messages
-  const task = said({ kind: 'user' })
-  const kid = (id, parentSession, ...more) => sessionOf(id, project, { origin: 'subagent', parentSession },
-    [task, said({ kind: 'agent-message' }), ...more])
-  assert.match(call(kid('kid-0', 'own-1')), /closed to it/, 'no agent registry: fails closed')
-  mountLate('agents', { get: (id) => parents[id] })
-  assert.equal(call(kid('kid-1', 'own-1')), undefined)
-  assert.match(call(kid('kid-2', 'douyin-2')), /closed to it/)
-  assert.match(call(kid('kid-3', 'gone')), /closed to it/, 'a parent that is not live: fails closed')
-  // the parent's state is read on every call, never remembered: an outsider queued into
-  // the parent closes the child at once, before the parent takes another step
-  const child = kid('kid-4', 'own-1')
-  assert.equal(call(child), undefined)
-  parents['own-1'].session.events.push(QQ)
-  assert.match(call(child), /closed to it/)
-  // someone else writing to a child directly closes it, whatever its parent; the user
-  // continuing it in dsh's window does not
-  parents['own-9'] = { session: own('own-9', project) }
-  assert.match(call(kid('kid-5', 'own-9', said({ kind: 'user', rpcId: 'r-9' }))), /closed to it/)
-  assert.match(call(kid('kid-6', 'own-9', QQ)), /closed to it/)
-  assert.equal(call(kid('kid-7', 'own-9', TYPED)), undefined)
-  // only the first bare `user` message is the parent's task, seen queued and then committed
-  // under one id; a second one is someone else's (a plugin writing to the child)
-  const queuedTask = { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [task.data] } }
-  assert.equal(call(sessionOf('kid-8', project, { origin: 'subagent', parentSession: 'own-9' }, [queuedTask, task])), undefined)
-  assert.match(call(kid('kid-9', 'own-9', said({ kind: 'user' }))), /closed to it/)
-  // a bare retry is never a child's task, even as its first message
-  assert.match(call(sessionOf('kid-12', project, { origin: 'subagent', parentSession: 'own-9' },
-    [said({ kind: 'retry' })])), /closed to it/)
-  // a fork-backed child inherits its parent's history, the parent's own task included: those
-  // events are the parent's, so the child's own task is still its first
-  const inherited = [task, said({ kind: 'agent-message' }), TYPED].map((e, seq) => ({ ...e, seq }))
-  const forked = sessionOf('kid-11', project, { origin: 'subagent', parentSession: 'own-9' },
-    [...inherited, { ...said({ kind: 'user' }), seq: 3 }])
-  forked.inherited = 3
-  assert.equal(call(forked), undefined)
-  // a subagent with no parent named is not anyone's child: fails closed
-  assert.match(call(sessionOf('kid-10', project, { origin: 'subagent' }, [TYPED])), /closed to it/)
-  // outside a subagent's log, a bare `user` message is someone else's (dsh headless)
-  assert.match(call(sessionOf('headless-1', project, {}, [task, TYPED])), /closed to it/)
-  // a fork names a parent too, but is a conversation of its own, judged by its own log
-  assert.match(call(sessionOf('fork-1', project, { parentSession: 'own-9' }, [TYPED, QQ])), /closed to it/)
-  assert.equal(call(sessionOf('fork-2', project, { parentSession: 'douyin-2' }, [TYPED])), undefined)
-})
-
-test('companion mode: a stranger cannot reach a store by another spelling, or plant one', () => {
-  const home = scratch('home')
-  store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion') // no store here yet
-  const elsewhere = scratch('elsewhere')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const stranger = theirs('douyin-9', project)
-  const call = (name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(stranger) }))
-  const closed = /closed to it/
-  assert.match(call('write', { file_path: join('.engramory-memory', INDEX), content: '- planted\n' }), closed)
-  assert.match(call('write', { file_path: join(elsewhere, '.engramory-memory', 'x.md'), content: 'x' }), closed)
-  assert.match(call('read', { file_path: join(home, '.ENGRAMORY-MEMORY', INDEX) }), closed)
-  assert.match(call('glob', { pattern: '*', path: join(home, '.Engramory-Memory') }), closed)
-  assert.equal(call('write', { file_path: join(project, 'notes.md'), content: 'x' }), undefined)
-})
-
-test('companion mode: a stranger cannot change a store at dsh\'s last hooks, where apply_patch passes', () => {
-  // dsh's apply_patch (0.2.2 on) names its paths only inside the patch text, which the guard
-  // does not read; each operation passes fs/write-intent, fs/edit-intent or fs/delete-intent
-  // with the target dsh resolved and the call's actor
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  const projectIndex = store(project, '- [p](p.md) - project\n')
-  const hooks = ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']
-  // dsh's read-before-write policy is there first and answers without passing on
-  const policy = () => 'intent'
-  const early = Object.fromEntries(hooks.map((h) => [h, [policy]]))
-  const { listeners } = mount(COMPANION, { workingDirectory: sessionDirs(), listeners: early })
-  const intent = (list, hook, target, actor) => withDshHome(home, () => {
-    const chain = list.get(hook)
-    const run = (i) => (i < chain.length ? chain[i](target, actor, () => run(i + 1)) : 'end')
-    return run(0)
-  })
-  const on = (p) => ({ displayPath: p, targetKey: p })
-  const stranger = as(theirs('patch-1', project))
-  const mine = as(own('patch-2', project))
-  const closed = /closed to it/
-  const stores = [userIndex, join(home, '.engramory-memory', 'planted.md'), projectIndex,
-    join(project, '.engramory-memory', 'a.md')]
-  for (const hook of hooks) {
-    assert.equal(listeners.get(hook)[1], policy, `${hook}: ahead of dsh's own`)
-    for (const path of stores) {
-      assert.throws(() => intent(listeners, hook, on(path), stranger), closed, `${hook} ${path}`)
-      assert.equal(intent(listeners, hook, on(path), mine), 'intent', `${hook} ${path}: the user's own may`)
-    }
-    // the resolved key alone is enough: a link spelled elsewhere that dsh resolved into the store
-    assert.throws(() => intent(listeners, hook, { displayPath: join(scratch('patch-link'), 'a.md'), targetKey: userIndex },
-      stranger), closed)
-    assert.equal(intent(listeners, hook, on(join(project, 'notes.md')), stranger), 'intent', 'anywhere else goes on')
-    // a target dsh did not resolve cannot be placed: refused for a stranger only
-    assert.throws(() => intent(listeners, hook, { displayPath: 'a.md' }, stranger), closed)
-    assert.equal(intent(listeners, hook, { displayPath: 'a.md' }, mine), 'intent')
-    // an actor whose session cannot be read is a stranger
-    assert.throws(() => intent(listeners, hook, on(userIndex), {}), closed)
-  }
-  // outside social mode these hooks judge a move only
-  const solo = mount({ companion: true }, { workingDirectory: sessionDirs(), listeners: early })
-  for (const hook of hooks) assert.equal(intent(solo.listeners, hook, on(userIndex), stranger), 'intent', hook)
-})
-
-test('companion mode: a global index that is a link closes the folder it points to', (t) => {
-  // recall reads the global index through the link, so its target is the user's index too
-  const home = scratch('home')
-  const vault = scratch('vault')
-  const target = join(vault, 'index.md')
-  writeFileSync(target, '- [u](u.md) - user\n', 'utf8')
-  mkdirSync(join(home, '.engramory-memory'), { recursive: true })
-  if (fileLink(target, join(home, '.engramory-memory', INDEX)) === null) {
-    return t.skip('no symlink privilege here')
-  }
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const stranger = theirs('douyin-10', scratch('companion'))
-  const call = (name, args) => withDshHome(home, () => guard({ name, arguments: args, ...as(stranger) }))
-  assert.match(call('read', { file_path: target }), /closed to it/)
-  assert.match(call('write', { file_path: join(vault, 'other.md'), content: 'x' }), /closed to it/)
-})
-
-test('companion mode fails closed without a projection registry, or when it refuses or fails', () => {
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  const read = { name: 'read', arguments: { file_path: userIndex } }
-  const closed = (guard) => withDshHome(home, () => guard({ ...read, ...as(own('own-1', project)) }))
-  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: false }).guard),
-    /closed to it/, 'no registry')
-  // dsh keeps an earlier registrant of the key when it refuses this one, and still answers for it
-  const refusing = { register: () => { throw new Error('incompatible stateVersion') }, stateOf: () => ({ owner: true, other: false }) }
-  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: refusing }).guard),
-    /closed to it/, 'a registry that refuses the unit')
-  const failing = { register: () => () => {}, stateOf: () => { throw new Error('fold failed') } }
-  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: failing }).guard),
-    /closed to it/, 'a fold that throws')
-  const odd = { register: () => () => {}, stateOf: () => ({ owner: true, other: 'no' }) }
-  assert.match(closed(mount(COMPANION, { workingDirectory: sessionDirs(), projections: odd }).guard),
-    /closed to it/, 'a state that is not one of this unit')
-  // a registry that mounts late is picked up
-  const late = mount(COMPANION, { workingDirectory: sessionDirs(), projections: false })
-  late.mountLate('sessionProjections', projectionRegistry())
-  assert.equal(closed(late.guard), undefined)
-  const throwing = { ...read }
-  Object.defineProperty(throwing, 'agent', { get() { throw new Error('gone') } })
-  assert.match(withDshHome(home, () => late.guard(throwing)), /closed to it/)
-})
-
-test('companion mode: a stranger\'s path is bounded before it is resolved', () => {
-  const home = scratch('home')
-  store(home, '- [u](u.md) - user\n')
-  const project = scratch('companion')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const deep = join(project, ...Array.from({ length: 100 }, (_, i) => `d${i}`), 'x.md')
-  const call = (session) => withDshHome(home, () =>
-    guard({ name: 'read', arguments: { file_path: deep }, ...as(session) }))
-  assert.match(call(theirs('douyin-5', project)), /closed to it/)
-  assert.equal(call(own('own-1', project)), undefined)
-  // a network path could stall the stat on the host's main thread: refused untouched
-  for (const unc of ['\\\\no-such-host.invalid\\share\\x.md', '//no-such-host.invalid/share/x.md']) {
-    const started = Date.now()
-    assert.match(withDshHome(home, () => guard({ name: 'read', arguments: { file_path: unc },
-      ...as(theirs('douyin-5', project)) })), /closed to it/)
-    assert.ok(Date.now() - started < 500, `${unc} was refused before any I/O`)
-  }
-})
-
-test('companion mode: a store relocated through a junction is closed at its target too', () => {
-  const home = scratch('home')
-  const vault = scratch('vault')
-  writeFileSync(join(vault, INDEX), '- [u](u.md) - user\n', 'utf8')
-  symlinkSync(vault, join(home, '.engramory-memory'), 'junction') // a directory link anywhere
-  const project = scratch('companion')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const call = (session) => withDshHome(home, () =>
-    guard({ name: 'read', arguments: { file_path: join(vault, INDEX) }, ...as(session) }))
-  assert.match(call(theirs('douyin-10', project)), /closed to it/)
-  assert.equal(call(own('own-1', project)), undefined)
-})
-
-test('companion mode: a store linked to a place that is not there yet cannot be planted there', () => {
-  const home = scratch('home')
-  const vault = join(scratch('drive'), 'vault') // e.g. a drive not mounted right now
-  symlinkSync(vault, join(home, '.engramory-memory'), 'junction')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const reason = withDshHome(home, () => guard({ name: 'write',
-    arguments: { file_path: join(vault, INDEX), content: '- planted\n' },
-    ...as(theirs('douyin-12', scratch('companion'))) }))
-  assert.match(reason, /closed to it/)
-})
-
-test('companion mode: a network $DSH_HOME is not walked for a stranger, only refused', (t) => {
-  // `\\host\share` names a network share only on Windows; elsewhere it is a relative path
-  if (process.platform !== 'win32') return t.skip('UNC paths are a Windows notion')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const started = Date.now()
-  const reason = withDshHome('\\\\no-such-host.invalid\\share\\.dsh', () => guard({ name: 'read',
-    arguments: { file_path: join(scratch('x'), 'a.md') },
-    ...as(theirs('douyin-13', scratch('companion'))) }))
-  assert.match(reason, /closed to it/)
-  assert.ok(Date.now() - started < 500)
 })
 
 test('companion rules name the three life headings and keep "delete only when asked" to moment and self', () => {
@@ -2662,20 +2077,6 @@ test('companion mode: a link inside the pinned directory is closed by the name i
   const reason = withDshHome(scratch('home'), () => guard({ name: 'read', arguments: { file_path: join(pins, 'link.md') },
     ...as(theirs('douyin-11', scratch('companion'))) }))
   assert.match(reason, /closed to it/)
-})
-
-test('companion mode: a store reached by its 8.3 short name is still the store', (t) => {
-  if (process.platform !== 'win32') return t.skip('8.3 names are a Windows thing')
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const r = spawnSync('cmd', ['/d', '/c', `for %I in ("${join(home, '.engramory-memory')}") do @echo %~sI`],
-    { encoding: 'utf8' })
-  const short = (r.stdout || '').trim()
-  if (!short || /\.engramory-memory$/i.test(short)) return t.skip('no 8.3 names on this volume')
-  const { guard } = mount(COMPANION, { workingDirectory: sessionDirs() })
-  const reason = withDshHome(home, () => guard({ name: 'read', arguments: { file_path: join(short, INDEX) },
-    ...as(theirs('douyin-6', scratch('companion'))) }))
-  assert.match(reason, /closed to it/, `short name ${short} for ${userIndex}`)
 })
 
 test('companion mode: a pinned index that is a link guards the directory it points into', (t) => {
@@ -2735,18 +2136,16 @@ test('companion mode adds the three life types to the skill, in either language'
   }
 })
 
-test('companion mode keeps its notes with injectIndex: false, which only drops the index', () => {
+test('companion mode keeps its rules with injectIndex: false, which only drops the index', async () => {
   const project = scratch('companion')
   store(project, '- [a](a.md) - first\n')
   const prompt = promptRegistry()
   mount({ ...COMPANION, injectIndex: false, language: 'zh' },
     { workingDirectory: sessionDirs(), systemPrompt: prompt })
-  const see = (session) => withDshHome(scratch('home'), () => prompt.render(as(session)))
-  const mine = see(own('own-1', project))
-  // where the store is (the skill names none in social mode), then the rules, no index
-  assert.match(mine, /^Engramory：你的记忆库在 `[^`]+\.engramory-memory`[^\n]*\n\n大肥鱼模式已打开。你在这里为用户扮演角色时/)
-  assert.doesNotMatch(mine, /first/)
-  assert.match(see(theirs('douyin-3', project)), /不是用户本人的/)
+  const home = scratch('home')
+  const mine = as(own('own-1', project))
+  assert.match(withDshHome(home, () => prompt.render(mine)), /^大肥鱼模式已打开。你在这里为用户扮演角色时/)
+  assert.doesNotMatch(await withDshHome(home, () => prompt.seen(mine)), /first/, 'no index')
 })
 
 test('the memory language follows dsh: the config first, then dsh\'s own choice, then the system\'s', () => {
@@ -2842,16 +2241,11 @@ test('companion context is required, so a persona preset with optional context o
   const owner = await off(own('own-1', project))
   assert.match(owner, /- \[birthday\]\(birthday\.md\) - May 3/)
   assert.match(owner, /Companion mode \(大肥鱼模式\)/)
-  assert.match(await off(theirs('douyin-1', project)), /not the user's own/)
   assert.deepEqual(prompt.contexts.map((c) => [c.name, c.required === true]),
     [['engramory:memory', true], ['engramory:compaction', true]])
 
-  // companion mode, private, makes it required too; without companion mode the index stays
-  // optional, as every preset expects — `audience: social` alone changes nothing
-  const one = promptRegistry()
-  mount({ companion: true }, { workingDirectory: sessionDirs(), systemPrompt: one })
-  assert.deepEqual(one.contexts.map((c) => [c.name, c.required === true]),
-    [['engramory:memory', true], ['engramory:compaction', true]])
+  // without companion mode the index stays optional, as every preset expects — `audience:
+  // social` alone changes nothing
   for (const config of [{}, { audience: 'social' }]) {
     const plain = promptRegistry()
     mount(config, { workingDirectory: sessionDirs(), systemPrompt: plain })
@@ -3024,57 +2418,6 @@ test('no reminder of a compaction that will not come, or without a measure and a
   assert.equal(failing.contexts.find((c) => c.name === 'engramory:compaction').text({ agent: { session: routed() } }), '')
 })
 
-test('in social mode only the user\'s own conversations are reminded to save', () => {
-  const project = scratch('remind-social')
-  const prompt = promptRegistry()
-  mount(COMPANION, { workingDirectory: sessionDirs(), systemPrompt: prompt,
-    ...pressureOf(() => ({ tokens: 900000, window: 1000000 })) })
-  const reminder = prompt.contexts.find((c) => c.name === 'engramory:compaction')
-  assert.equal(reminder.required, true) // a persona preset with optional context off keeps it
-  const header = () => ({ config: { provider: 'deepseek', model: 'flash', maxTokens: 250000 } })
-  assert.match(reminder.text(as({ ...own('own-r', project), requestHeader: header })), /close to its context limit/)
-  assert.equal(reminder.text(as({ ...theirs('qq-r', project), requestHeader: header })), '')
-})
-
-test('memory access is a choice inside companion mode: private by default, social only with companion mode on', async () => {
-  const project = scratch('companion')
-  store(project, '- [a](a.md) - first\n')
-  const home = scratch('home')
-  const userIndex = store(home, '- [u](u.md) - user\n')
-  const view = (config) => {
-    const prompt = promptRegistry()
-    const { guard, projections } = mount(config, { workingDirectory: sessionDirs(), systemPrompt: prompt })
-    return {
-      text: (session) => withDshHome(home, () => prompt.seen(as(session))),
-      read: (session) => withDshHome(home, () => guard({ name: 'read', arguments: { file_path: userIndex }, ...as(session) })),
-      speakers: projections.units.has('engramory:speakers'),
-    }
-  }
-  // companion mode, private: every conversation is the user's — a bridge's too
-  const solo = view({ companion: true })
-  for (const session of [own('own-1', project), theirs('qq-1', project), sessionOf('sched', project, {}, [said({ kind: 'schedule' })])]) {
-    assert.match(await solo.text(session), /Companion mode \(大肥鱼模式\) is on[\s\S]*- first/)
-    assert.equal(solo.read(session), undefined)
-  }
-  assert.equal(solo.speakers, false, 'private: nothing folds who wrote what')
-  // social without companion mode changes nothing: the plain index, for everyone
-  const alone = view({ audience: 'social' })
-  assert.match(await alone.text(theirs('qq-1', project)), /- first/)
-  assert.doesNotMatch(await alone.text(own('own-1', project)), /Companion mode|not the user's own/)
-  assert.equal(alone.read(theirs('qq-1', project)), undefined)
-  assert.equal(alone.speakers, false)
-  // social inside companion mode: the user's own get the memory and the rules, others the note
-  const social = view({ companion: true, audience: 'social' })
-  assert.match(await social.text(own('own-1', project)), /- first[\s\S]*Companion mode/) // all in the runtime context
-  assert.match(await social.text(theirs('qq-1', project)), /not the user's own/)
-  assert.match(social.read(theirs('qq-1', project)), /closed to it/)
-  assert.equal(social.speakers, true)
-  // only 'social' is social; anything else is the private default
-  for (const audience of ['Social', 'public', true, 1]) {
-    assert.equal(view({ companion: true, audience }).read(theirs('qq-1', project)), undefined, String(audience))
-  }
-})
-
 // --- the settings page's routes (client.js) ---
 
 /** A mount with dsh's web server, the profile editor on this plugin's own row, and `extra`. */
@@ -3126,7 +2469,7 @@ function webMount(config = {}, { rowConfig = config, extra = {}, editor: makeEdi
 }
 
 const saveBody = (revision, patch = {}) => ({
-  revision, companion: true, audience: 'social', maxLines: 200, maxBytes: 25600, ...patch,
+  revision, companion: true, maxLines: 200, maxBytes: 25600, ...patch,
 })
 
 test('settings routes: none without a web server, one exact route for both methods with it', () => {
@@ -3146,12 +2489,22 @@ test('settings GET: the row settings as the plugin reads them, and whether a sav
   })
   const { status, body } = await call('GET')
   assert.equal(status, 200)
-  const shown = { companion: true, audience: 'social', maxLines: 200, maxBytes: 25600 }
-  assert.deepEqual(body, { ...shown, revision: JSON.stringify(shown), editable: true })
-  // only `true` is companion mode on, and only 'social' is social, as apply() reads them
-  const other = (await webMount({}, { rowConfig: { companion: 'yes', audience: 'public' } }).call('GET')).body
+  const shown = { companion: true, maxLines: 200, maxBytes: 25600 }
+  // still set to social mode, gone in 2.0: the page says the memory is closed (closedBySocial)
+  assert.deepEqual(body, { ...shown, closed: true, revision: JSON.stringify(shown), editable: true })
+  // only `true` is companion mode on, as apply() reads it
+  const other = (await webMount({}, { rowConfig: { companion: 'yes', audience: 'social' } }).call('GET')).body
   assert.equal(other.companion, false)
-  assert.equal(other.audience, 'private')
+  assert.equal(other.closed, undefined)
+})
+
+test('settings POST on a row still set to social mode takes it out, and the memory is back', async () => {
+  const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, companion: true, audience: 'social' } })
+  const { body: shown } = await w.call('GET')
+  assert.equal(shown.closed, true)
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision)), { status: 200, body: { ok: true } })
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', companion: true })
+  assert.equal((await w.call('GET')).body.closed, undefined)
 })
 
 test('settings route: served by the bundle\'s own row, never by a second row of the package', () => {
@@ -3183,7 +2536,7 @@ test('settings: a setting written as a !!js expression makes the page read-only,
   assert.deepEqual(await whole.call('POST', saveBody(wholeShown.revision)),
     { status: 409, body: { ok: false, error: 'expression' } })
   assert.equal(whole.edits.length, 0)
-  for (const key of ['companion', 'audience', 'maxLines']) {
+  for (const key of ['companion', 'maxLines']) {
     const w = webMount({}, { rowConfig: { ...BUNDLE_ROW, [key]: expression } })
     const { body } = await w.call('GET')
     assert.equal(body.editable, false, key)
@@ -3204,7 +2557,7 @@ test('settings: a setting written as a !!js expression makes the page read-only,
     }),
   })
   const { body: shown } = await inheritedExpr.call('GET')
-  await inheritedExpr.call('POST', saveBody(shown.revision, { companion: false, audience: 'private' }))
+  await inheritedExpr.call('POST', saveBody(shown.revision, { companion: false }))
   assert.deepEqual(inheritedExpr.edits.at(-1), { indexName: 'MEMORY.md' }) // an override, so the expression no longer applies
 })
 
@@ -3216,12 +2569,12 @@ test('settings POST refuses a save when the profile it would rewrite now holds a
     editor: (entry, edits) => ({
       entries: () => [entry],
       edit: async (target, change) => {
-        edits.push(change({ ...BUNDLE_ROW, audience: { __jsExpr: "'social'" } }, structuredClone(BUNDLE_ROW)))
+        edits.push(change({ ...BUNDLE_ROW, companion: { __jsExpr: 'true' } }, structuredClone(BUNDLE_ROW)))
       },
     }),
   })
   const { body: shown } = await w.call('GET')
-  assert.deepEqual(await w.call('POST', saveBody(shown.revision, { companion: false, audience: 'private' })),
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision, { companion: false })),
     { status: 409, body: { ok: false, error: 'expression' } })
   assert.equal(w.edits.length, 0)
 })
@@ -3246,11 +2599,11 @@ test('settings POST saves through the profile editor, keeping other fields and w
   // not masked; a key this page does not know is carried over as it is
   assert.deepEqual(w.edits.at(-1), {
     indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false, maxLines: 150,
-    companion: true, audience: 'social',
+    companion: true,
   })
   // back to the defaults: a field the page does not edit (indexPath) keeps the override
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { companion: false, audience: 'private' }))
+  await w.call('POST', saveBody(again.revision, { companion: false }))
   assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', indexPath: '/pinned/MEMORY.md', injectIndex: false })
 })
 
@@ -3258,9 +2611,9 @@ test('settings POST back to the defaults on a bundle-only row hands back the inh
   const w = webMount({}, { rowConfig: { ...BUNDLE_ROW } })
   const { body: shown } = await w.call('GET')
   await w.call('POST', saveBody(shown.revision))
-  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', companion: true, audience: 'social' })
+  assert.deepEqual(w.edits.at(-1), { indexName: 'MEMORY.md', companion: true })
   const { body: again } = await w.call('GET')
-  await w.call('POST', saveBody(again.revision, { companion: false, audience: 'private' }))
+  await w.call('POST', saveBody(again.revision, { companion: false }))
   assert.equal(w.edits.at(-1), null) // equal to the inherited config: the editor drops the override
 })
 
@@ -3287,8 +2640,6 @@ test('settings POST rejects malformed values, naming the field, and writes nothi
   for (const [patch, field] of [
     [{ companion: 'true' }, 'companion'],
     [{ companion: undefined }, 'companion'],
-    [{ audience: 'public' }, 'audience'],
-    [{ audience: undefined }, 'audience'],
     [{ maxLines: 0 }, 'maxLines'],
     [{ maxBytes: 1.5 }, 'maxBytes'],
     [{ revision: undefined }, 'revision'],
@@ -3358,7 +2709,7 @@ test('settings: the own row found as dsh 0.2.2 keeps its fiber, an awaitable obj
   const { body: shown } = await w.call('GET')
   assert.equal(shown.editable, true)
   assert.equal(shown.readOnly, undefined)
-  assert.deepEqual(await w.call('POST', saveBody(shown.revision, { audience: 'private' })),
+  assert.deepEqual(await w.call('POST', saveBody(shown.revision)),
     { status: 200, body: { ok: true } })
   assert.equal(w.edits.length, 1)
   assert.equal(w.edits[0].companion, true)
@@ -4587,7 +3938,7 @@ test('store: a move cut short after its commit is carried on, settling what chan
   assert.equal(Object.keys(tree).length, 7)
 })
 
-test('store: a home file that cannot be taken as written names no place, and a stranger gets nothing', async () => {
+test('store: a home file that cannot be taken as written names no place', async () => {
   const { home, dir } = homeStore('mv-broken')
   writeFileSync(join(home, POINTER), '{ not json', 'utf8')
   const prompt = promptRegistry()
@@ -4600,15 +3951,9 @@ test('store: a home file that cannot be taken as written names no place, and a s
   assert.deepEqual(await m.call('POST', { to: join(scratch('mv-broken-to'), 'v') }),
     { status: 409, body: { ok: false, error: 'problem' } })
   assert.equal((await withHomeAsync(home, () => memoryMount().call())).body.location, 'unknown')
-  const social = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
-  const read = (path) => withDshHome(home, () => social.guard({ name: 'read',
-    arguments: { file_path: path }, ...as(theirs('qq-b', cwd)) }))
-  assert.match(read(join(scratch('mv-anywhere'), 'notes.md')) ?? '', /closed to it/,
-    'a stranger\'s file tools are refused outright')
   // fixed, it is seen again
   writeJson(join(home, POINTER), { version: 1 })
   assert.match(await withDshHome(home, () => prompt.recall(at(cwd))), /User memory index/)
-  assert.equal(read(join(scratch('mv-anywhere'), 'notes.md')), undefined)
 })
 
 test('store: the home file is taken only as written', async () => {
@@ -4629,40 +3974,6 @@ test('store: the home file is taken only as written', async () => {
   const fine = await shown(`\uFEFF${JSON.stringify({ version: 1, store: to, retired: [to] })}`)
   assert.equal(fine.problem, undefined)
   assert.equal(fine.store, to)
-})
-
-test('store: in social mode a moved store and a move\'s folders are closed to a stranger, an index pinned or not', () => {
-  const home = scratch('mv-social')
-  const to = join(scratch('mv-social-to'), 'vault')
-  mkdirSync(to)
-  writeFileSync(join(to, INDEX), '- u\n', 'utf8')
-  writeJson(join(home, POINTER), { version: 1, store: to })
-  const cwd = scratch('mv-social-cwd')
-  for (const config of [COMPANION, { ...COMPANION, indexPath: join(scratch('mv-social-pin'), INDEX) }]) {
-    const { guard } = withDshHome(home, () => mount(config, { workingDirectory: sessionDirs() }))
-    const read = (path) => withDshHome(home, () => guard({ name: 'read',
-      arguments: { file_path: path }, ...as(theirs('qq-s', cwd)) }))
-    const which = JSON.stringify(config)
-    assert.match(read(join(to, INDEX)) ?? '', /closed to it/, which)
-    assert.match(read(join(dirname(to), '.engramory-memory-old-abcdefgh', 'a.md')) ?? '', /closed to it/, which)
-    assert.match(read(join(home, POINTER)) ?? '', /closed to it/, which)
-    assert.equal(read(join(dirname(to), 'foo.engramory-memory-notes', 'a.md')), undefined,
-      'a name that merely holds it is not')
-    assert.equal(read(join(cwd, 'notes.md')), undefined)
-  }
-})
-
-test('store: a moved store reached through a link to a place not there yet is closed there too', () => {
-  const home = scratch('mv-dangling')
-  const future = join(scratch('mv-dangling-drive'), 'future') // a drive not mounted right now
-  const alias = join(scratch('mv-dangling-link'), 'alias')
-  symlinkSync(future, alias, linkKind)
-  writeJson(join(home, POINTER), { version: 1, store: join(alias, 'vault') })
-  const { guard } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
-  const reason = withDshHome(home, () => guard({ name: 'write',
-    arguments: { file_path: join(future, 'vault', INDEX), content: '- planted\n' },
-    ...as(theirs('qq-d', scratch('mv-dangling-cwd'))) }))
-  assert.match(reason ?? '', /closed to it/)
 })
 
 test('store: the skill names where the store is again once another dsh has moved it', async () => {
@@ -4817,20 +4128,6 @@ test('store: a lock never written whole is taken over once it is old, not before
   const old = (Date.now() - 60 * 1000) / 1000
   utimesSync(join(home, LOCK), old, old)
   assert.equal((await m.move(to)).body.ok, true)
-})
-
-test('store: a place the store moved from, reached through a link to a place not there yet, is closed there too', () => {
-  const home = scratch('mv-old-dangling')
-  const future = join(scratch('mv-old-drive'), 'future')
-  const alias = join(scratch('mv-old-link'), 'alias')
-  symlinkSync(future, alias, linkKind)
-  const to = join(scratch('mv-old-to'), 'vault')
-  writeJson(join(home, POINTER), { version: 1, store: to, retired: [join(alias, 'oldvault')] })
-  const { guard } = withDshHome(home, () => mount(COMPANION, { workingDirectory: sessionDirs() }))
-  const reason = withDshHome(home, () => guard({ name: 'write',
-    arguments: { file_path: join(future, 'oldvault', 'note.md'), content: 'x' },
-    ...as(theirs('qq-o', scratch('mv-old-cwd'))) }))
-  assert.match(reason ?? '', /closed to it/)
 })
 
 test('store: a dsh home spelled another way still reads a home file that names its default place', () => {

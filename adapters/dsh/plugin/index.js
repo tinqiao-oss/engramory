@@ -90,12 +90,16 @@ const ownName = (segment) => segment === STORE_DIR ||
 const INDEX_CONTEXT_ORDER = 300
 
 /**
- * `text` with no two braces side by side — a zero-width space between them — so no `{{`
- * in it opens a prompt variable where dsh fills them in (dsh 0.1's runtime context, apply()).
+ * Social mode is gone (2.0). A profile still set to it (`companion: true, audience: social`)
+ * is one where others talk to the character, and the private recall left would hand them the
+ * memory: it gets none in any conversation — no index, no skill, no companion rules, no
+ * reminder — until `audience` is taken out (a save on the settings page does that). The cap
+ * still holds. A bridge that brings others in belongs in a profile of its own.
  */
-const verbatim = (text) => text.replace(/\{(?=\{)/g, `{${String.fromCharCode(0x200b)}`)
+const closedBySocial = (config) => config.companion === true && config.audience === 'social'
 
 export function apply(ctx, config = {}) {
+  const closed = closedBySocial(config)
   // `indexPath` pins the guard to ONE file. Without it the only signal is the
   // basename, so an unrelated MEMORY.md in any other project is gated too — a real
   // refusal on a file that is not a memory index at all, with no way to opt out
@@ -125,14 +129,10 @@ export function apply(ctx, config = {}) {
     },
     // Companion mode (大肥鱼模式, SKILL.md §2.2): three more types for a companion
     // character's own life, and recall in character.
-    companion: config.companion === true,
-    // Social mode, a choice inside companion mode: others can talk to the character too, so
-    // only the user's own conversations get the memory (speakerOf). Private, the default:
-    // every conversation does.
-    social: config.companion === true && config.audience === 'social',
+    companion: config.companion === true && !closed,
     // Whether the index is sent to the model (below); the skill says where to look when it
     // is not.
-    injectIndex: config.injectIndex !== false,
+    injectIndex: config.injectIndex !== false && !closed,
   }
   settings.readLimit = Math.min(MAX_READ_LIMIT, Math.max(MIN_READ_LIMIT, 4 * settings.maxBytes))
 
@@ -166,64 +166,37 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // Two more optional services, both possibly late. dsh's session projections fold, per
-  // session, who has written in it (SPEAKERS, social mode) and which index this plugin last
-  // sent it (RECALL, below). Social mode also reads the live agents, where a subagent's
-  // parent is found (dsh only continues a subagent while its parent is live).
+  // dsh's session projections, optional and possibly late, fold per session which index this
+  // plugin last sent it (RECALL, below). Read only where this plugin's own registration took:
+  // dsh keeps an earlier registrant of the key when it refuses ours, and that unit's state is
+  // not this one's. A registry that refuses RECALL leaves the index unsent, for the model to
+  // read (the skill says so).
   const live = {}
-  if (settings.social) {
-    ctx.inject(['agents'], (inner) => {
+  if (settings.injectIndex) {
+    ctx.inject(['sessionProjections'], (inner) => {
       inner.effect(() => {
-        const service = inner.agents
-        live.agents = service
+        const registry = inner.sessionProjections
+        let dispose
+        try {
+          dispose = registry.register(RECALL)
+        } catch {
+          return () => {}
+        }
+        live.recall = registry
         return () => {
-          if (live.agents === service) live.agents = undefined
+          if (live.recall === registry) live.recall = undefined
+          if (typeof dispose === 'function') dispose()
         }
       })
     })
   }
-  // Read only where this plugin's own registration took: dsh keeps an earlier registrant
-  // of the key when it refuses ours, and that unit's state is not this one's. A registry
-  // that refuses SPEAKERS leaves every session a stranger's (companionRoles); one that
-  // refuses RECALL leaves the index unsent, for the model to read (the skill says so).
-  // (Social mode keeps the index in the runtime context, below, and needs no RECALL.)
-  const units = [
-    ...(settings.social ? [['speakers', SPEAKERS]] : []),
-    ...(settings.injectIndex && !settings.social ? [['recall', RECALL]] : []),
-  ]
-  if (units.length > 0) {
-    ctx.inject(['sessionProjections'], (inner) => {
-      for (const [slot, unit] of units) {
-        inner.effect(() => {
-          const registry = inner.sessionProjections
-          let dispose
-          try {
-            dispose = registry.register(unit)
-          } catch {
-            return () => {}
-          }
-          live[slot] = registry
-          return () => {
-            if (live[slot] === registry) live[slot] = undefined
-            if (typeof dispose === 'function') dispose()
-          }
-        })
-      }
-    })
-  }
-  const roleOf = settings.social ? companionRoles(live) : () => 'owner'
 
   // A guard that throws breaks the host's tool call; only an UNEXPECTED exception can
   // get here (an edit whose simulated result exceeds V8's string limit, say), and like
   // the Python guard it fails open — the host could not perform such an edit either.
-  // The stranger filter is the exception: it fails closed on its own (refuseStranger).
-  // So is a move of the store (refuseMoving), which holds every write to it off while it
-  // runs, and turns one sent to where the store was toward where it is.
+  // A move of the store (refuseMoving) is the exception: it holds every write to the store
+  // off while it runs, and turns one sent to where the store was toward where it is.
   ctx.tools.guard((exec) => {
-    const stranger = settings.social
-      ? refuseStranger(exec, settings, sessionCwd, roleOf)
-      : undefined
-    if (stranger !== undefined) return stranger
     const moving = refuseMoving(exec, settings, sessionCwd)
     if (moving !== undefined) return moving
     try {
@@ -233,21 +206,15 @@ export function apply(ctx, config = {}) {
     }
   })
   // dsh's last hooks before a file tool's write, edit or delete lands, on the target dsh
-  // resolved. dsh's write and edit run them from 0.1.5 on; `apply_patch` (dsh 0.2.2-alpha.3
-  // on, off by default) runs one per operation, its delete too, and names its paths only
-  // inside the patch text, which the guard does not read. A stranger's change to a store is
-  // refused here (refuseStrangerTarget), ahead of the move, whose reason names where the
-  // store is now. A move is judged again (refuseMovingTarget): a file tool may wait for the
-  // user's approval inside its call, after the guard has passed it. Refusing is throwing,
-  // which dsh reports to the model as the tool's error. Ahead of the others: dsh's own
-  // read-before-write policy (dsh-fs-observation-policy) answers these hooks without passing
-  // them on.
+  // resolved: a move is judged again there (refuseMovingTarget). A file tool may wait for the
+  // user's approval inside its call, after the guard has passed it; and `apply_patch` (dsh
+  // 0.2.2-alpha.3 on, off by default) names its paths only inside the patch text, which the
+  // guard does not read, but runs one of these hooks per operation, its delete too. Refusing
+  // is throwing, which dsh reports to the model as the tool's error. Ahead of the others:
+  // dsh's own read-before-write policy (dsh-fs-observation-policy) answers these hooks
+  // without passing them on.
   for (const hook of ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']) {
     ctx.on(hook, (target, exec, next) => {
-      if (settings.social) {
-        const stranger = refuseStrangerTarget(target, exec, settings, sessionCwd, roleOf)
-        if (stranger !== undefined) throw new Error(stranger)
-      }
       let reason
       try {
         reason = refuseMovingTarget(target, settings)
@@ -271,7 +238,8 @@ export function apply(ctx, config = {}) {
   // dsh or another sharing its home (homeState): the skill is registered again once the place
   // it names is not where the store is, checked as each step's prompt is assembled (below).
   let skillPlace
-  if (config.registerSkill !== false) {
+  const registerSkill = config.registerSkill !== false && !closed
+  if (registerSkill) {
     ctx.inject(['skills'], (inner) => {
       let dispose
       const register = () => {
@@ -311,7 +279,7 @@ export function apply(ctx, config = {}) {
     language.current = next
     refreshSkill()
   })
-  const keepSkillCurrent = config.registerSkill !== false && config.skill === undefined
+  const keepSkillCurrent = registerSkill && config.skill === undefined
     ? () => {
         try {
           if (skillPlace !== undefined && placeKey() !== skillPlace) refreshSkill()
@@ -334,26 +302,13 @@ export function apply(ctx, config = {}) {
   // 20 KB index in a 13-step session with two `cd`s and two saves). dsh's own clock
   // (dsh-time-context) is sent the same way, as a message of its own.
   //
-  // Social mode is the exception: there the index stays in the runtime context, as before.
-  // Who is on the other end can change while a step's request is being prepared — a bridge
-  // queues an outsider's message — and only the runtime context is judged again then, at
-  // the very moment dsh admits the step's messages (dsh 0.2's refresh): a message chosen
-  // for the user's own conversation at the start of the step would still be committed,
-  // into what is by then someone else's, on its first turn too. A character chatting with
-  // others seldom moves directory or switches approval, so little is lost.
-  //
-  // With companion mode or social mode on, a runtime context of this plugin's own carries
-  // what is small and settled: companion mode's rules; in social mode, who is on the other
-  // end — the user's own conversation gets the index and where the store is, any other
-  // gets no store at all, only a note saying so. They still go in with `injectIndex: false`,
-  // which only turns the index off.
-  //
-  // That context is REQUIRED: a persona preset may turn optional runtime context off
-  // (dsh-persona's `includeRuntimeContext: false`, as the shipped `minimal` preset does),
-  // which would leave a companion without the memory and a stranger without the note that
-  // the store is closed — seen on a real dsh 0.2 (dsh 0.1 drops required ones too). Without
-  // either mode the index stays optional, as every preset expects: a context that is only a
-  // probe, with no text.
+  // With companion mode on, a runtime context of this plugin's own carries what is small and
+  // settled: companion mode's rules. They still go in with `injectIndex: false`, which only
+  // turns the index off. That context is REQUIRED: a persona preset may turn optional runtime
+  // context off (dsh-persona's `includeRuntimeContext: false`, as the shipped `minimal` preset
+  // does), which would leave a companion without its rules — seen on a real dsh 0.2. Without
+  // companion mode the index's context stays optional, as every preset expects: a context that
+  // is only a probe, with no text.
   //
   // Either way the context says whether the index message may be sent. dsh assembles a
   // step's prompt just before it asks for the step (`agent/pre-step`), and the assembly
@@ -364,40 +319,13 @@ export function apply(ctx, config = {}) {
   // assembly overwrites the answer: the refresh dsh makes of the runtime context before the
   // request runs no waterfall, and cannot carry a yes over to a later step.
   const injectIndex = settings.injectIndex
-  const guarded = settings.companion || settings.social
+  const guarded = settings.companion
   const index = injectIndex ? indexRecall(settings, sessionCwd) : () => ({ text: '', unsure: false })
-  const asMessage = injectIndex && !settings.social
   const memoryContext = guarded ? 'engramory:memory' : 'engramory:memory-index'
   const assembled = new WeakMap() // session -> did its latest assembly hold the memory context
   const contexts = []
   if (guarded) {
-    contexts.push({
-      name: memoryContext,
-      required: true,
-      text: (context) => {
-        if (roleOf(context?.agent) !== 'owner') return settings.text.strangerNotice
-        let shown = ''
-        if (settings.social) {
-          try {
-            shown = index(context).text
-          } catch {
-            // an index that cannot be read must not take the companion rules with it
-          }
-          // The skill, which every conversation reads, names no path: the user's own
-          // conversations learn it here, where no index has shown it yet — a relative pin
-          // resolved against this session's directory, as recall resolves it.
-          const stores = storesOf(settings)
-          if (stores.pinned !== undefined) stores.pinned = hostPath(sessionCwd(context), stores.pinned)
-          // only a project's index shown, or none: the store the skill sends notes to is
-          // still to be named (or said to be unknown, its place unreadable)
-          if (stores.unknown || !shown.includes(stores.pinned ?? join(stores.global, stores.indexName))) {
-            shown = [shown, settings.text.storeAt(stores)].filter(Boolean).join('\n\n')
-          }
-        }
-        const rules = settings.companion ? settings.text.companion : ''
-        return [shown, rules].filter(Boolean).join('\n\n')
-      },
-    })
+    contexts.push({ name: memoryContext, required: true, text: () => settings.text.companion })
   } else if (injectIndex) {
     contexts.push({ name: memoryContext, text: () => '' })
   }
@@ -414,8 +342,8 @@ export function apply(ctx, config = {}) {
   // 0.2.2's on a switch of model, as the request is prepared (`agent/request`, by a listener
   // outside this one) — the request it compacted goes without the index, and the next step
   // sends it again.
-  if (asMessage) {
-    const recallMessage = recallFor(settings, live, roleOf, index, assembled)
+  if (injectIndex) {
+    const recallMessage = recallFor(settings, live, index, assembled)
     ctx.on('agent/pre-step', async (step, next) => {
       const decision = await next()
       if (decision?.kind === 'reject' || step?.signal?.aborted || !Array.isArray(decision?.messages)) {
@@ -446,11 +374,9 @@ export function apply(ctx, config = {}) {
   // request goes out; where, compactionReminder() works out), the model is told to save what
   // is worth keeping beyond it — the summary keeps what the conversation needs, not what
   // memory would. The model, not the user, is told: saving is its part. A runtime context
-  // of its own (outside social mode the index is not in the runtime context, so its switching
-  // on sends no index again); required where the memory context is (a persona preset may drop optional
-  // context), and in social mode only for the user's own conversations, the only ones
-  // that may save.
-  if (config.compactionReminder !== false) {
+  // of its own (the index is not in the runtime context, so its switching on sends no index
+  // again); required where the memory context is (a persona preset may drop optional context).
+  if (config.compactionReminder !== false && !closed) {
     const pressure = {}
     for (const [service, key] of [['tokenMeter', 'meter'], ['sessionProjections', 'projections'],
       ['compaction', 'compaction'], ['llm', 'llm']]) {
@@ -469,33 +395,21 @@ export function apply(ctx, config = {}) {
       name: 'engramory:compaction',
       order: INDEX_CONTEXT_ORDER + 1,
       ...(guarded ? { required: true } : {}),
-      text: (context) => (roleOf(context?.agent) === 'owner' ? reminder(context) : ''),
+      text: (context) => reminder(context),
     })
   }
 
   if (contexts.length > 0) {
     // Each assembly of a step's prompt, read outermost (prepended), as the other listeners
-    // leave it, says two things. Whether the coming step may carry the index message
-    // (above). And whether this plugin's runtime context will be taken as written: dsh 0.1
-    // drops `interpolate: false` from a runtime context as it assembles one (dsh 0.2 keeps
-    // it) and fills in every `{{name}}` group of the text, failing the whole request over a
-    // name it does not know — in social mode a `{{` the user wrote in the index is enough.
-    // Where the assembly no longer says `interpolate: false`, no two braces of this plugin's
-    // text are left side by side (verbatim()); dsh 0.2's text stays exactly as written.
-    const ours = new Set(contexts.map((c) => c.name))
-    const filledIn = (c) => ours.has(c?.name) && c.interpolate !== false &&
-      typeof c.text === 'string' && c.text.includes('{{')
+    // leave it, says whether the coming step may carry the index message (above).
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {
       keepSkillCurrent()
       const result = await next()
       try {
         const listed = Array.isArray(result?.contexts) ? result.contexts : []
         const session = context?.agent?.session
-        if (asMessage && session !== null && typeof session === 'object') {
+        if (injectIndex && session !== null && typeof session === 'object') {
           assembled.set(session, listed.some((c) => c?.name === memoryContext))
-        }
-        if (listed.some(filledIn)) {
-          return { ...result, contexts: listed.map((c) => (filledIn(c) ? { ...c, text: verbatim(c.text) } : c)) }
         }
       } catch {
         // never fail an assembly over recall
@@ -626,8 +540,10 @@ const json = (status, body) => new Response(JSON.stringify(body), {
  * not overwritten.
  *
  * Only the owner reaches these — a signed-in browser, or a program holding the owner's
- * login: dsh answers an exact route for owner peers alone, so an agent, a stranger's
- * conversation included, cannot call them to switch social mode off.
+ * login: dsh answers an exact route for owner peers alone, so an agent cannot call them.
+ *
+ * A row still set to social mode, gone in 2.0 (closedBySocial), is said to be closed
+ * (`closed`); a save takes `audience` out, and the memory is back.
  */
 function settingsRoutes(ctx, config, fiber) {
   const read = () => {
@@ -636,6 +552,7 @@ function settingsRoutes(ctx, config, fiber) {
     const shown = editableSettings(raw)
     return json(200, {
       ...shown,
+      ...(closedBySocial(raw ?? {}) ? { closed: true } : {}),
       revision: revisionOf(shown),
       // A setting written as a `!!js` expression is not what the page would show.
       editable: entry !== undefined && plainSettings(raw),
@@ -716,7 +633,6 @@ function editableSettings(raw) {
   const config = raw !== null && typeof raw === 'object' ? raw : {}
   return {
     companion: config.companion === true,
-    audience: config.audience === 'social' ? 'social' : 'private',
     maxLines: positive(config.maxLines, DEFAULT_MAX_LINES),
     maxBytes: positive(config.maxBytes, DEFAULT_MAX_BYTES),
   }
@@ -735,7 +651,6 @@ function plainSettings(raw) {
   if (Object.hasOwn(config, '__jsExpr')) return false
   const plain = {
     companion: (v) => typeof v === 'boolean',
-    audience: (v) => typeof v === 'string',
     maxLines: (v) => typeof v === 'number',
     maxBytes: (v) => typeof v === 'number',
   }
@@ -747,11 +662,10 @@ function parseSettings(body) {
   if (body === null || typeof body !== 'object') return 'body'
   if (typeof body.revision !== 'string') return 'revision'
   if (typeof body.companion !== 'boolean') return 'companion'
-  if (body.audience !== 'private' && body.audience !== 'social') return 'audience'
   for (const [key, max] of [['maxLines', MAX_CAP_LINES], ['maxBytes', MAX_CAP_BYTES]]) {
     if (!Number.isInteger(body[key]) || body[key] < 1 || body[key] > max) return key
   }
-  return { companion: body.companion, audience: body.audience, maxLines: body.maxLines, maxBytes: body.maxBytes }
+  return { companion: body.companion, maxLines: body.maxLines, maxBytes: body.maxBytes }
 }
 
 /**
@@ -768,14 +682,14 @@ function withSettings(current, next, inherited) {
     else out[key] = value
   }
   set('companion', true, !next.companion)
-  set('audience', 'social', next.audience === 'private')
+  set('audience', undefined, true) // social mode is gone (closedBySocial): a save takes it out
   set('maxLines', next.maxLines, next.maxLines === DEFAULT_MAX_LINES)
   set('maxBytes', next.maxBytes, next.maxBytes === DEFAULT_MAX_BYTES)
   const managed = ['companion', 'audience', 'maxLines', 'maxBytes']
   const others = (config) => Object.fromEntries(Object.entries(config ?? {})
     .filter(([key]) => !managed.includes(key)))
   const base = inherited !== null && typeof inherited === 'object' ? inherited : {}
-  if (managed.every((key) => !(key in out)) && plainSettings(base) &&
+  if (managed.every((key) => !(key in out)) && plainSettings(base) && !closedBySocial(base) &&
       revisionOf(editableSettings(base)) === revisionOf(editableSettings({})) &&
       isDeepStrictEqual(others(out), others(base))) {
     return structuredClone(base)
@@ -1515,578 +1429,12 @@ async function fileIn(store, name, archived) {
   }
 }
 
-/**
- * The producers of dsh's own messages that carry nothing an outsider wrote: context, tool
- * results, skills, compaction, agent-to-agent traffic. From dsh 0.2.1-rc.5's message
- * source map and its catalog of first-party producers (`dsh-session-format-v3-to-v4`),
- * so a restored older log reads the same. Two carry text without an author, and only the
- * owner can send either on that dsh (it grants a caller other than the owner nothing):
- * an answer to the agent's question (`user-question-reply`) and a scheduled prompt
- * (`schedule`). `webhook`, input from outside, is left out. dsh 0.2.2-rc.1 adds one,
- * `action-cards` (ACTION_CARD_NOTICE). A kind not named here — a later dsh's, or any
- * plugin's — is someone else's unless its source says otherwise.
- */
-const INERT_PRODUCERS = new Set([
-  'runtime-context', 'system-prompt', 'time-context', 'tmux-context', 'working-directory',
-  'model-selection', 'plan-mode', 'ptc-mode', 'tool-registry', 'repeat-tool-reminder',
-  'skill-catalog', 'skill-invocation', 'agent-instructions', 'compact-checkpoint',
-  'compact-basic', 'cordis-host-runner', 'tool-cordis', 'tool-jobs', 'tool-goal', 'goal',
-  'user-approval', 'user-question-reply', 'schedule', 'session-reference',
-  'subagent-settled', 'subagent-report', 'agent-message', 'team-message', 'coordinator',
-  'dsh-session-title-llm', 'hooks-codex', 'hooks-claude-code', 'model', 'tool',
-])
-
-/**
- * dsh 0.2.2-rc.1's `action-cards` messages (dsh-action-cards, in the optional personalized
- * recommendations bundle): what became of the cards the agent proposed, sent as a notice
- * (`form: 'notice'`) before the agent's next step. Its text is dsh's own preamble and the
- * cards' receipts — a card's title, the agent's own, and what each kind reports, such as a
- * place the owner typed — none of it written by an outsider: on that dsh only the owner
- * decides a card (`actionCards/act` is granted to no one else). Only the notice is nobody's;
- * any other form of the kind is someone else's, until a later dsh is read again.
- */
-const ACTION_CARD_NOTICE = 'action-cards'
-
-/**
- * dsh 0.2.2-rc.2's `retry` kind: the empty prompt its window sends from Continue generating
- * after a failed request. dsh-api-session-controller's `prompt` stamps it as it stamps a
- * typed prompt — kind `retry` for empty content, `user` otherwise, the same request id,
- * time zone and `principal` — so it is judged by the same marks: the owner's from the
- * owner's own window, anyone else's otherwise.
- */
-const RETRY = 'retry'
-
-/**
- * Who wrote one user message, by the source dsh stamps on it (a message queued in
- * `agent/inbox/spliced` or committed in `user/message`):
- *   'owner'    the signed-in owner, typing in dsh's own window (desktop or web), or asking
- *              it to continue (RETRY): dsh's browser client sends every prompt with a
- *              request id and the browser's time zone, and dsh records any caller other
- *              than the owner as `principal`. Or a
- *              plugin declared the message the owner's: `speaker: { role: 'owner' }` on its
- *              source — the standard a chat bridge follows for the owner's own chat (README);
- *   'other'    anyone else: dsh's `user` or `retry` kind without both marks (a program
- *              calling dsh web's API, `dsh headless`, an editor or terminal client, a bridge
- *              writing that kind), any kind dsh's own producers do not use (`plugin:<name>`, as chat
- *              bridges write, or any other), `speaker: { role: 'guest' }`, and a source that
- *              cannot be read. Anyone in a group, the owner included: a `speaker` whose
- *              `chat` is set to anything but 'private' ('group' is the standard) — the whole
- *              group reads the reply, even before anyone else there has spoken;
- *   undefined  nobody: dsh's own producers (INERT_PRODUCERS, ACTION_CARD_NOTICE) and a plugin's own message
- *              declared `speaker: { role: 'none' }` — a report or a reminder no outsider
- *              wrote. These decide nothing. (SPEAKERS also lets through two bare `user`
- *              messages dsh writes itself.)
- */
-function speakerOf(source) {
-  if (source === null || typeof source !== 'object') return 'other'
-  const speaker = source.speaker !== null && typeof source.speaker === 'object' ? source.speaker : undefined
-  if (speaker?.role === 'none') return undefined
-  if (speaker?.chat !== undefined && speaker.chat !== 'private') return 'other'
-  if (speaker?.role === 'owner') return 'owner'
-  if (speaker?.role === 'guest') return 'other'
-  const kind = source.kind === 'plugin' ? legacyKind(source.plugin) : source.kind
-  if (kind === 'user' || kind === RETRY) {
-    return typeof source.rpcId === 'string' && typeof source.clientTimeZone === 'string' &&
-      source.principal === undefined ? 'owner' : 'other'
-  }
-  if (kind === ACTION_CARD_NOTICE) return source.form === 'notice' ? undefined : 'other'
-  return typeof kind === 'string' && INERT_PRODUCERS.has(kind) ? undefined : 'other'
-}
-
-/**
- * The kind dsh 0.2 gives a dsh 0.1 producer, which stamped `{ kind: 'plugin', plugin: <its
- * name> }` (dsh-time-context's clock on 0.1.5–0.1.7, say): as dsh's own session migration
- * (dsh-session-format-v3-to-v4, `producerKind`) lifts it — a few renamed, the rest of its
- * own producers keeping their names, anything else `plugin:<name>`, someone else's.
- */
-function legacyKind(plugin) {
-  if (typeof plugin !== 'string') return undefined
-  return Object.hasOwn(LEGACY_RENAMED, plugin) ? LEGACY_RENAMED[plugin]
-    : LEGACY_SAME_NAME.has(plugin) ? plugin
-      : `plugin:${plugin}`
-}
-const LEGACY_RENAMED = Object.freeze({
-  'compact': 'compact-checkpoint', 'tools-code-mode': 'ptc-mode', 'tools-ptc': 'ptc-mode',
-  'dsh-compaction-basic': 'compact-basic', '@deepseek-ai/dsh-system-prompt': 'runtime-context',
-})
-const LEGACY_SAME_NAME = new Set([
-  'agent-instructions', 'session-reference', 'team-message', 'goal', 'skill-invocation',
-  'skill-catalog', 'coordinator', 'subagent-report', 'subagent-settled', 'webhook',
-  'agent-message', 'model-selection', 'plan-mode', 'time-context', 'tmux-context',
-  'user-approval', 'repeat-tool-reminder', 'tool-cordis', 'cordis-host-runner', 'tool-goal',
-  'tool-jobs', 'hooks-codex', 'hooks-claude-code', 'schedule', 'dsh-session-title-llm',
-])
-
-/** A source that is dsh's `user` kind and nothing else: no request id, caller, zone or speaker. */
-const isBareUser = (source) => source !== null && typeof source === 'object' &&
-  source.kind === 'user' && Object.keys(source).length === 1
-
-/**
- * The SPEAKERS projection's state: has the owner written in the session, has anyone else.
- * In a subagent's log (`child`), where its own events start (`from`, the history its parent
- * forked to it coming first) and whether its task has arrived (`tasked`); the slash commands
- * running now (`commands`) and how many events ago the latest began (`since`); the ids of
- * messages let through as dsh's own until they are committed (`byDsh`).
- */
-const NOBODY = Object.freeze({ owner: false, other: false })
-const SPEAKERS_KEY = 'engramory:speakers'
-/** Past this many events a command's window closes, `command/done` or not (a lost append). */
-const COMMAND_WINDOW = 32
-const MAX_BY_DSH = 256
-const SPEAKER_KEYS = new Set(['owner', 'other', 'child', 'from', 'tasked', 'commands', 'since', 'byDsh'])
-const ids = (list, max) => Array.isArray(list) && list.length > 0 && list.length <= max &&
-  list.every((id) => typeof id === 'string' && id !== '')
-const isSpeakers = (value) => value !== null && typeof value === 'object' &&
-  Object.keys(value).every((key) => SPEAKER_KEYS.has(key)) &&
-  typeof value.owner === 'boolean' && typeof value.other === 'boolean' &&
-  (value.child === undefined ? value.from === undefined && value.tasked === undefined
-    : value.child === true && Number.isSafeInteger(value.from) && value.from >= 0 &&
-      (value.tasked === undefined || value.tasked === true)) &&
-  (value.commands === undefined ? value.since === undefined
-    : ids(value.commands, COMMAND_WINDOW) && Number.isSafeInteger(value.since) &&
-      value.since >= 0 && value.since < COMMAND_WINDOW) &&
-  (value.byDsh === undefined || ids(value.byDsh, MAX_BY_DSH))
-
-/** `state` without `keys`. */
-const omit = (state, ...keys) => Object.fromEntries(Object.entries(state).filter(([k]) => !keys.includes(k)))
-
-/** The command window after one event: a command begins or ends, or it ages by one event. */
-function commandsAfter(state, event) {
-  const id = event?.data?.commandId
-  if (event?.type === 'command/run' && typeof id === 'string' && id !== '') {
-    const running = (state.commands ?? []).filter((c) => c !== id)
-    return { ...state, commands: [...running, id].slice(-COMMAND_WINDOW), since: 0 }
-  }
-  if (state.commands === undefined) return state
-  const running = event?.type === 'command/done' ? state.commands.filter((c) => c !== id) : state.commands
-  const since = state.since + 1
-  return running.length === 0 || since >= COMMAND_WINDOW
-    ? omit(state, 'commands', 'since')
-    : { ...state, commands: running, since }
-}
-
-/**
- * A host-only dsh session projection folding who has written in each session, so a role
- * is one read per step instead of a walk over the log. dsh drives it over every committed
- * event, a fork's inherited ones and a restored log's included, and checkpoints it.
- *
- * A message counts from the moment it is queued (`agent/inbox/spliced`), not only once it
- * is committed (`user/message`): dsh computes a step's runtime context before it commits
- * the messages that step delivers, so a fold over commits alone judged every turn without
- * its own message — the first message of the user's conversation got a stranger's note,
- * and an outsider's first message in it got the memory (seen on dsh 0.2.1-rc.5). Bridges
- * reach the queue too (`agent.followup`, `agent.steer`). A queued message later withdrawn
- * still counts: an outsider who was about to be heard is not forgotten.
- *
- * Two bare `user` messages are dsh's own and decide nothing. One a slash command adds while
- * it runs, between its `command/run` and `command/done` (`/plan <text>`, `/goal`'s
- * attachments; on a real dsh three events after `command/run`): dsh records no one as
- * having run a command, and a bridge that forwards one runs it in its own conversation,
- * which its other messages already make someone else's. The window closes at the
- * command's `command/done`, or COMMAND_WINDOW events on. The other is the first one in a
- * subagent's own events, the task its parent agent hands it (later ones from the parent
- * are `agent-message`); the history a fork-backed subagent inherits is its parent's, and
- * the parent's own role stands for it. Any other bare `user` message is someone else's.
- */
-const SPEAKERS = {
-  key: SPEAKERS_KEY,
-  // Bumped whenever the state's fields or the fold change, so dsh refolds a session from its
-  // log rather than seed it from a checkpoint the fold no longer means (2: pre-release shapes;
-  // 3: a message in a group chat is someone else's, the owner's included; 4: dsh 0.1's own
-  // `{ kind: 'plugin' }` messages are nobody's, no longer an outsider's; 5: dsh 0.2.2's
-  // `action-cards` notices are nobody's, no longer an outsider's, ACTION_CARD_NOTICE; 6: dsh
-  // 0.2.2-rc.2's `retry` is judged as a typed prompt is, no longer always an outsider's, RETRY).
-  stateVersion: 6,
-  // dsh only calls `parse`, on a checkpoint before folding on from it; no zod needed.
-  stateSchema: {
-    parse(value) {
-      if (!isSpeakers(value)) throw new TypeError(`${SPEAKERS_KEY}: not a state of this unit`)
-      return structuredClone(value)
-    },
-  },
-  init: (header, inheritedEventCount) => (header?.origin === 'subagent'
-    ? { ...NOBODY, child: true, from: Number.isSafeInteger(inheritedEventCount) && inheritedEventCount > 0 ? inheritedEventCount : 0 }
-    : NOBODY),
-  apply(state, event) {
-    if (state.child === true && typeof event?.seq === 'number' && event.seq < state.from) return state
-    let next = commandsAfter(state, event)
-    const messages = event?.type === 'user/message' ? [event.data]
-      : event?.type === 'agent/inbox/spliced' ? event.data?.inserted
-        : undefined
-    if (!Array.isArray(messages)) return next
-    const committed = event.type === 'user/message'
-    for (const message of messages) {
-      if (message?.role !== 'user') continue
-      const id = typeof message.id === 'string' && message.id !== '' ? message.id : undefined
-      if (id !== undefined && next.byDsh?.includes(id)) {
-        if (committed) {
-          const rest = next.byDsh.filter((b) => b !== id)
-          next = rest.length > 0 ? { ...next, byDsh: rest } : omit(next, 'byDsh')
-        }
-        continue
-      }
-      const byCommand = next.commands !== undefined
-      if (id !== undefined && isBareUser(message.source) &&
-          (byCommand || (next.child === true && next.tasked !== true))) {
-        next = {
-          ...next,
-          ...(byCommand ? {} : { tasked: true }),
-          ...(committed ? {} : { byDsh: [...(next.byDsh ?? []), id].slice(-MAX_BY_DSH) }),
-        }
-        continue
-      }
-      const speaker = speakerOf(message.source)
-      if (speaker === 'owner' && !next.owner) next = { ...next, owner: true }
-      if (speaker === 'other' && !next.other) next = { ...next, other: true }
-    }
-    return next
-  },
-}
-
-/**
- * Who a session is talking to, in social mode:
- *   'owner'    the user's own conversation: the user has written in it (speakerOf) and
- *              nobody else ever has;
- *   'stranger' any other: one a chat bridge, a script or a schedule opened, and one an
- *              outsider has written in even once — what the memory put into it earlier
- *              stays in its history, out of this plugin's reach.
- *
- * A subagent (`origin: 'subagent'`) acts for the conversation that spawned it: it is the
- * user's own while its live parent, read afresh on every call, is — and nobody else has
- * written to it directly. A fork also names a `parentSession` but is a conversation of its
- * own, judged by its own log, the history it inherited included. Fails closed: a call with
- * no session, no registration of the SPEAKERS unit, a state that is not one, a fold that
- * throws, or a subagent whose parent is unnamed or not live counts as a stranger's.
- */
-function companionRoles(live) {
-  const classify = (agent, depth) => {
-    try {
-      const session = agent?.session
-      if (typeof session?.id !== 'string' || session.id === '' || live.speakers === undefined) {
-        return 'stranger'
-      }
-      const heard = live.speakers.stateOf(session, SPEAKERS_KEY)
-      if (!isSpeakers(heard) || heard.other) return 'stranger'
-      const header = session.header
-      if ((header?.origin === 'subagent') !== (heard.child === true)) return 'stranger'
-      if (header?.origin === 'subagent') {
-        const parentId = header.parentSession
-        const parent = typeof parentId === 'string' && parentId !== '' && depth < MAX_LINEAGE
-          ? live.agents?.get?.(parentId)
-          : undefined
-        return parent === undefined ? 'stranger' : classify(parent, depth + 1)
-      }
-      return heard.owner ? 'owner' : 'stranger'
-    } catch {
-      return 'stranger'
-    }
-  }
-  return (agent) => classify(agent, 0)
-}
-
-/** How many subagent generations a role is looked up through before failing closed. */
-const MAX_LINEAGE = 8
-
-/** Arguments that name a file or a directory, as dsh's tools and common others spell them. */
-const PATH_ARGS = ['file_path', 'path', 'filePath', 'filename', 'file', 'target_file', 'target']
-
-/** Tools that walk a whole tree under their `path` — the session's directory by default. */
-const TREE_SEARCHES = new Set(['grep', 'glob'])
-
-/**
- * Tools that read other conversations' records, every event in them: dsh's session search
- * (an optional bundle). dsh lets a conversation read any other opened in the same directory —
- * a stranger's the user's own, the index in it included.
- */
-const HISTORY_TOOLS = new Set([
-  'session_search', 'session_event_search', 'session_trace', 'session_event_trace', 'session_event_read',
-])
-
-/** Past this many files listed in one call, a stranger's call is refused without checking each. */
-const MAX_LISTED = 32
-
-/**
- * In social mode, a stranger's conversation may not point a file tool at a memory
- * store — not to read it, list it, search it, or write it — and may name files only,
- * never a directory. Refused:
- *   - a path that is a directory: grep and glob walk it, a directory view lists two
- *     levels and follows links, and any tree may hold a store this filter cannot see
- *     from here (another project's, below the session's directory). grep and glob
- *     with no `path` walk the session's directory, so they are refused too;
- *   - a path with a `.engramory-memory` segment, or one named as a move names its own
- *     (ownName), as written or as the OS resolves it (links, junctions, 8.3 short names) —
- *     a store that does not exist yet included, so a stranger cannot plant one for the
- *     user's next session;
- *   - a path in the global store, wherever it has been moved, or in a move's folders
- *     (storeTargets) — whether or not an index is pinned, since the store is the dsh
- *     home's, not this profile's;
- *   - a path in the pinned index's directory, or in the directory its target is in;
- *   - the same for every file a call lists (`files`, as dsh's `present` takes them), and
- *     for where a session moves to (`cd`) — there a directory is fine, a store's is not;
- *   - dsh's session search (HISTORY_TOOLS), whatever it is asked: it reads the records of
- *     the user's own conversations too.
- * Paths are compared without case or Unicode form on every platform: macOS opens
- * `.ENGRAMORY-MEMORY` as the store too, and refusing a stranger one path too many
- * costs nothing. Fails closed: a stranger's call that cannot be checked is refused.
- *
- * This keeps the user's memory out of a stranger's context by the routes dsh's own
- * file tools take. It is not a security boundary (SECURITY.md): a shell tool reads
- * any file.
- */
-function refuseStranger(exec, settings, sessionCwd, roleOf) {
-  try {
-    if (roleOf(exec?.agent) !== 'stranger') return undefined
-    if (HISTORY_TOOLS.has(exec.name)) return settings.text.strangerHistory
-    const args = exec.arguments !== null && typeof exec.arguments === 'object'
-      ? exec.arguments
-      : {}
-    const strings = (values) => values.filter((v) => typeof v === 'string' && v !== '')
-    const named = strings(PATH_ARGS.map((k) => args[k]))
-    // Files listed rather than named, as dsh's `present` takes them (`files: [{ path }]`).
-    if (Array.isArray(args.files)) {
-      if (args.files.length > MAX_LISTED) return settings.text.strangerRefusal
-      for (const item of args.files) {
-        named.push(...strings(item !== null && typeof item === 'object' ? PATH_ARGS.map((k) => item[k]) : [item]))
-      }
-    }
-    // The root a tree search really walks, whatever else the call carries: dsh ignores
-    // arguments a tool does not declare, so a stray `file_path` is not its root.
-    if (TREE_SEARCHES.has(exec.name)) {
-      named.push(typeof args.path === 'string' && args.path !== '' ? args.path : '.')
-    }
-    // Where a session moves to (dsh's `working_directory`, `cd`): a directory, so not refused
-    // for being one — but never a store's.
-    const moves = strings([args.cd])
-    if (named.length === 0 && moves.length === 0) return undefined
-    const cwd = sessionCwd(exec)
-    const stores = storeTargets(cwd, settings)
-    for (const [p, move] of [...named.map((p) => [p, false]), ...moves.map((p) => [p, true])]) {
-      // A network or device path can stall a stat for as long as the share takes to
-      // time out, on the host's main thread: refused before any I/O.
-      if (/^[\\/]{2}/.test(p)) return settings.text.strangerRefusal
-      const spelled = hostPath(cwd, p)
-      // Resolving walks the path a stat per missing segment: bounded before any I/O.
-      if (tooDeep(spelled) || /^[\\/]{2}/.test(spelled)) return settings.text.strangerRefusal
-      if (!move && isDirectory(spelled)) return settings.text.strangerRefusal
-      const written = foldPath(spelled)
-      const target = osKey(spelled)
-      if (namesStore(written) || namesStore(target)) return settings.text.strangerRefusal
-      if (stores.some((dir) => under(target, dir) || under(written, dir))) {
-        return settings.text.strangerRefusal
-      }
-    }
-    return undefined
-  } catch {
-    // Reached for a stranger's call, or one whose session could not even be read.
-    return settings.text.strangerRefusal
-  }
-}
-
-/**
- * refuseStranger() at dsh's last hooks before a write, edit or delete lands, on the target dsh
- * resolved (`displayPath`, `targetKey`): judged as a `write` naming it. The route `apply_patch`
- * takes, whose paths are only inside its patch text; dsh's write and edit, already judged at
- * the guard, pass here too. A stranger's target that is not an absolute path cannot be placed,
- * and is refused.
- */
-function refuseStrangerTarget(target, exec, settings, sessionCwd, roleOf) {
-  try {
-    if (roleOf(exec?.agent) !== 'stranger') return undefined
-    const paths = [target?.displayPath, target?.targetKey].filter((v) => typeof v === 'string' && isAbsolute(v))
-    if (paths.length === 0) return settings.text.strangerRefusal
-    const call = { name: 'write', arguments: { file_path: paths[0], path: paths[1] }, agent: exec?.agent }
-    return refuseStranger(call, settings, sessionCwd, roleOf)
-  } catch {
-    return settings.text.strangerRefusal
-  }
-}
-
 /** A filesystem error that only means "nothing there"; any other one fails closed. */
 const absent = (error) => error?.code === 'ENOENT' || error?.code === 'ENOTDIR'
-
-function isDirectory(p) {
-  try {
-    return statSync(p).isDirectory() // links followed: a link to a directory is one
-  } catch (error) {
-    if (absent(error)) return false // nothing there yet (a write may create it): judged by name
-    throw error
-  }
-}
-
-/** Past this many path segments, a stranger's call is refused without resolving it. */
-const MAX_STRANGER_DEPTH = 64
-
-/** A path compared without case or Unicode form (the stranger filter only). */
-const foldPath = (p) => p.normalize('NFC').toLowerCase()
-
-/** Does a folded path have a store directory, or one of a move's names, among its segments? */
-const namesStore = (folded) => folded.split(/[\\/]+/).some(ownName)
 
 /** Is folded `path` the folded `root` or below it? */
 const under = (path, root) =>
   path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
-
-/**
- * pathKey() for the stranger filter: resolved by the OS (so an 8.3 short name such as
- * `ENGRAM~1` for `.engramory-memory` is expanded), then folded in case and Unicode form on
- * every platform. Where pathKey() falls back to Node's walk, this throws on any error but
- * "nothing there": the filter fails closed.
- */
-function osKey(p) {
-  let head = process.platform !== 'win32' && isAbsolute(p) ? p : resolve(p)
-  const tail = []
-  for (;;) {
-    try {
-      head = realpathSync.native(head)
-      break
-    } catch (error) {
-      if (!absent(error)) throw error // unreadable is not missing: the caller fails closed
-      const parent = dirname(head)
-      if (parent === head) break
-      tail.unshift(basename(head))
-      head = parent
-    }
-  }
-  return foldPath(tail.length ? join(head, ...tail) : head)
-}
-
-/**
- * The directories a store really occupies, keyed, for paths that name no store: a store
- * directory may be a link or junction (a relocated store), so its target is reached
- * under another name — and a pinned index may live in a directory of any name, or be a
- * link itself. Covered: the global store, every `.engramory-memory/` from the session's
- * directory up, the pinned index's directory and its target's — a link's target read
- * from the link itself, so a dangling one (a store on a drive not mounted right now)
- * still closes the place it points to: a stranger's write would otherwise create it.
- * A store elsewhere that is a link is not looked for. Every path walked here is held to
- * the same bounds as a tool's — no network path, nothing too deep — and an error that
- * is not "nothing there" throws, refusing the call.
- *
- * The global store is where the dsh home says it is (homeState), moved or not, with its
- * default place, the places it was moved from and a move's own folders beside it — pinned
- * index or not, since another profile of the same home may use it. Where that cannot be
- * read, the call is refused. Those places are also reached through a link among their
- * ancestors, a dangling one too (aliasesOf): `C:\alias\vault` with `C:\alias` pointing to a
- * drive not there yet is closed at `D:\future\vault` as well.
- */
-function storeTargets(cwd, settings) {
-  const start = checkedRoot(cwd ?? process.cwd())
-  // the home's own bounds first: a home on another machine refuses before any I/O
-  const fallback = checkedRoot(join(dshHome(), STORE_DIR))
-  const state = homeState()
-  if (state.invalid !== undefined || state.unknownMove) throw new Error('where the store is cannot be read')
-  const { moving } = state
-  const named = [fallback, state.store,
-    ...(moving === undefined ? [] : [moving.from, moving.to, moving.staging, moving.detached])].map(checkedRoot)
-  const dirs = [...named, ...state.retired.map(checkedRoot)]
-  let indexLinked
-  if (settings.indexPath === undefined) {
-    // The global index may itself be a link, and recall reads through it: the directory
-    // it points to holds the user's index under a name no store has.
-    const index = join(state.store, settings.indexName)
-    dirs.push(dirname(realpathOr(index)))
-    const pointed = linkTarget(index)
-    if (pointed !== undefined) dirs.push(dirname(pointed))
-    indexLinked = pointed === undefined ? undefined : dirname(pointed)
-  }
-  // the places the store has been or is, and the pinned index's folder (below), are also
-  // closed where a link among their parents leads
-  const linked = [...named, ...state.retired, ...(indexLinked === undefined ? [] : [indexLinked])]
-  for (let dir = start; ; dir = dirname(dir)) {
-    const store = join(dir, STORE_DIR)
-    if (present(store)) dirs.push(store)
-    if (dirname(dir) === dir) break
-  }
-  if (settings.indexPath !== undefined) {
-    // relative: under a directory of any depth
-    const pinned = checkedRoot(hostPath(cwd, settings.indexPath))
-    dirs.push(dirname(pinned), dirname(realpathOr(pinned)))
-    const pointed = linkTarget(pinned)
-    if (pointed !== undefined) dirs.push(dirname(pointed))
-    linked.push(dirname(pinned), ...(pointed === undefined ? [] : [dirname(pointed)]))
-  }
-  for (const dir of linked) dirs.push(...aliasesOf(dir))
-  for (const d of [...dirs]) {
-    const pointed = linkTarget(d)
-    if (pointed !== undefined) dirs.push(pointed)
-  }
-  return dirs.flatMap((d) => [foldPath(resolve(d)), osKey(d)])
-}
-
-const tooDeep = (p) => p.split(/[\\/]+/).length > MAX_STRANGER_DEPTH
-
-/** A path this filter walks itself: refused (thrown) when a network one or too deep. */
-function checkedRoot(p) {
-  if (tooDeep(p) || /^[\\/]{2}/.test(p)) throw new Error(`not walked here: ${p}`)
-  return p
-}
-
-/** Is something at `p`, a dangling link included? Only "nothing there" is a no. */
-function present(p) {
-  try {
-    lstatSync(p)
-    return true
-  } catch (error) {
-    if (absent(error)) return false
-    throw error
-  }
-}
-
-/** How many links aliasesOf() follows, one through another, before it gives up (and refuses). */
-const MAX_LINK_HOPS = 8
-
-/**
- * The other names `p` goes by through a link or junction among its ancestors (or `p`
- * itself): for each, its target with the rest of `p` after it — a dangling link's too, read
- * from the link itself — and that path's own aliases in turn. Synchronous and bounded: a
- * stat per segment, MAX_LINK_HOPS links deep, the same bounds as a tool's path on every name
- * reached; past them, or on an error but "nothing there", it throws.
- */
-function aliasesOf(p, hops = 0) {
-  const out = []
-  const { root } = parse(p)
-  const parts = p.slice(root.length).split(/[\\/]+/).filter(Boolean)
-  let head = root
-  for (let i = 0; i < parts.length; i++) {
-    head = join(head, parts[i])
-    let link
-    try {
-      link = lstatSync(head)
-    } catch (error) {
-      if (absent(error)) break // nothing below it exists either
-      throw error
-    }
-    if (!link.isSymbolicLink()) continue
-    if (hops >= MAX_LINK_HOPS) throw new Error(`too many links: ${p}`)
-    const alias = checkedRoot(join(checkedRoot(resolve(dirname(head), readlinkSync(head))), ...parts.slice(i + 1)))
-    out.push(alias, ...aliasesOf(alias, hops + 1))
-    break // what follows is walked through the alias
-  }
-  return out
-}
-
-/** Where a link or junction at `p` points, resolved, dangling or not; else undefined. */
-function linkTarget(p) {
-  let link
-  try {
-    link = lstatSync(p)
-  } catch (error) {
-    if (absent(error)) return undefined
-    throw error
-  }
-  if (!link.isSymbolicLink()) return undefined
-  return checkedRoot(resolve(dirname(p), readlinkSync(p)))
-}
-
-/** The file a path names, links followed; the path itself when nothing is there. */
-function realpathOr(p) {
-  try {
-    return realpathSync.native(p)
-  } catch (error) {
-    if (absent(error)) return p
-    throw error
-  }
-}
 
 /**
  * dsh-compaction-basic's default ratio, for an engine whose config cannot be read. From
@@ -2213,9 +1561,9 @@ const count = (n) => Number.isInteger(n) && n >= 0
 
 /**
  * The source of the index messages this plugin sends: a producer kind of its own, as dsh
- * 0.2's session format requires of a message (it refuses the retired `plugin` kind) and
- * dsh 0.1's accepts, and written by nobody (`speaker: { role: 'none' }`), so the SPEAKERS
- * fold does not take the plugin's own message for an outsider's. dsh's chat shows a message
+ * 0.2's session format requires of a message (it refuses the retired `plugin` kind), and
+ * written by nobody (`speaker: { role: 'none' }`), the standard a bridge's own messages
+ * follow, so that no plugin takes it for someone's words. dsh's chat shows a message
  * of a kind other than `user` as a folded context row. No `sections` copy of the text,
  * which dsh-time-context's clock carries: dsh stores, and by default uploads with its
  * requests (dsh-session-log-deepseek), each event's data whole.
@@ -2286,9 +1634,8 @@ const RECALL = {
 /**
  * What to send a session with its coming step, or undefined: the index it should see,
  * headed as the latest, when that is not what it holds (RECALL); once, a note that no
- * index applies any more, when it should see none but holds one — its store gone, say
- * (social mode, where who is on the other end decides, keeps the index in the runtime
- * context and never comes here). Nothing where the session's
+ * index applies any more, when it should see none but holds one — its store gone, say.
+ * Nothing where the session's
  * latest assembly did not hold the memory context (a persona preset turned optional
  * runtime context off), and nothing without RECALL: a session whose last copy cannot be
  * told would be sent the index on every step.
@@ -2301,7 +1648,7 @@ const RECALL = {
  * long unreadable holds back no other's — and so is one holding no copy (a compaction took
  * it), at once.
  */
-function recallFor(settings, live, roleOf, index, assembled) {
+function recallFor(settings, live, index, assembled) {
   // sessions in a run of steps with a store found but not read, held back once in it already
   const held = new WeakSet()
   return (agent, { retry = false } = {}) => {
@@ -2310,7 +1657,7 @@ function recallFor(settings, live, roleOf, index, assembled) {
     if (assembled.get(session) !== true || live.recall === undefined) return undefined
     const sent = live.recall.stateOf(session, RECALL_KEY)
     if (!isRecall(sent)) return undefined
-    const { text: shown, unsure } = roleOf(agent) === 'owner' ? index({ agent }) : { text: '', unsure: false }
+    const { text: shown, unsure } = index({ agent })
     if (!unsure) held.delete(session)
     else if (sent.seq !== null && (retry || !held.has(session))) {
       held.add(session)
@@ -2651,8 +1998,7 @@ function jsonOf(text) {
  * Where the global store is, as the dsh home says: `{ root, fallback, store, retired,
  * moving }`, `store` its default place (`fallback`) unless the home's file names another, and
  * `moving` the move under way, if any. `invalid` where that file cannot be taken as written —
- * `store` is then undefined: no place is guessed, and a stranger's file tools are refused
- * (storeTargets) — and `unknownMove` where a move's journal cannot. A home on another machine
+ * `store` is then undefined: no place is guessed — and `unknownMove` where a move's journal cannot. A home on another machine
  * is not read here (the guard and recall run on dsh's main thread): its default place is the
  * store, and no move is made there. Throws on an error but "nothing there", which the callers
  * take as not known just now.
@@ -4295,13 +3641,6 @@ function crlfDominates(raw) {
   return crlf > sample.split('\n').length - 1 - crlf
 }
 
-function firstString(...values) {
-  for (const v of values) {
-    if (typeof v === 'string') return v
-  }
-  return undefined
-}
-
 /** Returns a human-readable breach description, or `null` when the text is within caps. */
 function measure(text, { maxLines, maxBytes }) {
   const lines = countLines(text)
@@ -4579,29 +3918,11 @@ const TEXT = {
       'not save — never claim a save that did not happen. Delete a `moment` or `self` ' +
       'note only when the user asks you to forget it; never write ID numbers, card ' +
       'numbers or passwords.',
-    strangerNotice:
-      'Engramory: this conversation is not the user\'s own — someone else has written in ' +
-      'it, or the user never has in dsh\'s own window — so no memory is loaded here and the ' +
-      'memory store is closed to file tools. Do not recall or save anything about the user ' +
-      'in it.',
     compactionSoon:
       'Engramory: this conversation is close to its context limit, and dsh will soon compact ' +
       'it into a summary. If anything in it is worth keeping beyond this conversation and is ' +
       'not in memory yet, save it now, as the Engramory skill describes. No need to tell the ' +
       'user.',
-    strangerRefusal:
-      'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
-      'written in it, or the user never has in dsh\'s own window), so the memory store is ' +
-      'closed to it.',
-    strangerHistory:
-      'This conversation is not the user\'s own (Engramory social mode: someone else has ' +
-      'written in it, or the user never has in dsh\'s own window), so the records of other ' +
-      'conversations are closed to it.',
-    storeAt: (stores) => (stores.unknown
-      ? 'Engramory: where your memory store is cannot be read just now (the user sees why on ' +
-        'this plugin\'s settings page); do not save to it until your context names it again.'
-      : `Engramory: your memory store is ${code(storeDir(stores))}, its index ` +
-        `${code(stores.indexName)}; create them there on the first save if they do not exist yet.`),
     storeMoving:
       'The Engramory memory store is being moved to another folder right now, which takes a ' +
       'few seconds: try this save again shortly.',
@@ -4660,24 +3981,9 @@ const TEXT = {
       '给你起的外号，记成 `self`（`## 我自己`）。记住了、改了、忘掉了、没记上，都用角色' +
       '口吻如实说——没记上绝不说记住了。`moment` 和 `self` 笔记只有用户说忘掉才删；' +
       '证件号、银行卡号、密码一律不记。',
-    strangerNotice:
-      'Engramory：这个会话不是用户本人的——有别人在里面说过话，或者用户从没在 dsh 窗口里' +
-      '亲手发过消息——所以这里不加载记忆，文件工具也碰不到记忆库。不要在这里回忆或保存关于' +
-      '用户的任何事。',
     compactionSoon:
       'Engramory：这段对话快到上下文上限了，dsh 很快会把它压缩成摘要。里面如果有值得长期' +
       '记住、还没存进记忆的东西，现在照 Engramory skill 存好。不用特意告诉用户。',
-    strangerRefusal:
-      '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
-      '窗口里亲手发过消息），记忆库对它关闭。',
-    strangerHistory:
-      '这个会话不是用户本人的（Engramory 社交模式：有别人在里面说过话，或者用户从没在 dsh ' +
-      '窗口里亲手发过消息），其他会话的记录对它关闭。',
-    storeAt: (stores) => (stores.unknown
-      ? 'Engramory：现在读不出你的记忆库在哪（原因用户在本插件的设置页能看到）；上下文再次给出它的' +
-        '位置之前，别往里存。'
-      : `Engramory：你的记忆库在 ${code(storeDir(stores))}，索引是 ${code(stores.indexName)}；` +
-        '还不存在的话，第一次保存时就在那里建。'),
     storeMoving: 'Engramory 记忆库正在搬到另一个文件夹，要几秒钟：过一会儿再保存一次。',
     storeMoved: (store) => `Engramory 记忆库已经搬到 ${code(store)}：笔记存到那里，别存这里。`,
     conflictLine: '搬家时两边都改过：这是旧位置的那一份，请合并',
@@ -4711,7 +4017,6 @@ const TEXT = {
 function storesOf(settings) {
   const how = {
     injected: settings.injectIndex !== false,
-    social: settings.social === true,
     maxLines: settings.maxLines ?? DEFAULT_MAX_LINES,
     maxBytes: settings.maxBytes ?? DEFAULT_MAX_BYTES,
   }
@@ -4745,9 +4050,6 @@ function capsOf(stores, zh = false) {
   return zh ? `${stores.maxLines} 行 / ${size}` : `${stores.maxLines} lines / ${size}`
 }
 
-/** The store's own folder: the pinned index's, or the global store. */
-const storeDir = (stores) => (stores.pinned !== undefined ? dirname(stores.pinned) : stores.global)
-
 /** `s` as a markdown code span whatever backticks it holds (CommonMark: a longer fence, padded). */
 function code(s) {
   const longest = Math.max(0, ...(s.match(/`+/g) ?? []).map((run) => run.length))
@@ -4758,15 +4060,11 @@ function code(s) {
 /** The skill's "where the store is" section, in English (stores from storesOf). */
 function whereEn(stores, companion) {
   const store = stores.pinned !== undefined
-    ? [stores.social
-      ? 'This host pins one index; in the user\'s own conversations your context gives its path.'
-      : `This host pins one index: ${code(stores.pinned)}${qualified(stores.pinned) ? '' : ', relative to your working directory'}.`,
+    ? [`This host pins one index: ${code(stores.pinned)}${qualified(stores.pinned) ? '' : ', relative to your working directory'}.`,
     'Its folder is the store: every note goes there, beside it.']
-    : [stores.social
-      ? 'Your store is the global one; in the user\'s own conversations your context gives its full path.'
-      : stores.unknown
-        ? 'Your store is the global one, but where it is cannot be read just now (the user sees why on this plugin\'s settings page): until your context names it again, do not save to it.'
-        : `Your store is the global one: ${code(stores.global)}, its index ${code(stores.indexName)}.`,
+    : [stores.unknown
+      ? 'Your store is the global one, but where it is cannot be read just now (the user sees why on this plugin\'s settings page): until your context names it again, do not save to it.'
+      : `Your store is the global one: ${code(stores.global)}, its index ${code(stores.indexName)}.`,
     'It serves every conversation, whatever its working directory. Write every note there,',
     'beside the index; on the first save, create the folder and the index if they do not',
     'exist yet.',
@@ -4780,9 +4078,6 @@ function whereEn(stores, companion) {
     '## Where the store is',
     '',
     ...store,
-    ...(stores.social ? ['',
-      'If your runtime context says a conversation is not the user\'s own, the store is closed',
-      'to it: do not read, create, write or name a store there.'] : []),
     '',
     `Never write ${code(stores.indexName)} or a note anywhere else, and never search the disk`,
     'for memory: there is no other store.',
@@ -4792,15 +4087,11 @@ function whereEn(stores, companion) {
 /** whereEn() in Chinese, sentence for sentence. */
 function whereZh(stores, companion) {
   const store = stores.pinned !== undefined
-    ? [stores.social
-      ? '本宿主固定了一个索引；在用户本人的会话里，上下文会给出它的路径。'
-      : `本宿主固定了一个索引：${code(stores.pinned)}${qualified(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
+    ? [`本宿主固定了一个索引：${code(stores.pinned)}${qualified(stores.pinned) ? '' : '（相对你的工作目录）'}。`,
     '它所在的文件夹就是记忆库：每条笔记都写在那里，放在索引旁边。']
-    : [stores.social
-      ? '你的记忆库是全局库；在用户本人的会话里，上下文会给出完整路径。'
-      : stores.unknown
-        ? '你的记忆库是全局库，但现在读不出它在哪（原因用户在本插件的设置页能看到）：上下文再次给出它的位置之前，别往里存。'
-        : `你的记忆库是全局库：${code(stores.global)}，索引是 ${code(stores.indexName)}。`,
+    : [stores.unknown
+      ? '你的记忆库是全局库，但现在读不出它在哪（原因用户在本插件的设置页能看到）：上下文再次给出它的位置之前，别往里存。'
+      : `你的记忆库是全局库：${code(stores.global)}，索引是 ${code(stores.indexName)}。`,
     '不管会话的工作目录在哪，用的都是它。每条笔记都写在那里，放在索引旁边；第一次保存时，',
     '文件夹或索引还不存在就新建。',
     '',
@@ -4813,9 +4104,6 @@ function whereZh(stores, companion) {
     '## 记忆库在哪',
     '',
     ...store,
-    ...(stores.social ? ['',
-      '如果运行时上下文说某个会话不是用户本人的，记忆库就对它关闭：在那里不读、不建、不写，',
-      '也不提记忆库。'] : []),
     '',
     `绝不在别处写 ${code(stores.indexName)} 或笔记，也绝不满盘搜索记忆：除此之外没有别的记忆库。`,
   ]
