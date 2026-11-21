@@ -2,8 +2,8 @@
 
 Engramory is a local developer tool: a discipline, a Claude Code index hook, a dsh
 guard plugin (`adapters/dsh/plugin/`) and helper scripts. It runs entirely on your
-machine and opens no network service of its own. Two things touch a network, both in
-the dsh plugin's settings and memory pages:
+machine, opens no network service of its own and makes no request to anywhere else. One
+thing touches a network, in the dsh plugin's settings and memory pages:
 
 - **Four routes on dsh's own web server**, which dsh answers only for the signed-in
   owner. `/api/engramory/settings` saves the plugin's settings into the dsh profile.
@@ -11,13 +11,8 @@ the dsh plugin's settings and memory pages:
   store's folder, on the dsh machine. `/api/engramory/store` says where the global
   store is and moves it to another local folder: it copies the store there, checks the
   copy, switches to it and keeps the old place as a backup. `/api/engramory/store/pick`
-  opens dsh's own folder
-  chooser on the dsh machine. None serves a note's text.
-- **One outbound request, on a click.** "Check for updates" on the memory page asks the
-  npm registry (then npmmirror, when npm gives no version) for the plugin's latest
-  version number: from the browser, with no cookie, no referrer and nothing from the
-  store. The plugin calls out at no other time, and its host half (`index.js`) never
-  does.
+  opens dsh's own folder chooser on the dsh machine. None serves a note's text. (Until
+  2.1.0 the memory page also asked npm for the latest version, on a click.)
 
 ## Reporting a vulnerability
 
