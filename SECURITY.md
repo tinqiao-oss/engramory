@@ -33,9 +33,10 @@ with details and a minimal repro. We aim to acknowledge within a few business da
   (`SKILL.md` §5).
 - **The index caps are size nudges, not security controls.** The Claude Code hook
   fails open on unexpected input (it must never brick editing) and sees only
-  `Edit | Write | MultiEdit`; the dsh plugin sees only dsh's own file tools. Shell tools
-  (Bash, PowerShell, background commands), MCP file tools, external editors and sync
-  clients go past both.
+  `Edit | Write | MultiEdit`; the dsh plugin sees only dsh's own file tools, and not
+  `apply_patch` (dsh 0.2.2-alpha.3 on, off by default), whose paths are in its patch
+  text. Shell tools (Bash, PowerShell, background commands), MCP file tools, external
+  editors and sync clients go past both.
 - **The dsh plugin's social mode is best-effort, not access control.** It keeps the
   memory out of conversations that are not the owner's by not injecting it there and
   refusing dsh's file tools pointed at a store. It recognises the owner by what dsh's
@@ -48,8 +49,8 @@ with details and a minimal repro. We aim to acknowledge within a few business da
   folders and a folder with anything in it; never replaces a file at the new place (one
   changed in both places is kept beside it, with a line added to the index); and
   removes the old place file by file, each after it is compared. While it runs it holds
-  off writes made through dsh's file tools (`write`, `edit`, `str_replace_editor`) and
-  nothing else: a shell, an MCP file tool, an editor or another host writing to the
+  off writes made through dsh's file tools (`write`, `edit`, `str_replace_editor`,
+  `apply_patch`) and nothing else: a shell, an MCP file tool, an editor or another host writing to the
   store at that moment is not coordinated. Its link checks are on paths, so a process
   that swaps a folder for a link between a check and its use can still redirect a copy
   or a removal (as with the installer, below).

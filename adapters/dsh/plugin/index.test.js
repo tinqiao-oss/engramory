@@ -2489,6 +2489,51 @@ test('companion mode: a stranger cannot reach a store by another spelling, or pl
   assert.equal(call('write', { file_path: join(project, 'notes.md'), content: 'x' }), undefined)
 })
 
+test('companion mode: a stranger cannot change a store at dsh\'s last hooks, where apply_patch passes', () => {
+  // dsh's apply_patch (0.2.2 on) names its paths only inside the patch text, which the guard
+  // does not read; each operation passes fs/write-intent, fs/edit-intent or fs/delete-intent
+  // with the target dsh resolved and the call's actor
+  const home = scratch('home')
+  const userIndex = store(home, '- [u](u.md) - user\n')
+  const project = scratch('companion')
+  const projectIndex = store(project, '- [p](p.md) - project\n')
+  const hooks = ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']
+  // dsh's read-before-write policy is there first and answers without passing on
+  const policy = () => 'intent'
+  const early = Object.fromEntries(hooks.map((h) => [h, [policy]]))
+  const { listeners } = mount(COMPANION, { workingDirectory: sessionDirs(), listeners: early })
+  const intent = (list, hook, target, actor) => withDshHome(home, () => {
+    const chain = list.get(hook)
+    const run = (i) => (i < chain.length ? chain[i](target, actor, () => run(i + 1)) : 'end')
+    return run(0)
+  })
+  const on = (p) => ({ displayPath: p, targetKey: p })
+  const stranger = as(theirs('patch-1', project))
+  const mine = as(own('patch-2', project))
+  const closed = /closed to it/
+  const stores = [userIndex, join(home, '.engramory-memory', 'planted.md'), projectIndex,
+    join(project, '.engramory-memory', 'a.md')]
+  for (const hook of hooks) {
+    assert.equal(listeners.get(hook)[1], policy, `${hook}: ahead of dsh's own`)
+    for (const path of stores) {
+      assert.throws(() => intent(listeners, hook, on(path), stranger), closed, `${hook} ${path}`)
+      assert.equal(intent(listeners, hook, on(path), mine), 'intent', `${hook} ${path}: the user's own may`)
+    }
+    // the resolved key alone is enough: a link spelled elsewhere that dsh resolved into the store
+    assert.throws(() => intent(listeners, hook, { displayPath: join(scratch('patch-link'), 'a.md'), targetKey: userIndex },
+      stranger), closed)
+    assert.equal(intent(listeners, hook, on(join(project, 'notes.md')), stranger), 'intent', 'anywhere else goes on')
+    // a target dsh did not resolve cannot be placed: refused for a stranger only
+    assert.throws(() => intent(listeners, hook, { displayPath: 'a.md' }, stranger), closed)
+    assert.equal(intent(listeners, hook, { displayPath: 'a.md' }, mine), 'intent')
+    // an actor whose session cannot be read is a stranger
+    assert.throws(() => intent(listeners, hook, on(userIndex), {}), closed)
+  }
+  // outside social mode these hooks judge a move only
+  const solo = mount({ companion: true }, { workingDirectory: sessionDirs(), listeners: early })
+  for (const hook of hooks) assert.equal(intent(solo.listeners, hook, on(userIndex), stranger), 'intent', hook)
+})
+
 test('companion mode: a global index that is a link closes the folder it points to', (t) => {
   // recall reads the global index through the link, so its target is the user's index too
   const home = scratch('home')
@@ -4384,13 +4429,14 @@ test('store: dsh\'s file tools are held off both places while a move runs, and t
 
 test('store: a write is judged again at dsh\'s last hook before it lands, after any approval it waited for', async () => {
   // dsh-tool-fs asks to widen the sandbox inside the call, after the guard; a move started
-  // while that waits must still hold the write off (fs/write-intent, fs/edit-intent)
+  // while that waits must still hold the write off (fs/write-intent, fs/edit-intent), and
+  // apply_patch's delete (fs/delete-intent)
   const { home, dir } = homeStore('mv-intent')
   const to = join(scratch('mv-intent-to'), 'vault')
   // dsh's read-before-write policy (dsh-fs-observation-policy) is there first and answers
   // these hooks without passing them on: this plugin's listener must run ahead of it
   const policy = () => 'intent'
-  const hooks = ['fs/write-intent', 'fs/edit-intent']
+  const hooks = ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']
   const m = storeMount(home, { language: 'en' }, { listeners: Object.fromEntries(hooks.map((h) => [h, [policy]])) })
   for (const hook of hooks) assert.deepEqual([m.listeners.get(hook)?.length, m.listeners.get(hook)?.[1]], [2, policy], hook)
   // a dsh waterfall: each listener gets the target, the actor and the rest of the chain

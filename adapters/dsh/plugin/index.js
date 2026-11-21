@@ -232,13 +232,22 @@ export function apply(ctx, config = {}) {
       return undefined
     }
   })
-  // A move is judged again at dsh's last hook before a write lands (refuseMovingTarget): a
-  // file tool may wait for the user's approval inside its call, after the guard has passed it.
-  // dsh's write and edit run these hooks from 0.1.5 on; refusing is throwing, which dsh reports
-  // to the model as the tool's error. Ahead of the others: dsh's own read-before-write policy
-  // (dsh-fs-observation-policy) answers these hooks without passing them on.
-  for (const hook of ['fs/write-intent', 'fs/edit-intent']) {
+  // dsh's last hooks before a file tool's write, edit or delete lands, on the target dsh
+  // resolved. dsh's write and edit run them from 0.1.5 on; `apply_patch` (dsh 0.2.2-alpha.3
+  // on, off by default) runs one per operation, its delete too, and names its paths only
+  // inside the patch text, which the guard does not read. A stranger's change to a store is
+  // refused here (refuseStrangerTarget), ahead of the move, whose reason names where the
+  // store is now. A move is judged again (refuseMovingTarget): a file tool may wait for the
+  // user's approval inside its call, after the guard has passed it. Refusing is throwing,
+  // which dsh reports to the model as the tool's error. Ahead of the others: dsh's own
+  // read-before-write policy (dsh-fs-observation-policy) answers these hooks without passing
+  // them on.
+  for (const hook of ['fs/write-intent', 'fs/edit-intent', 'fs/delete-intent']) {
     ctx.on(hook, (target, exec, next) => {
+      if (settings.social) {
+        const stranger = refuseStrangerTarget(target, exec, settings, sessionCwd, roleOf)
+        if (stranger !== undefined) throw new Error(stranger)
+      }
       let reason
       try {
         reason = refuseMovingTarget(target, settings)
@@ -1869,6 +1878,25 @@ function refuseStranger(exec, settings, sessionCwd, roleOf) {
     return undefined
   } catch {
     // Reached for a stranger's call, or one whose session could not even be read.
+    return settings.text.strangerRefusal
+  }
+}
+
+/**
+ * refuseStranger() at dsh's last hooks before a write, edit or delete lands, on the target dsh
+ * resolved (`displayPath`, `targetKey`): judged as a `write` naming it. The route `apply_patch`
+ * takes, whose paths are only inside its patch text; dsh's write and edit, already judged at
+ * the guard, pass here too. A stranger's target that is not an absolute path cannot be placed,
+ * and is refused.
+ */
+function refuseStrangerTarget(target, exec, settings, sessionCwd, roleOf) {
+  try {
+    if (roleOf(exec?.agent) !== 'stranger') return undefined
+    const paths = [target?.displayPath, target?.targetKey].filter((v) => typeof v === 'string' && isAbsolute(v))
+    if (paths.length === 0) return settings.text.strangerRefusal
+    const call = { name: 'write', arguments: { file_path: paths[0], path: paths[1] }, agent: exec?.agent }
+    return refuseStranger(call, settings, sessionCwd, roleOf)
+  } catch {
     return settings.text.strangerRefusal
   }
 }

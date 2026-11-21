@@ -47,7 +47,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.5.6`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@1.5.7`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
 for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
 install that, then quit dsh from the tray and open it again. Your memory and settings stay.
@@ -287,7 +287,11 @@ writable. This table is pinned by `node --test` in CI.
 
 - **Only dsh's file tools are capped:** `write`, `edit`, and the `str_replace_editor`
   some versions and presets carry; a tool of the same name from another plugin is
-  judged the same way. Shell tools, MCP file tools and external editors go past it: run
+  judged the same way. Not `apply_patch`, which dsh offers from 0.2.2-alpha.3 and leaves
+  off by default: its paths are in the patch text, which the cap does not read (it is
+  still kept off a store in a stranger's conversation in social mode, and while the store
+  moves). Shell tools, MCP file tools and external
+  editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
 - **The global store is found where the memory page put it.** Moved there by hand, it
   is not (move it back and use the memory page, or set `indexPath`); for a project store

@@ -6,6 +6,28 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 1.5.7 — 2026-11-21
+
+dsh's `apply_patch` (dsh 0.2.2-alpha.3 on, off by default) is held off a store in social
+mode and while the store moves; the index cap does not judge it.
+
+- **dsh: in social mode, a stranger's `apply_patch` could change the memory store.** The
+  tool names its paths only inside the patch text, which the guard does not read, so a
+  conversation that is not the owner's could add a note to a store, edit its index (a line
+  there reaches the owner's next conversation with the index: a stored prompt injection)
+  or delete a note. Each of its operations passes one of dsh's last hooks before a file changes
+  (`fs/write-intent`, `fs/edit-intent`, `fs/delete-intent`) with the target dsh resolved;
+  a stranger's change to a store is now refused there, as dsh's other file tools already
+  were at the guard. Only where a profile turns `apply_patch` on.
+- **dsh: `apply_patch`'s delete went past a store move.** A move, or a place the store moved
+  from, held off its adds and edits but not its deletes: the plugin now listens to
+  `fs/delete-intent` as well.
+- **The index cap does not judge `apply_patch`** (SECURITY.md, the plugin README's known
+  limits): like a shell, it can grow the index past the cap. Run `engramory_check.py`
+  after editing the index, as for the other routes the cap does not see.
+- **dsh 0.2.2-rc.4 and 0.2.2-rc.5 declared compatible**, after the end-to-end run passed
+  on both, with the 16 releases declared before.
+
 ## 1.5.6 — 2026-11-19
 
 Moving the dsh plugin's global store: a place whose last name ends in a space is refused,
