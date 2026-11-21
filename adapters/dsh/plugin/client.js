@@ -33,11 +33,8 @@ window.__ModuleLoader__.load({
     const PICK_API = 'api/engramory/store/pick'
     /** How long the page waits on dsh's folder chooser: the route closes it after ten minutes. */
     const PICK_WAIT_MS = 11 * 60 * 1000
-    /** How often the page asks after a move it started, and for how long in all. */
-    const MOVE_POLL_MS = 500
-    const MOVE_WATCH_MS = 120000
-    /** How often the page looks again at a move it did not start, while one is under way. */
-    const MOVE_FOLLOW_MS = 2000
+    /** How long the page waits on a move: the plugin answers once it is done (up to 256 MB copied). */
+    const MOVE_WAIT_MS = 10 * 60 * 1000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
     const VERSION = '1.5.7'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
@@ -107,17 +104,13 @@ window.__ModuleLoader__.load({
       placePlaceholder: '新位置：一个空文件夹或还不存在的文件夹，例如 D:\\同步盘\\AI记忆',
       placeMove: '搬过去',
       placeBack: '搬回默认位置',
-      placeHint: '整个记忆库连同归档一起搬过去，搬完旧位置自动清理；这台电脑上的桌面版和命令行都用这个位置。搬的那几秒 AI 存不了记忆，会过一会儿再存。放进网盘的话别让两台电脑同时写；放进 git 仓库会被一起提交；映射的网络盘可能让 dsh 卡顿。',
+      placeHint: '整个记忆库连同归档复制到新位置，逐个文件核对后切换过去；旧库改名留在原处旁边作备份（名字后面加 .backup-日期），确认新位置没问题后可以自己删掉。这台电脑上的桌面版和命令行都用新位置。搬的那几秒 AI 存不了记忆，会过一会儿再存；同时开着的其他 dsh 窗口那几秒写进的内容只留在备份里，换位置前最好关掉它们。放进网盘的话别让两台电脑同时写；放进 git 仓库会被一起提交；映射的网络盘可能让 dsh 卡顿。',
       placeMoving: '正在搬…',
-      placeMoved: '搬好了，旧位置已经清理。',
-      placeMovedConflicts: '搬好了。有 {count} 个文件在搬的时候两边都被改过：旧位置那份放在新位置、名字里带 .old-，索引里也加了一行，记得合并。',
+      placeMoved: '搬好了。',
+      placeMovedBackup: '搬好了。旧库改名留作备份：{backup}，确认新位置没问题后可以删掉。',
+      placeMovedKept: '搬好了。旧库有文件正被占用，没能改名，原样留在 {backup} 作备份；确认新位置没问题后可以删掉。AI 不会再往那里写。',
       placeSame: '记忆库已经在这里了。',
-      placeStillMoving: '还在搬，过一会儿刷新这一页看看。',
-      placeEnded: '这次搬家已经结束，记忆库现在在上面写的位置。',
       placeMoveFailed: '没搬成：{reason}',
-      placeMovedUnfinished: '已经搬到新位置，记忆库现在在上面写的位置；旧位置还没清理完：{reason} dsh 每分钟会自动接着清理，不用再搬一次。',
-      placeResuming: '有一次搬家还没做完，dsh 会自动接着做完。',
-      placeResumingWhy: '上次停在：{reason}会自动再试。',
       placePinned: '配置里固定了索引（indexPath），记忆库就在它所在的文件夹，这里不能搬。',
       placeRemote: 'dsh 主目录在网络位置上，这里不能搬。',
       placeProblem: '记录记忆库位置的文件读不懂，暂时找不到记忆库：{file}。把它改对后刷新这一页。',
@@ -142,7 +135,6 @@ window.__ModuleLoader__.load({
       whyTooDeep: '文件夹层数太多了。',
       whySpecial: '记忆库里有不是普通文件的东西。',
       whyChanged: '搬的时候记忆库被别处换了位置。',
-      whyInterrupted: '上次搬到一半被打断了，已经撤销，记忆库还在原处。',
       whyFailed: '文件操作出错了。',
       locationUnknown: '记录记忆库位置的文件（dsh 主目录下的 .engramory-memory.json）读不懂，全局记忆这次没列出来。把它改对后点刷新。',
       panel: '记忆',
@@ -195,7 +187,7 @@ window.__ModuleLoader__.load({
       howToSay: '想让 AI 记住什么，直接跟它说，比如「记住：我习惯用 pnpm」「把这个决定记下来」。平时它也会尽量自己挑值得长期记住的记下来，比如你纠正过它的做法。',
       howToRecall: '默认每次对话都会带上记忆的目录（索引），AI 用到细节时再打开那条笔记，不用你提醒。',
       howToEdit: '这里列出读得到的记忆，打开笔记就能直接改；想让 AI 忘掉什么，跟它说「忘掉……」就行。',
-      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），点「全局记忆」右上角的「更换存储地址」，插件会整个搬过去。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
+      howToMove: '记忆是存在运行 dsh 那台电脑上的普通 markdown 文件，位置写在每个库的标题下面。想放到别处（比如网盘里），点「全局记忆」右上角的「更换存储地址」，插件会整个复制过去，旧库留作备份。换电脑时，把那个文件夹拷到新电脑 dsh 主目录下的 .engramory-memory，想放别处再在新电脑上搬一次。',
       howToSocial: '想让别人也能跟你的 AI 聊（接了 QQ、微信等）？给那个机器人单独开一个 dsh profile，别接进这个 profile：这里的每个对话都能用你的记忆。',
       feedbackLead: '遇到问题或有建议：',
       feedbackIssue: '到 GitHub 提 issue',
@@ -299,17 +291,13 @@ window.__ModuleLoader__.load({
       placePlaceholder: 'New place: an empty folder, or one not there yet, such as D:\\Sync\\AI memory',
       placeMove: 'Move it there',
       placeBack: 'Move it back to the default place',
-      placeHint: 'The whole store moves, archive and all, and the old place is cleared once it has; the desktop app and the command line on this computer both use the new place. For the few seconds it takes, the AI cannot save memory and tries again a little later. In a synced folder, do not let two computers write at once; in a git repository it gets committed with the rest; a mapped network drive may make dsh stall.',
+      placeHint: 'The whole store, archive and all, is copied to the new place, each file checked, and then used from there; the old store is renamed and kept beside where it was as a backup (.backup- and the date added to its name), for you to delete once the new place looks right. The desktop app and the command line on this computer both use the new place. For the few seconds it takes, the AI cannot save memory and tries again a little later; what another dsh window open meanwhile writes in those seconds stays in the backup only, so close the others first. In a synced folder, do not let two computers write at once; in a git repository it gets committed with the rest; a mapped network drive may make dsh stall.',
       placeMoving: 'Moving…',
-      placeMoved: 'Moved, and the old place is cleared.',
-      placeMovedConflicts: 'Moved. {count} file(s) changed in both places while it moved: the old place\'s copy is beside it in the new place, with .old- in its name and a line in the index. Merge them.',
+      placeMoved: 'Moved.',
+      placeMovedBackup: 'Moved. The old store is kept as a backup: {backup}. Delete it once the new place looks right.',
+      placeMovedKept: 'Moved. A file in the old store was held open, so it could not be renamed: it stays at {backup} as the backup. Delete it once the new place looks right; the AI no longer writes there.',
       placeSame: 'The memory is there already.',
-      placeStillMoving: 'Still moving. Refresh this page in a little while.',
-      placeEnded: 'The move is over: the memory is where it says above.',
       placeMoveFailed: 'Not moved: {reason}',
-      placeMovedUnfinished: 'Moved: the memory is where it says above. Clearing the old place did not finish: {reason} dsh carries on with it every minute; there is nothing to move again.',
-      placeResuming: 'A move is not finished yet; dsh finishes it on its own.',
-      placeResumingWhy: 'It last stopped at: {reason} It will try again.',
       placePinned: 'An index is pinned (indexPath): the memory is in its folder, and is not moved here.',
       placeRemote: 'dsh\'s home folder is on a network place: the memory is not moved here.',
       placeProblem: 'The file that says where the memory is cannot be read as written, so the memory cannot be found for now: {file}. Correct it, then refresh this page.',
@@ -334,7 +322,6 @@ window.__ModuleLoader__.load({
       whyTooDeep: 'Its folders go too deep.',
       whySpecial: 'The store holds something that is not a plain file.',
       whyChanged: 'The store was moved elsewhere while this move ran.',
-      whyInterrupted: 'The last move was cut short and has been undone: the store is where it was.',
       whyFailed: 'A file operation failed.',
       locationUnknown: 'The file that says where the memory is (.engramory-memory.json in dsh\'s home folder) cannot be read as written, so the global memory is not listed this time. Correct it, then refresh.',
       panel: 'Memory',
@@ -387,7 +374,7 @@ window.__ModuleLoader__.load({
       howToSay: 'To have the AI remember something, just tell it: "remember that I use pnpm", "note this decision down". It also tries to keep what is worth keeping on its own, such as a way of working you corrected.',
       howToRecall: 'By default every conversation carries the memory\'s table of contents (the index), and the AI opens a note when it needs the details; you do not have to remind it.',
       howToEdit: 'The memory this page can read is listed here; open a note to edit it. To have the AI forget something, tell it "forget …".',
-      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), click Change location at the top right of the global memory, and the plugin moves it all there. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
+      howToMove: 'The memory is plain markdown files on the computer dsh runs on, in the folder shown under each store\'s title. To keep it elsewhere (a synced folder, say), click Change location at the top right of the global memory: the plugin copies it all there and keeps the old store as a backup. On a new computer, copy that folder to .engramory-memory in dsh\'s home folder there, then move it again if you want it elsewhere.',
       howToSocial: 'Want others to talk to your AI too (through QQ, WeChat and the like)? Give that bot a dsh profile of its own rather than bridging it into this one: every conversation here gets your memory.',
       feedbackLead: 'Found a problem or have an idea? ',
       feedbackIssue: 'Open an issue on GitHub',
@@ -833,7 +820,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         busy: () => t('whyBusy'), problem: () => t('whyProblem'), pinned: () => t('placePinned'),
         remote: () => t('placeRemote'), tooMany: () => t('whyTooMany'), tooBig: () => t('whyTooBig'),
         tooDeep: () => t('whyTooDeep'), special: () => t('whySpecial'), changed: () => t('whyChanged'),
-        interrupted: () => t('whyInterrupted'),
       }[code]
       return why === undefined ? `${t('whyFailed')}${typeof detail === 'string' ? ` (${detail})` : ''}` : why()
     }
@@ -841,8 +827,8 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
     /**
      * Moving the global store: on the memory page, opened from the global store's own actions
      * (or beside "no memory yet"). The folder comes from dsh's own chooser where it opens on this
-     * desktop, or is typed; the page starts a move and asks after it until it is done (the plugin
-     * carries it on whether or not the page stays), then has the listing read again (`onMoved`).
+     * desktop, or is typed; the plugin copies the store there, switches to it and keeps the old
+     * one as a backup, and answers once it is done; the listing is then read again (`onMoved`).
      * `showNow`: say where the store is, where the page does not show it already.
      */
     function PlaceSection({ t, onMoved, showNow = false }) {
@@ -854,8 +840,6 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const alive = useRef(true)
       const moving = useRef(false)
       const chooserRequest = useRef(undefined)
-      // a move on record the last time it was read: over now, the listing is read again
-      const wasMoving = useRef(false)
       useEffect(() => () => {
         alive.current = false
         chooserRequest.current?.abort() // closed: the chooser it asked for closes with it
@@ -864,28 +848,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
         try {
           const response = await request(STORE_API)
           if (!response.ok || response.body === undefined) throw new Error(`HTTP ${response.status}`)
-          if (!alive.current) return
-          setState({ phase: 'ready', data: response.body })
-          const under = response.body.moving !== undefined
-          if (wasMoving.current && !under) onMoved?.()
-          wasMoving.current = under
+          if (alive.current) setState({ phase: 'ready', data: response.body })
         } catch {
           if (alive.current) setState((s) => (s.phase === 'ready' ? s : { phase: 'error' }))
         }
-      }, [onMoved])
+      }, [])
       useEffect(() => { load() }, [load])
-      // a move under way when the page opened (another window's, or one carried on after a
-      // restart): asked after until it is over, as one this page starts
-      const underWay = state.phase === 'ready' && state.data.moving !== undefined && !busy
-      // each look, answered or not, schedules the next while the move is still on record
-      const [looks, setLooks] = useState(0)
-      useEffect(() => {
-        if (!underWay) return undefined
-        const timer = setTimeout(() => {
-          if (alive.current) load().finally(() => { if (alive.current) setLooks((n) => n + 1) })
-        }, MOVE_FOLLOW_MS)
-        return () => clearTimeout(timer)
-      }, [underWay, looks])
 
       const choose = async () => {
         if (moving.current || choosing) return
@@ -927,6 +895,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           try {
             response = await request(STORE_API, {
               method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to }),
+              timeout: MOVE_WAIT_MS,
             })
           } catch (error) {
             response = { ok: false, body: { error: 'failed', detail: String(error?.message ?? error) } }
@@ -939,45 +908,17 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
             onMoved?.()
             return
           }
-          if (response.status !== 202 || typeof body.id !== 'string') {
+          await load() // where the store is now, moved or not
+          if (!alive.current) return
+          if (!response.ok || body.ok !== true) {
             setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, body.reason ?? body.error, body.detail) }) })
-            await load()
             return
           }
-          setBanner({ tone: 'ok', text: t('placeMoving') })
-          let outcome
-          // by the clock, not by count: each ask may itself wait out its own deadline
-          const until = Date.now() + MOVE_WATCH_MS
-          while (alive.current && outcome?.done !== true && Date.now() < until) {
-            await new Promise((resolve) => setTimeout(resolve, MOVE_POLL_MS))
-            try {
-              const polled = await request(`${STORE_API}?id=${encodeURIComponent(body.id)}`)
-              if (polled.ok && polled.body !== undefined && alive.current) {
-                setState({ phase: 'ready', data: polled.body })
-                outcome = polled.body.outcome
-              }
-            } catch { /* asked again */ }
-          }
-          if (!alive.current) return
-          if (outcome?.done === true && outcome.elsewhere === true) {
-            setText('')
-            setBanner({ tone: 'ok', text: t('placeEnded') })
-            onMoved?.()
-          } else if (outcome?.done === true && outcome.ok === true) {
-            setText('')
-            setBanner({ tone: 'ok', text: outcome.conflicts > 0
-              ? t('placeMovedConflicts', { count: outcome.conflicts }) : t('placeMoved') })
-            onMoved?.()
-          } else if (outcome?.done === true && outcome.moved === true) {
-            // stopped after the switch: the store has moved, the old place is cleared later
-            setText('')
-            setBanner({ tone: 'error', text: t('placeMovedUnfinished', { reason: whyNot(t, outcome.error, outcome.detail) }) })
-            onMoved?.()
-          } else if (outcome?.done === true) {
-            setBanner({ tone: 'error', text: t('placeMoveFailed', { reason: whyNot(t, outcome.error, outcome.detail) }) })
-          } else {
-            setBanner({ tone: 'error', text: t('placeStillMoving') })
-          }
+          setText('')
+          const backup = typeof body.backup === 'string' ? legible(body.backup) : undefined
+          setBanner({ tone: 'ok', text: backup === undefined ? t('placeMoved')
+            : t(body.kept === true ? 'placeMovedKept' : 'placeMovedBackup', { backup }) })
+          onMoved?.()
         } finally {
           moving.current = false
           if (alive.current) setBusy(false)
@@ -993,14 +934,11 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const { data } = state
       const atDefault = typeof data.store === 'string' && data.store === data.default
       const blocked = data.pinned === true ? 'placePinned' : data.remote === true ? 'placeRemote' : undefined
-      const stopped = data.moving !== undefined && !busy
       return h('section', { className: 'eng-place', 'aria-label': t('place') },
         showNow && typeof data.store === 'string' ? h('p', { className: 'eng-place-now' },
           `${t('placeNow')} `, h('code', null, legible(data.store)), atDefault ? t('placeIsDefault') : '') : null,
         data.problem !== undefined ? h('div', { className: 'eng-banner', 'data-tone': 'error' },
           t('placeProblem', { file: legible(data.file ?? '') })) : null,
-        stopped ? h('p', { className: 'eng-note' }, t('placeResuming'),
-          data.moving.error === undefined ? '' : ` ${t('placeResumingWhy', { reason: whyNot(t, data.moving.error) })}`) : null,
         blocked !== undefined ? h('p', { className: 'eng-note' }, t(blocked)) : data.problem === undefined ? [
           h('div', { className: 'eng-place-row', key: 'row' },
             data.chooser === true ? h('button', { type: 'button', className: 'eng-btn', disabled: busy || choosing,
