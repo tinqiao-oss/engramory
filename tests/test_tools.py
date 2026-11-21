@@ -310,37 +310,6 @@ def test_init_reader_keeps_a_rule_file_it_did_not_write_unless_forced(tmp_path):
     assert rc == 0 and "<!-- Written by engramory_init.py" in mdc.read_text(encoding="utf-8")
 
 
-def test_init_reader_keeps_an_unmarked_rule_file_an_older_version_may_have_written(tmp_path):
-    # Older versions wrote no mark, and a user's edit of such a file starts the same way:
-    # only --force replaces it. A marked file, even with CRLF endings, is rewritten.
-    store = _existing_store(tmp_path / "cc-memory")
-    cfg = tmp_path / "repo"
-    steer = cfg / ".kiro" / "steering" / "engramory-recall.md"
-    steer.parent.mkdir(parents=True)
-    older = "---\ninclusion: always\n---\n\n## Memory (Engramory — read-only)\n\nmy edit\n"
-    steer.write_text(older, encoding="utf-8")
-    rc, out = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
-    assert rc == 0 and "versions before 1.0.3 wrote none" in out
-    assert steer.read_text(encoding="utf-8") == older
-    rc, _ = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store),
-                 "--force")
-    marked = steer.read_text(encoding="utf-8")
-    assert rc == 0 and "<!-- Written by engramory_init.py" in marked
-    steer.write_bytes(marked.replace("\n", "\r\n").encode("utf-8") + b"stale\r\n")
-    rc, out = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
-    assert rc == 0 and steer.read_text(encoding="utf-8") == marked
-
-
-def test_init_reader_kiro_writes_steering_with_inclusion_always(tmp_path):
-    store = _existing_store(tmp_path / "cc-memory")
-    cfg = tmp_path / "repo"
-    rc, _ = _run(INIT, "kiro-reader", "--project-root", str(cfg), "--memory-root", str(store))
-    steer = cfg / ".kiro" / "steering" / "engramory-recall.md"
-    assert rc == 0 and steer.is_file()
-    text = steer.read_text(encoding="utf-8")
-    assert text.startswith("---") and "inclusion: always" in text and "read-only" in text.lower()
-
-
 def test_init_reader_cline_targets_clinerules(tmp_path):
     store = _existing_store(tmp_path / "cc-memory")
     cfg = tmp_path / "repo"
@@ -1318,47 +1287,6 @@ def test_doctor_bounds_echoed_note_content(tmp_path):
     assert "..." in out                # visibly truncated
 
 
-def test_reinstall_drops_the_ignore_rule_once_the_file_becomes_shared(tmp_path):
-    # Ownership can flip: a teammate adds a handler, so the file must go back
-    # under version control. Declining to ADD the rule is not enough when an
-    # earlier Engramory-only install already wrote one.
-    project = tmp_path / "project"
-    rc, out = _run(INIT, "codex", "--project-root", str(project), "--install-hooks")
-    assert rc == 0, out
-    assert "/.codex/hooks.json" in (project / ".gitignore").read_text(encoding="utf-8")
-
-    config_path = project / ".codex" / "hooks.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["hooks"]["Stop"] = [{"hooks": [{"type": "command",
-                                           "command": "echo teammate",
-                                           "statusMessage": "team hook"}]}]
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-
-    rc, out = _run(INIT, "codex", "--project-root", str(project), "--install-hooks")
-    assert rc == 0, out
-    remaining = (project / ".gitignore").read_text(encoding="utf-8")
-    assert "/.codex/hooks.json" not in remaining
-    assert "/.engramory-memory/" in remaining      # unrelated rules survive
-
-
-def test_reinstall_keeps_a_gitignore_rule_engramory_did_not_write(tmp_path):
-    # Ownership works both ways: an entry the USER added deliberately must survive.
-    # Provenance is the comment this installer emits above its own rule; without it
-    # the line is not ours to remove.
-    project = tmp_path / "project"
-    (project / ".codex").mkdir(parents=True)
-    (project / ".gitignore").write_text("/.codex/hooks.json\n", encoding="utf-8")
-    (project / ".codex" / "hooks.json").write_text(
-        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command",
-                                                   "command": "echo teammate",
-                                                   "statusMessage": "team hook"}]}]}}),
-        encoding="utf-8")
-    rc, out = _run(INIT, "codex", "--project-root", str(project), "--install-hooks")
-    assert rc == 0, out
-    assert "/.codex/hooks.json" in (project / ".gitignore").read_text(encoding="utf-8")
-    assert "looks like your own" in out
-
-
 # --- 0.6.1: a non-remote URL scheme is a local path, not an "external" pointer ---
 
 def test_doctor_file_url_pointer_is_not_treated_as_external(tmp_path):
@@ -1561,8 +1489,8 @@ def test_init_reports_what_landed_when_a_step_fails(tmp_path):
     ini._copy_skill = boom  # a private module instance; nothing else imports it
     args = types.SimpleNamespace(
         project_root=str(tmp_path), memory_root=".engramory-memory",
-        install_skill=True, install_hooks=False, mode="explicit",
-        force=False, hook_python=None)
+        install_skill=True,
+        force=False)
     captured = io.StringIO()
     with contextlib.redirect_stderr(captured):
         try:
@@ -1622,14 +1550,6 @@ def test_run_helper_reports_stderr_refusals(tmp_path):
     rc, out = _run(INIT, "codex", "--project-root", str(tmp_path),
                    "--memory-root", str(tmp_path))
     assert rc != 0 and "memory root must be a directory" in out
-
-
-# The direct runner must stay at the very END of this file: `_main()` collects the
-# test_* names present in globals() at CALL time, so anything defined below this
-# block is invisible to it — and CI runs this suite as a plain script, so those
-# tests would silently never run there. (14 of them already had that fate.)
-if __name__ == "__main__":
-    sys.exit(_main())
 
 
 # --- 0.12.0: bloat is reported (INFO), never failed ---
@@ -1694,3 +1614,32 @@ def test_doctor_reads_an_uppercase_md_pointer(tmp_path):
                                         encoding="utf-8")
     rc, out = _run(DOCTOR, str(tmp_path))
     assert rc == 1 and "gone.MD" in out, out
+
+
+def test_init_reader_keeps_an_unmarked_rule_file_an_older_version_may_have_written(tmp_path):
+    # Older versions wrote no mark, and a user's edit of such a file starts the same way:
+    # only --force replaces it. A marked file, even with CRLF endings, is rewritten.
+    store = _existing_store(tmp_path / "cc-memory")
+    cfg = tmp_path / "repo"
+    steer = cfg / ".cursor" / "rules" / "engramory-recall.mdc"
+    steer.parent.mkdir(parents=True)
+    older = "---\ndescription: Engramory read-only memory recall\nalwaysApply: true\n---\n\n## Memory (Engramory — read-only)\n\nmy edit\n"
+    steer.write_text(older, encoding="utf-8")
+    rc, out = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and "versions before 1.0.3 wrote none" in out
+    assert steer.read_text(encoding="utf-8") == older
+    rc, _ = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store),
+                 "--force")
+    marked = steer.read_text(encoding="utf-8")
+    assert rc == 0 and "<!-- Written by engramory_init.py" in marked
+    steer.write_bytes(marked.replace("\n", "\r\n").encode("utf-8") + b"stale\r\n")
+    rc, out = _run(INIT, "cursor-reader", "--project-root", str(cfg), "--memory-root", str(store))
+    assert rc == 0 and steer.read_text(encoding="utf-8") == marked
+
+
+# The direct runner must stay at the very END of this file: `_main()` collects the
+# test_* names present in globals() at CALL time, so anything defined below this
+# block is invisible to it — and CI runs this suite as a plain script, so those
+# tests would silently never run there.
+if __name__ == "__main__":
+    sys.exit(_main())

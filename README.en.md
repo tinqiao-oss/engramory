@@ -13,7 +13,7 @@ files, one per memory, with a pointer-only index (`MEMORY.md`) that is read at t
 of every session; a note is opened when its details are needed. No database,
 embeddings, or server; you can read and edit every file yourself. It works with Claude
 Code, Codex, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh),
-OpenClaw, Kiro and others; one agent writes a store, and others can read it.
+OpenClaw and others; one agent writes a store, and others can read it.
 
 **dsh has a dedicated plugin**, `dsh-engramory`: it works once installed, brings the
 index into the conversation, refuses most writes that would grow the index past
@@ -97,17 +97,13 @@ python tools/engramory_init.py codex --project-root /path/to/project --install-s
 ```
 
 The store defaults to `<project>/.engramory-memory/`; use `--memory-root` for an
-existing folder. It stays separate from Codex's own Memories. Add `--install-hooks`
-for lifecycle reminders; they run only once you trust the project hooks in Codex
-(check with `/hooks`). For a chat bridge that starts a session per message, read
-[adapters/codex/README.md](adapters/codex/README.md) first.
+existing folder. It stays separate from Codex's own Memories. See
+[adapters/codex/README.md](adapters/codex/README.md) for details.
 
 ### Other hosts
 
 - **OpenClaw:** `python tools/engramory_init.py openclaw --install-skill`; see
   [adapters/openclaw](adapters/openclaw/README.md).
-- **Kiro:** copy the steering template by hand; see [adapters/kiro](adapters/kiro/README.md).
-  Keep the notes out of `.kiro/steering/`, or every note loads into every request.
 - **Cursor, Cline, Hermes, …:** follow [PORTING.md](PORTING.md) to put
   `rules-snippet.md` in the standing instructions. To take over an existing store, see
   its [Adopting an existing store](PORTING.md#adopting-an-existing-store).
@@ -159,7 +155,7 @@ and what it recalls goes to that host's model provider. See the
   a checker.
 - **Continuity without a handoff store.** An unfinished task keeps one `project` note,
   updated in place with its status and next step; before a compact, clear, or new
-  thread, the agent runs a [continuity sync](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional).
+  thread, the agent runs a [continuity sync](PORTING.md#3-wire-continuity-sync).
 
 ## How it compares
 

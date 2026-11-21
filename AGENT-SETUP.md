@@ -347,8 +347,7 @@ exists. Two things to carry into your report afterwards:
   part-way leaves earlier steps on disk. The installer prints exactly which steps landed —
   pass that through to the user verbatim rather than summarizing it as "install failed".
   To clean up afterwards, re-run the same host with `--uninstall` (add `--dry-run` first to
-  print the plan): it removes the marked rules block, the installed skill, and the managed
-  Codex hooks, and it never touches the memory store. That is a separate deliberate step —
+  print the plan): it removes the marked rules block, the installed skill, and it never touches the memory store. That is a separate deliberate step —
   the failed run does not do it for you, and it is never the right answer to a failure you
   have not yet reported.
 - **Re-running is not unconditionally safe.** A truncated index is adopted as "kept
@@ -387,10 +386,6 @@ Two ways this test lies to you:
 **Where no such hook exists:** do not test for a deny — there is nothing to deny.
 Verify instead that `python tools/engramory_check.py <MEMORY.md>` reports `OVER` on an
 over-cap index, and state plainly that enforcement here is best-effort.
-
-For the Codex lifecycle hooks specifically, confirming them in `/hooks` proves the
-lifecycle assistance is trusted. It is **not** evidence of an index cap — those are
-different mechanisms.
 
 ---
 

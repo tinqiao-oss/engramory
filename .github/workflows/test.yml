@@ -32,12 +32,6 @@ jobs:
         run: python tests/test_index_guard.py
       - name: tool tests
         run: python tests/test_tools.py
-      # Concurrency semantics differ per platform (POSIX flock vs Windows msvcrt),
-      # so this one earns its place in the matrix rather than a local run.
-      - name: state-lock tests
-        run: python tests/test_state_lock.py
-      - name: codex hook tests
-        run: python tests/test_codex_hooks.py
       - name: codex installer tests
         run: python tests/test_codex_init.py
       # Uninstall deletes from user-owned files, so its fail-safe behaviour (malformed

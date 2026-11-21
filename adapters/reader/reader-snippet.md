@@ -1,8 +1,7 @@
 # Engramory (read-only recall) — pointer
 
 Paste this into your host's **always-loaded** rules (Codex `AGENTS.md`, Claude Code
-`CLAUDE.md`, Cline `.clinerules`, a Cursor `.mdc` with `alwaysApply: true`, a Kiro steering
-file with `inclusion: always`, …) so the agent can *recall* from a memory store that
+`CLAUDE.md`, Cline `.clinerules`, a Cursor `.mdc` with `alwaysApply: true`, …) so the agent can *recall* from a memory store that
 **another agent** (Claude Code, dsh, …) owns and writes. This agent reads; it never writes.
 Keep it short — the full protocol lives in the engramory `SKILL.md`. (`engramory_init.py
 <host>-reader` wires this for you.)

@@ -8,7 +8,6 @@ contributions focused and tested.
 - No build step and no dependencies beyond the Python standard library, plus Node's
   built-ins for the dsh plugin (`adapters/dsh/plugin/`, plain ESM, Node ≥18).
 - The load-bearing code: `hooks/engramory_index_guard.py` (Claude Code cap),
-  `hooks/codex/engramory_codex_hook.py` (Codex lifecycle assistance),
   `adapters/dsh/plugin/index.js` (dsh plugin), and the scripts in `tools/`.
 - `SKILL.md` is the full protocol; `README.md` (Chinese) / `README.en.md` are the front
   door; `PORTING.md` covers other hosts.
@@ -36,9 +35,7 @@ installer, plugin or tool should come with a test.
 
 - **Keep each hook's failure contract.** The Claude Code guard never emits `allow` and
   never crashes an edit: an unexpected failure passes silently; an index that exists
-  but cannot be read passes with a visible "cap NOT verified" warning. The Codex hook
-  may block only an explicit manual compaction with unsynced state; automatic, missing
-  or unknown triggers fail open visibly.
+  but cannot be read passes with a visible "cap NOT verified" warning.
 - **Don't oversell reliability.** Hooks enforce bounded mechanical gates, not memory
   quality; the discipline stays best-effort (`SKILL.md` §8).
 - **Keep both READMEs in sync.** A change to `README.md` (Chinese) should be mirrored in

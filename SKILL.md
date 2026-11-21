@@ -513,10 +513,6 @@ check result. If transient state was deleted rather than retained, name it under
 In a companion conversation the report is spoken in character, and the index size
 and check result are given only when the user asks (§2.2).
 
-This sync is a semantic curation pass. A lifecycle hook may remind, mark work
-dirty, or gate a manual compact, but it does not itself understand the
-conversation or guarantee that this sync happened.
-
 ---
 
 ## 6. Bounded index guard (the anti-bloat rule)
@@ -686,17 +682,13 @@ Three layers, different guarantees:
   tools, external editors, sync clients, and host-internal writes bypass it.
 - The **dsh-engramory plugin** (>= 0.2.7) is the same kind of guard on dsh, through
   `ctx.tools.guard()`, for the file-tool edits it can measure; the same bypasses apply.
-- The optional **Codex lifecycle hooks** (`SessionStart`, `UserPromptSubmit`,
-  `PreCompact`) provide recall/sync reminders, dirty/reconcile bookkeeping, and a
-  manual-compaction gate. Automatic compaction fails open. These hooks do not
-  enforce the index cap and do not perform semantic memory curation.
 - The **discipline** in this file (recall-at-start, dedup, the ontology, the
   curation contract) is loaded via the host's instruction mechanism — ideally
   always-loaded rules, or a relevance-loaded skill — so it is model-followed and
   NOT guaranteed to be in context for every task or save. Treat it as best-effort
   guidance, not a hard-enforced contract.
 
-Neither hook family can decide what belongs in `project` versus `feedback`, or
+Neither guard can decide what belongs in `project` versus `feedback`, or
 honestly claim that an automatic compact produced a complete semantic summary.
 
 For behaviour you want truly always-on (e.g. "always check memory at the start of
