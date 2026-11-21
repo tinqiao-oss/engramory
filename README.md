@@ -16,7 +16,7 @@
 
 > 🤖 **你是被要求安装或检查它的 AI agent？** 先读 [AGENT-SETUP.md](AGENT-SETUP.md)。
 
-> **状态:1.5.7。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
+> **状态:2.0.0。** 记忆库格式、工具和索引上限从此只在主版本做不兼容改动，见[版本规则](#版本规则)。
 
 ## 长什么样
 
@@ -55,7 +55,7 @@ updated: 2026-10-31
 dsh plugin --profile <名字> add dsh-engramory
 ```
 
-dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`（侧栏「记忆」页里能换位置，插件会整个搬过去），侧栏多一个只读的「记忆」页。配置、大肥鱼模式、社交模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
+dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用：记忆默认存在 `~/.dsh/.engramory-memory/`（侧栏「记忆」页里能换位置，插件会整个搬过去），侧栏多一个只读的「记忆」页。配置、大肥鱼模式和上限规则见[插件说明](adapters/dsh/plugin/README.md)。
 
 ![dsh 里的记忆页](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
@@ -143,7 +143,7 @@ python tools/engramory_init.py codex --uninstall
 - **工具：** `tools/` 下脚本的命令和参数（包括 `engramory_init.py` 把库建在哪），以及 Claude Code、Codex 的 hook。
 - **dsh 插件：** 包名、上限判定，以及 `indexName`、`maxLines`、`maxBytes`、`indexPath`、`registerSkill`、`injectIndex`、`language`、`skill` 这些配置。
 
-**实验性，小版本也可能改：** 大肥鱼模式（`companion`）和它的三种类型、社交模式（`audience`）、插件的设置页和记忆页。
+**实验性，小版本也可能改：** 大肥鱼模式（`companion`）和它的三种类型、插件的设置页和记忆页。
 
 协议措辞每次发布都可能修订，但会让合格的记忆库变得不合格的规则要等主版本。记忆库不带版本号，格式变了的迁移步骤写在 CHANGELOG。安全修复可能在任何版本改变不安全配置的行为，CHANGELOG 会写明。
 

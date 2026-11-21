@@ -26,7 +26,7 @@ refuses those writes; other tools rely on the rules plus a checker.
 
 > 🤖 **AI agent asked to install or check this?** Start at [AGENT-SETUP.md](AGENT-SETUP.md).
 
-> **Status: 1.5.7.** The store format, the tools and the index caps now change
+> **Status: 2.0.0.** The store format, the tools and the index caps now change
 > incompatibly only in a major version; see [Versioning](#versioning).
 
 ## What it looks like
@@ -71,8 +71,8 @@ dsh plugin --profile <name> add dsh-engramory
 In dsh's desktop app you can also search for `dsh-engramory` on the Plugins page. It
 works once installed: the memory lives in `~/.dsh/.engramory-memory/` by default (the
 sidebar's Memory page can move it, all of it, elsewhere), and
-the sidebar gets a read-only Memory page. Settings, companion mode, social mode and the
-cap's rules are in the [plugin README](adapters/dsh/plugin/README.en.md).
+the sidebar gets a read-only Memory page. Settings, companion mode and the cap's rules
+are in the [plugin README](adapters/dsh/plugin/README.en.md).
 
 ![The memory page in dsh](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/memory-page.png)
 
@@ -214,7 +214,7 @@ which).
   `language` and `skill`.
 
 **Experimental, may change in a minor version:** companion mode (`companion`) and its
-three types, social mode (`audience`), and the plugin's settings and memory pages.
+three types, and the plugin's settings and memory pages.
 
 The protocol's wording is revised in any release, but a rule that would make a valid
 store invalid waits for a major version. The store carries no version number; a format

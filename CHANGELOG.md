@@ -6,6 +6,54 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 2.0.0 — 2026-11-21
+
+A trimmed release: features whose cost outran their use are gone, and moving the dsh
+plugin's store no longer deletes anything. A major version because the Codex hooks and a
+tool go, and `engramory_init.py` loses a host and two flags (README, *Versioning*).
+
+**If you used one of these:**
+
+- **dsh social mode** (`companion: true` with `audience: social`) is removed. A profile
+  still set to it gets no memory in any conversation — no index, no rules, no reminder —
+  until you save once on the plugin's settings page (or the memory page's *Restore
+  memory*), which takes the setting out; both pages say so. The cap still holds. A
+  character others talk to through a bridge belongs in a dsh profile of its own.
+- **The Codex lifecycle hooks** (`engramory_init.py codex --install-hooks`, `--mode`) are
+  removed, with `tools/engramory_sync.py`. Hooks you installed keep running from their
+  copy in your project until you take them out: delete `.codex/engramory/` and the
+  Engramory handlers in `.codex/hooks.json`, or run the 1.5.7 installer's
+  `codex --uninstall`. Codex stays a host through its `AGENTS.md` block and the skill.
+- **Kiro**: `adapters/kiro/` and the `kiro-reader` host are removed. Delete
+  `.kiro/steering/engramory-recall.md` by hand.
+- **dsh 0.1** is no longer supported: `engines.dsh` is `>=0.2.1-alpha.5`.
+- **A store move a 1.5 plugin left unfinished** is not taken up again: let 1.5.7 finish it
+  (open dsh once) before upgrading. Whatever it had not settled stays on disk in its
+  `.engramory-memory-old-<id>` folder; nothing of it is deleted.
+
+**Changes:**
+
+- **dsh: moving the global store copies it over and keeps the old one as a backup.** The
+  memory page's move copies the store beside the new place, checks every file, renames the
+  copy to the new place and switches to it; the old store is renamed
+  `<name>.backup-<date-time>` beside where it was (or left where it is when something holds
+  it open) for you to delete. The page says where. Failing before the switch, the copy
+  goes and the store stays. Gone with the deleting: the move's journal, its cross-process
+  lock, the resume after a restart, the undo, and the settle that kept a file changed in
+  both places as `.old-`. Only this dsh's own writes are held off while it moves: what
+  another dsh sharing the home writes to the old place meanwhile stays in the backup.
+- **dsh: a move checks that the home's file will name both places before it copies** (a
+  last name ending in a space, a home too deep), as the journal used to; and a moved store
+  gone since it was checked (a drive pulled out) stops the move instead of switching to an
+  empty place.
+- **dsh: the memory page's update steps** say that from dsh 0.2.2 the desktop app's Plugins
+  page has *Update* for this plugin.
+- **dsh 0.2.1-rc.5 and 0.2.2-rc.3 to rc.5 are declared compatible**, the last of the 0.2.1
+  line and the newest three, which DSH-Store reviews; others are no longer listed, and an
+  unlisted release is unverified, not refused (tests/dsh_e2e/README.md).
+- **Tests:** in `tests/test_tools.py` and `tests/test_uninstall.py` the direct runner sat
+  above some tests, which CI therefore never ran; it is at the end now, and they run.
+
 ## 1.5.7 — 2026-11-21
 
 dsh's `apply_patch` (dsh 0.2.2-alpha.3 on, off by default) is held off a store in social

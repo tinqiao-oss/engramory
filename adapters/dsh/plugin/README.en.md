@@ -18,9 +18,8 @@ which is general-purpose agent memory: Claude Code, Codex and others can use the
   what it has saved without reading a file first, and opens a note when it needs the
   detail. It is sent again only when it changes (a write, another project, a
   compacted conversation): a write shows up on the next request, and a long
-  conversation does not fill up with copies of it ([social mode](#social-mode) keeps it
-  in dsh's runtime context, as before). Whatever is past the cap is left out, and the AI
-  is told to compact.
+  conversation does not fill up with copies of it. Whatever is past the cap is left out,
+  and the AI is told to compact.
 - **The index has a hard cap.** 200 lines / 25 KB by default. When the AI writes the
   index with dsh's file tools and the plugin can work out the result, a write that
   would grow it past the cap is refused before it happens, and the AI is told to
@@ -47,17 +46,19 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@1.5.7`: by name alone, pnpm 11 (the desktop app's own included) by default
-installs only a version published at least 24 hours ago. The desktop app's Plugins page has no *Update*
-for a plugin from outside dsh: uninstall it, search for `dsh-engramory@<version>` and
-install that, then quit dsh from the tray and open it again. Your memory and settings stay.
-*Check for updates* at the foot of the memory page finds the latest version and lists
-these steps.
+dsh-engramory@2.0.0`: by name alone, pnpm 11 (the desktop app's own included) by default
+installs only a version published at least 24 hours ago. From dsh 0.2.2 the desktop
+app's Plugins page has an *Update* for *Engramory memory*; before that there is none:
+uninstall it, then search for `dsh-engramory@<version>` and install that. Restart dsh
+when it says so (in the desktop app, quit from the tray and open it again). Your memory
+and settings stay. *Check for updates* at the foot of the memory page finds the latest
+version and lists the steps.
 
 Compatible dsh releases are listed in
 `dsh.compatibility.dshReleases` in [`package.json`](https://github.com/tinqiao-oss/engramory/blob/master/adapters/dsh/plugin/package.json); an unlisted release
-is unverified. `engines.dsh` gives only a floor (`>=0.1.0-rc.7`), so a newer dsh does
-not refuse the install; it is just not verified yet.
+is unverified. `engines.dsh` gives only a floor (`>=0.2.1-alpha.5`; dsh 0.1 is not
+supported from 2.0), so a newer dsh does not refuse the install; it is just not verified
+yet.
 
 **Where the memory lives:**
 
@@ -95,74 +96,36 @@ companion switch on the settings page, or set `companion: true`.
 - **Recall in character.** Even a greeting may call for recall, and what it remembered,
   or failed to save, is told in the character's voice, without naming files or tools.
 - **The persona preset needs the file tools.** The memory arrives even under a preset
-  that turns optional context off (dsh's `minimal`, for one; from dsh 0.2 — 0.1 then sends
-  no runtime context at all). To save notes, though, the
+  that turns optional context off (dsh's `minimal`, for one). To save notes, though, the
   preset needs dsh's file tools and the skill tool; a preset with only a shell reads the
   memory, and its writes go past the cap.
 
-## Social mode
+## Bridges and other people's accounts
 
-A choice inside companion mode, for a character other people can talk to as well, such
-as one wired to QQ, WeChat, Douyin or Bilibili through a bridge plugin. Choose *Social*
-under *Memory access* on the settings page, or set `audience: social`. If only you talk
-to this dsh, keep the default, *Private*.
+The memory goes to every conversation in a profile. A bridge plugin that brings other
+people's messages in from QQ, WeChat, Douyin or Bilibili gives their conversations your
+memory too: give such a character a dsh profile of its own (its own plugin config and
+store, if you like) rather than bridging it into the profile you use. Their conversations
+then get neither your memory nor its rules; the store is plain files, though, which a
+shell tool or another profile on the same account can read, so full isolation still
+takes filesystem permissions or a sandbox.
 
-With it on, **only your own conversations get the memory**: one is yours when you have
-typed in it in dsh's own window (the desktop app or `dsh web`) and nobody else has.
-A subagent goes with its parent. Messages from a bridge plugin (unless it marks them as
-the owner's, below), `dsh headless`, other programs, and terminal or editor clients
-count as someone else's. Once anyone else has written in a conversation it stays
-theirs, and the memory already put into it stays in its history.
-
-Someone else's conversation gets no index and is not told where the store is; dsh's
-file tools there may name files only (every directory is refused), and any path into
-a store is refused however it is spelled; dsh's session search (an optional, experimental
-feature that reads the records of other conversations in the same directory) is refused
-there outright. This is **not** a security boundary: a shell tool reads any file, and
-another profile on the same account can read the store too. Real isolation needs
-filesystem permissions or a sandbox. A custom `skill` (see
-[Configuration](#configuration)) reaches every conversation as written, someone else's
-included, so if it says where the store is, they are told too.
-
-### For bridge authors
-
-With social mode on, every message a bridge submits counts as someone else's. For a
-message from the owner's own account (their private QQ chat with the character, say),
-put a `speaker` on its source:
-
-```js
-agent.followup(createUserMessage({
-  content: [{ type: 'text', text }],
-  source: { kind: 'plugin:your-bridge', speaker: { role: 'owner' } },
-}))
-```
-
-| `speaker.role` | Meaning |
-|---|---|
-| `owner` | The owner wrote it: it comes from the account the user set as theirs in your bridge. |
-| `guest` | Someone else wrote it, the same as no `speaker` at all. |
-| `none` | Nobody wrote it: your plugin's own report, reminder or notice. It does not make the owner's conversation someone else's. |
-
-In a group chat, add `chat: 'group'` (`{ role: 'owner', chat: 'group' }`): the whole
-group reads the reply, so the conversation counts as someone else's even while only the
-owner has spoken in it. A private chat may say `chat: 'private'` or leave it out; any
-other value counts as a group. A group conversation stays someone else's once anyone else in it
-speaks. A program that talks to dsh only through dsh web's API cannot set a source, so its messages count
-as someone else's; if it sends `clientTimeZone` with a prompt it is taken for the
-owner, so a program forwarding other people's messages must leave it out.
+Social mode (`audience: social`), which until 2.0 tried to tell your own conversations
+apart within one profile, was removed: every review found a way past it. A profile still
+set to it gives no conversation any memory (no index, no rules), and the settings page
+says so; one save there takes the setting out, and the memory is back. The cap holds
+either way.
 
 ## Settings page and memory page
 
 ![The settings page](https://raw.githubusercontent.com/tinqiao-oss/engramory/master/adapters/dsh/plugin/screenshots/settings-page.png)
 
 - **Settings page:** on dsh's *Plugins* page, open *Engramory memory* to set companion
-  mode, memory access and the index cap. Saving goes through dsh's own profile editor,
-  which writes your profile's `cordis.patch.yml` and reloads the plugin. Only you, signed
-  in, can call it, so an agent cannot use it to switch social mode off.
+  mode and the index cap. Saving goes through dsh's own profile editor, which writes your
+  profile's `cordis.patch.yml` and reloads the plugin. Only you, signed in, can call it.
 - **Memory page:** *Memory* in the sidebar. A banner at the top, the plugin's version
   beside its title, says how many notes, stores and archived files are listed and when
-  they were read, with the switches (companion mode, and memory access once it is on)
-  that save as you flip them. Below it,
+  they were read, with the companion mode switch, which saves as you flip it. Below it,
   tabs by note type and a filter by name, over the global store and each workspace's
   project store (with an absolute `indexPath`, that store alone; with a relative one,
   none). Each note is a row: a mark for its type, its name, its type and size; a plan's
@@ -204,18 +167,16 @@ path, then click *Move it there*:
   holds something already (the root of a synced folder, say) gets an `Engramory` folder
   made inside it for the memory. Choosing only fills the path in; *Move it there* moves.
 
-- **All of it moves, and the old place is cleared.** It is copied to the new place first,
-  each file checked, and only then switched to; the old place is then renamed aside,
-  compared file by file with the new one, and removed. What was written to the old place
-  while it moved is added to the new one; a file changed in both places keeps the new
-  place's version, with the old place's beside it as `<name>.old-<id>` and a line for it
-  at the end of the index. Nothing in the new place is written over.
-- **Cut short, nothing is lost.** Each step is written down first: dsh closed before the
-  switch, the move is undone when it opens again and the memory stays where it was;
-  closed after, the move is finished when it opens again. An error after the switch (a
-  file in the old place held open by another program, say) leaves the memory moved: the
-  page says so, and that the old place is not cleared yet, which dsh carries on with every
-  minute.
+- **Copied over, the old store kept as a backup.** It is copied into a folder beside the
+  new place, each file checked, renamed to the new place and switched to; the old store is
+  renamed `<name>.backup-<date-time>` beside where it was, for you to delete once the new
+  place looks right. Where a file in it is held open by another program and it cannot be
+  renamed, it stays where it was as the backup, and the page says so. The plugin deletes
+  nothing.
+- **A failure loses nothing.** One before the switch (too many files, a folder link in the
+  store) takes the copy away, and the memory stays where it was; the switch either happens
+  or does not. dsh closed partway may leave an `.engramory-memory-moving-<id>` folder beside
+  the new place: delete it.
 - **Every dsh on this computer moves with it.** The place is kept in
   `.engramory-memory.json` in dsh's home folder, which the desktop app, the command line
   and `dsh web` all follow (their plugin configs are their own; the global store is
@@ -231,8 +192,10 @@ path, then click *Move it there*:
   With `indexPath` set, there is no move.
 - **Readers** (`claude-reader`, `codex-reader` and the others, see one writer, many
   readers above) read the new place once installed again with it.
-- **Only dsh's own writes are held off.** A shell, an editor or another AI tool writing to
-  the store in those few seconds is beyond the plugin, and what it writes may be missed.
+- **Only this dsh's own writes are held off.** What another dsh open at the same time (the
+  desktop app while you use the command line, say), a shell, an editor or another AI tool
+  writes to the old store in those few seconds stays in the backup only, not in the new
+  place: close them first.
   A network drive mapped to a letter cannot be told apart, and there dsh may stall. Only
   file contents are copied: NTFS alternate data streams are not, and hard links become
   separate files.
@@ -262,8 +225,7 @@ caps in force. A patch replaces the row's whole `config`, so list every key you 
 | `compactionReminder` | `true` | `false` stops the reminder to save before dsh compacts. The plugin works out where dsh will compact from dsh's own compaction settings (on dsh 0.2 with DeepSeek's defaults, about 69% of the window, not 80%) and reminds at 85% of that. A best effort: a conversation that grows past the gap in one step goes unreminded; with no compaction, or automatic compaction off, there is no reminder. |
 | `language` | dsh's | `zh` (or `zh-CN` and other regional forms) writes the store in Chinese: note names, headings such as `## 用户`, the Why/How labels. Any other string is English; a value that is not a string, or is empty, counts as unset. Unset, it follows dsh's language; a change applies once dsh restarts. Frontmatter keys and `type:` values stay English, so every host reads the store. |
 | `companion` | `false` | `true` turns companion mode on. |
-| `audience` | `private` | With companion mode on, `social` turns social mode on. |
-| `skill` | built-in | Your own markdown in place of the built-in rules; it must then say where the store is. In social mode, others' conversations see it too. |
+| `skill` | built-in | Your own markdown in place of the built-in rules; it must then say where the store is. |
 
 ## How the cap decides
 
@@ -289,24 +251,18 @@ writable. This table is pinned by `node --test` in CI.
   some versions and presets carry; a tool of the same name from another plugin is
   judged the same way. Not `apply_patch`, which dsh offers from 0.2.2-alpha.3 and leaves
   off by default: its paths are in the patch text, which the cap does not read (it is
-  still kept off a store in a stranger's conversation in social mode, and while the store
-  moves). Shell tools, MCP file tools and external
+  still kept off a store while the store moves). Shell tools, MCP file tools and external
   editors go past it: run
   `engramory_check.py` after editing the index and `engramory_doctor.py` now and then.
 - **The global store is found where the memory page put it.** Moved there by hand, it
   is not (move it back and use the memory page, or set `indexPath`); for a project store
   that links out of the project, set `indexPath`. A project's root is found by
   its `.git` only, and a project store created mid-session can take ten seconds to appear.
-- **Social mode knows you by what dsh's window sends.** Apart from a bridge's owner
-  messages, only what you type in dsh's own window (and its Continue generating) is
-  yours, and not when the browser's time zone cannot be read. A kind of
-  message a later dsh adds counts as someone else's until this plugin knows it: your
-  conversation may lose the memory, never the other way round.
 - **What the memory page opens is checked by path.** dsh's opener resolves the path once
   more before the desktop opens it, so a process changing the store's files at that
   moment could redirect what opens (as with dsh's own opener for any workspace file).
-- **Experimental:** companion mode, social mode, the settings and memory pages, and moving
-  the store may change in a minor version.
+- **Experimental:** companion mode, the settings and memory pages, and moving the store may
+  change in a minor version.
 
 ## Feedback
 

@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
     /** How long the page waits on a move: the plugin answers once it is done (up to 256 MB copied). */
     const MOVE_WAIT_MS = 10 * 60 * 1000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '1.5.7'
+    const VERSION = '2.0.0'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -202,7 +202,7 @@ window.__ModuleLoader__.load({
       updateNewer: '有新版本 {latest}（你装的是 {current}）',
       updateNotes: '看这一版改了什么',
       updateHow: '升级时要写上版本号（只写名字的话，pnpm 默认不装发布不满 24 小时的版本）：',
-      updateDesktop: '桌面版：在「插件」页卸载「Engramory 记忆」，再搜索安装',
+      updateDesktop: '桌面版：dsh 0.2.2 起在「插件」页点「Engramory 记忆」的「更新」；更早的版本先卸载它，再搜索安装',
       updateCli: '命令行：',
       updateProfile: '<名字>',
       updateAfter: '装完重启 dsh（桌面版从托盘退出再打开）。记忆和设置都会保留。',
@@ -389,7 +389,7 @@ window.__ModuleLoader__.load({
       updateNewer: 'Version {latest} is out (you have {current})',
       updateNotes: 'What changed',
       updateHow: 'Name the version when you upgrade: by name alone, pnpm by default does not install a version published less than 24 hours ago.',
-      updateDesktop: 'Desktop app: on the Plugins page, uninstall Engramory memory, then search for and install',
+      updateDesktop: 'Desktop app: from dsh 0.2.2, Update on Engramory memory in the Plugins page; before that, uninstall it, then search for and install',
       updateCli: 'Command line: ',
       updateProfile: '<name>',
       updateAfter: 'Then restart dsh (in the desktop app, quit from the tray and open it again). Your memory and settings stay.',
