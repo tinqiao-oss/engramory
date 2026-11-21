@@ -1666,11 +1666,20 @@ test('a store not read for longer than a step holds back no other store\'s index
   mount({}, { workingDirectory: sessionDirs(), systemPrompt: prompt })
   const session = { cwd: repo }
   const step = () => withDshHome(home, () => prompt.sent({ agent: { session } }, { commit: true }))
+  // A save made later, as a real one is: on Windows two writes of one size a few ms apart
+  // can keep the same times (a timestamp ticks coarser than that), and recall, which knows a
+  // file by its size and times, would take the second for the first (seen on CI).
+  let saves = 0
+  const save = (text) => {
+    writeFileSync(project, text, 'utf8')
+    const later = new Date(Date.now() + ++saves * 2000)
+    fs.utimesSync(project, later, later)
+  }
   assert.match((await step())[0].content[0].text, /- project one[\s\S]*- user$/)
-  writeFileSync(project, '- [p](p.md) - project two\n', 'utf8')
+  save('- [p](p.md) - project two\n')
   const [held, told, later] = await failing('statSync', 'EACCES', user, async () => {
     const steps = [await step(), await step()]
-    writeFileSync(project, '- [p](p.md) - project three\n', 'utf8')
+    save('- [p](p.md) - project three\n')
     return [...steps, await step()]
   })
   assert.deepEqual(held, [])
