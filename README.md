@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![dsh-xray](https://img.shields.io/endpoint?url=https%3A%2F%2Funstone.github.io%2Fdsh-xray%2Fbadge%2Ftinqiao-oss__engramory.json)](https://unstone.github.io/dsh-xray/registry.html#tinqiao-oss__engramory)
 
-**Agent 通用长期记忆层。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw、Kiro 等都能用；一个工具负责写，别的工具可以只读同一个库。
+**Agent 通用长期记忆层。** AI 记住的东西存成一个个普通 markdown 文件，一个只放指针的索引 `MEMORY.md` 列出全部笔记，每次会话开头读进来，细节要用时再打开。不需要数据库、向量或服务器，文件你能直接看、能改。Claude Code、Codex、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（dsh）、OpenClaw 等都能用；一个工具负责写，别的工具可以只读同一个库。
 
 **dsh 有专用插件** `dsh-engramory`：装上就能用，自动带上索引，把索引写超上限的写入大多在落盘前就被拦下，侧栏还多一个记忆页。Claude Code 用 hook 拦超限写入；其他工具靠规则加校验脚本。
 
@@ -73,12 +73,11 @@ dsh 桌面版也可以在插件页搜 `dsh-engramory` 安装。装好就能用�
 python tools/engramory_init.py codex --project-root /path/to/project --install-skill
 ```
 
-默认库在 `<项目>/.engramory-memory/`，已有目录用 `--memory-root` 指定；和 Codex 自带的 Memories 分开。加 `--install-hooks` 可装生命周期提醒，要在 Codex 里信任项目 hook 才会运行（`/hooks` 查看）。每条消息都开新会话的聊天桥接，先看 [adapters/codex/README.md](adapters/codex/README.md) 里的说明。
+默认库在 `<项目>/.engramory-memory/`，已有目录用 `--memory-root` 指定；和 Codex 自带的 Memories 分开。详见 [adapters/codex/README.md](adapters/codex/README.md)。
 
 ### 其他宿主
 
 - **OpenClaw：** `python tools/engramory_init.py openclaw --install-skill`，见 [adapters/openclaw](adapters/openclaw/README.md)。
-- **Kiro：** 手动复制 steering 模板，见 [adapters/kiro](adapters/kiro/README.md)。笔记别放进 `.kiro/steering/`，否则每次请求都会全部加载。
 - **Cursor、Cline、Hermes 等：** 按 [PORTING.md](PORTING.md) 把 `rules-snippet.md` 放进常驻指令。接入已有的记忆库见其中 [Adopting an existing store](PORTING.md#adopting-an-existing-store)。
 
 这些宿主没有写前上限，靠规则、写完索引后跑 `tools/engramory_check.py`、定期跑 `tools/engramory_doctor.py`。
@@ -107,7 +106,7 @@ dsh 插件给全局库换过位置的，`--memory-root` 写换过之后的位置
 - **索引小，细节按需打开。** 索引每次会话开头都要读进来（宿主自动注入，比如 dsh 插件；或者由 AI 自己读），所以只放指针，默认上限 200 行 / 25 KB。
 - **笔记要整理，不是堆日志。** 四种类型 `user | feedback | project | reference`。写之前查重，能更新旧笔记就不新建，过时的删掉或归档，git 和代码里已有的不重复记。陪伴角色另有 `moment`（经历）、`upcoming`（约定）、`self`（我自己）三类（[SKILL.md](SKILL.md) §2.2）；记忆库可以用中文写（§1.1）。
 - **写入前卡上限。** 在 dsh（插件）和 Claude Code（hook）上，算得出结果、会把索引写超上限的写入，在写入前就被拒绝，压缩照样放行。其他工具靠规则加校验脚本。
-- **任务续接不另建交接库。** 没做完的任务只留一条 `project` 笔记，就地更新状态和下一步；compact、清空或开新线程前做一次[续接同步](PORTING.md#3-wire-continuity-sync--explicit-first-hooks-optional)。
+- **任务续接不另建交接库。** 没做完的任务只留一条 `project` 笔记，就地更新状态和下一步；compact、清空或开新线程前做一次[续接同步](PORTING.md#3-wire-continuity-sync)。
 
 ## 和别的方案比
 

@@ -136,19 +136,6 @@ class ContinuityProtocolTests(unittest.TestCase):
         for category in ("added", "updated", "archived", "skipped"):
             self.assertIn(category, lower)
 
-    def test_codex_contract_blocks_only_known_manual_compaction(self):
-        lower = re.sub(r"\s+", " ", self.codex.lower())
-        self.assertIn("precompact", lower)
-        self.assertIn("manual", lower)
-        self.assertIn("automatic", lower)
-        self.assertIn("fail open", lower)
-        self.assertIn("needs_reconcile", lower)
-        self.assertIn("/hooks", self.codex)
-        self.assertIn("mark-synced", lower)
-        self.assertIn(
-            "does not run semantic curation, create a note, or modify memory content",
-            lower,
-        )
 
 
 def _plain(text):
@@ -175,7 +162,33 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
     coverage from quietly disappearing.
     """
 
-    MARKDOWN_SURFACES = ("rules-snippet.md", "adapters/kiro/steering-engramory.md")
+    MARKDOWN_SURFACES = ("rules-snippet.md",)
+
+    def test_no_standing_surface_is_left_unregistered(self):
+        """A new host must be added to one of the lists above, not forgotten.
+
+        The inventory comes from the installer's own host table rather than from a
+        filename pattern: a wired host has to appear there or it cannot be installed
+        at all, whereas a glob over `adapters/**/*.md` misses a `.mdc`, a
+        `.clinerules`, or anything not named "snippet". Hand-copied templates that
+        no host config points at are listed here explicitly.
+        """
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import engramory_init
+        finally:
+            sys.path.pop(0)
+        wired = {cfg.get("snippet", "rules-snippet.md")
+                 for cfg in engramory_init.HOST_CONFIG.values()}
+        hand_copied = set()
+        known = set(self.MARKDOWN_SURFACES) | {
+            "adapters/reader/reader-snippet.md",     # read-only: layout only
+        }
+        self.assertEqual(
+            (wired | hand_copied) - known, set(),
+            "standing-rules surface(s) no test covers; add them to MARKDOWN_SURFACES "
+            "(write side) or to the known set (read-only side)")
+
 
     def _surfaces(self):
         for rel in self.MARKDOWN_SURFACES:
@@ -315,30 +328,6 @@ class ContinuityReachesEveryStandingSurfaceTests(unittest.TestCase):
                 any(phrase in ln and "assert" in ln for ln in live),
                 "no live assertion in adapters/dsh/plugin/index.test.js for: " + phrase)
 
-    def test_no_standing_surface_is_left_unregistered(self):
-        """A new host must be added to one of the lists above, not forgotten.
-
-        The inventory comes from the installer's own host table rather than from a
-        filename pattern: a wired host has to appear there or it cannot be installed
-        at all, whereas a glob over `adapters/**/*.md` misses a `.mdc`, a
-        `.clinerules`, or anything not named "snippet". Hand-copied templates that
-        no host config points at are listed here explicitly.
-        """
-        sys.path.insert(0, str(ROOT / "tools"))
-        try:
-            import engramory_init
-        finally:
-            sys.path.pop(0)
-        wired = {cfg.get("snippet", "rules-snippet.md")
-                 for cfg in engramory_init.HOST_CONFIG.values()}
-        hand_copied = {"adapters/kiro/steering-engramory.md"}  # no installer support yet
-        known = set(self.MARKDOWN_SURFACES) | {
-            "adapters/reader/reader-snippet.md",     # read-only: layout only
-        }
-        self.assertEqual(
-            (wired | hand_copied) - known, set(),
-            "standing-rules surface(s) no test covers; add them to MARKDOWN_SURFACES "
-            "(write side) or to the known set (read-only side)")
 
 
 class SetupRunbookTests(unittest.TestCase):

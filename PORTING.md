@@ -16,7 +16,6 @@ in the host's **always-loaded** instructions:
 | Codex | `AGENTS.md` (`~/.codex/AGENTS.md` or project `AGENTS.md`) | yes (`.agents/skills`) |
 | OpenClaw | `AGENTS.md` (in `~/.openclaw/workspace`) | yes (auto-discovers `.agents/skills`) |
 | DeepSeek Harness (dsh) | `AGENTS.md` (`$DSH_HOME/AGENTS.md` or project `AGENTS.md`) | yes (skill roots: `$DSH_HOME/skills`, project `.dsh/skills` / `.agents/skills`) |
-| Kiro | `.kiro/steering/*.md` with `inclusion: always` (or `AGENTS.md`) | yes (`SKILL.md` as an `inclusion: manual`/`auto` steering file, or a Kiro skill) |
 | Hermes (Nous) | `AGENTS.md` / `.hermes.md` (rules) — **not** `SOUL.md` (persona slot) | yes (skills system) |
 | Cursor | `.cursor/rules/*.mdc` (`alwaysApply: true`) | yes (auto-discovers `.agents/skills`) |
 | Trae | `.trae/rules/project_rules.md` or `AGENTS.md` | yes (`.agents/skills`, enable in settings) |
@@ -41,7 +40,6 @@ without becoming a writer:
 | `cline-reader` | `.clinerules` | unverified wiring |
 | `windsurf-reader` | `.windsurfrules` | unverified wiring |
 | `cursor-reader` | `.cursor/rules/engramory-recall.mdc` (`alwaysApply: true`) | unverified wiring |
-| `kiro-reader` | `.kiro/steering/engramory-recall.md` (`inclusion: always`) | unverified wiring |
 
 "Dogfooded" means a real host read the index, opened the right note and answered
 from it. The other rows follow each host's documented format but have not run here;
@@ -58,19 +56,13 @@ govern: on Claude Code, the auto-memory directory with the rules in `CLAUDE.md`.
 Keep host-managed memory separate: Codex native Memories, Letta memory blocks,
 OpenClaw's auto-written store, and Hermes's `memory`-tool files
 (`~/.hermes/memories/MEMORY.md`, `USER.md`) are not Engramory stores. On Hermes, use a
-separate store with the rules in `AGENTS.md` or `.hermes.md`. On Kiro, keep the notes
-outside steering and load only the index ([Kiro adapter](adapters/kiro/README.md)).
+separate store with the rules in `AGENTS.md` or `.hermes.md`.
 
 ## 3. Wire continuity sync — explicit first, hooks optional
 
 Any host with rules and file access can run the continuity sync in
 [`SKILL.md` §5](SKILL.md) before a deliberate compact, clear, or new thread: curate
 the store, validate it, and confirm a cold-started agent could continue.
-
-Lifecycle hooks can only prompt that work, never do it. The
-[Codex adapter](adapters/codex/README.md) is the one shipped lifecycle contract. On
-another host, verify event payloads, trust and blocking first; an automatic or
-unknown compaction must fail open with a warning and keep its reconcile state. Otherwise use explicit sync alone.
 
 ## 4. Enforce the size cap — the degradation ladder (no PreToolUse hook)
 
@@ -91,19 +83,13 @@ The cap keeps the index inside the host's load window. Strongest first:
    | dsh | `ctx.tools.guard()` | shipped, tested, running plugin |
    | Hermes | `pre_tool_call`, matching `write_file\|patch` | rules + check + doctor; no shim |
    | Cursor | `preToolUse` for file edits | rules + check + doctor; no shim |
-   | Kiro CLI | `PreToolUse`, `matcher: fs_write`, `exit 2` | rules + check + doctor; no shim |
    | OpenClaw | TypeScript `before_tool_call` plugin, `block: true` | rules + check + doctor; no shim |
-   | Codex | no index-deny shim here; lifecycle assistance is separate | rules + check + doctor |
+   | Codex | no index-deny shim here | rules + check + doctor |
    | Trae | post-write review/undo, no pre-write deny | rules + check + doctor |
    | Other hosts | verify the host's interface | rules + check + doctor where tools are available |
 
-   The "no shim" hosts are **portable in principle, not written or verified here**:
-   demonstrate a real deny on your host before claiming a port works (Kiro IDE and
-   CLI separately). Hermes's write seam does not cover its `memory` tool. Reported
-   problems to test for first: Hermes `pre_tool_call` shell hooks not firing in some
-   worker contexts (#25204), Cursor's hook flaky on Windows, Kiro IDE passing empty
-   `toolArgs` (#7375, so a path/content deny is CLI-only), and the Kiro CLI hook not
-   firing on Windows 11 (#8264).
+   The "no shim" hosts are **portable in principle, not written or verified here**.
+   Demonstrate a real deny on your host before claiming a port works.
 
 2. **Agent-invoked check** (any host with a shell): after writing the index, run
    `python tools/engramory_check.py <MEMORY.md>` and compact on `OVER`. Put that in
@@ -157,7 +143,7 @@ Why/How not in label form. Triage instead of hand-fixing blind:
 - [ ] `rules-snippet.md` in the host's always-loaded instructions
 - [ ] `SKILL.md` imported as a skill too (if supported)
 - [ ] one canonical `<MEMORY_ROOT>`; no second handoff store or writer
-- [ ] explicit continuity sync wired; any lifecycle hooks documented as assistance only
+- [ ] continuity sync wired
 - [ ] store git-ignored if inside a repo (it holds machine-local detail)
 - [ ] size cap at the strongest rung the host supports (hook → check → discipline)
 - [ ] `engramory_doctor.py` runnable as an occasional backstop
@@ -166,13 +152,10 @@ Init helpers wire `AGENTS.md`, the skill and a separate store in one go:
 
 ```sh
 python tools/engramory_init.py codex    --project-root <repo> --install-skill
-python tools/engramory_init.py codex    --project-root <repo> --install-skill --install-hooks --mode explicit
 python tools/engramory_init.py openclaw                       --install-skill   # -> ~/.openclaw/workspace
 python tools/engramory_init.py dsh                            --install-skill   # -> $DSH_HOME (else ~/.dsh)
 ```
 
 Setup and limits per host: [Codex](adapters/codex/README.md),
 [OpenClaw](adapters/openclaw/README.md), [dsh plugin](adapters/dsh/plugin/README.en.md)
-(the dsh guard is the plugin, `dsh-engramory >= 0.2.7`), and
-[Kiro](adapters/kiro/README.md), which has no init helper and ships a
-[steering template](adapters/kiro/steering-engramory.md) to copy.
+(the dsh guard is the plugin, `dsh-engramory >= 0.2.7`).

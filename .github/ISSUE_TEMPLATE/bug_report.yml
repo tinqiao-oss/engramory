@@ -25,7 +25,7 @@ body:
         - installer — engramory_init.py (incl. --uninstall)
         - tool — engramory_doctor.py
         - tool — engramory_check.py
-        - tool — engramory_sync.py / engramory_trace.py
+        - tool — engramory_trace.py
         - protocol text (SKILL.md / rules-snippet.md)
         - docs / templates
         - other
@@ -35,7 +35,7 @@ body:
     id: host
     attributes:
       label: Host / agent
-      description: e.g. Claude Code, Codex, dsh (DeepSeek Harness), Cursor, Kiro, or a plain script — with its version.
+      description: e.g. Claude Code, Codex, dsh (DeepSeek Harness), Cursor, or a plain script — with its version.
       placeholder: dsh 0.2.1-rc.2
     validations:
       required: true
