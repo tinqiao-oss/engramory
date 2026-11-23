@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
     /** How long the page waits on a move: the plugin answers once it is done (up to 256 MB copied). */
     const MOVE_WAIT_MS = 10 * 60 * 1000
     /** This plugin's version, for the feedback footer; a test keeps it equal to package.json's. */
-    const VERSION = '2.1.0'
+    const VERSION = '2.1.1'
     /** Where feedback goes: a new issue on the repository, or the project's mailbox. Opening
      * the link is the browser's (the desktop app hands it to the system's); the footer submits
      * nothing by itself. */
@@ -579,9 +579,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
 
     /**
      * The settings as the host has them, and a save that waits for the reloaded plugin to
-     * read them back. `onAdopt` hears every settings read, a save's included.
+     * read them back. `onAdopt` hears every settings read, a save's included. A save carries
+     * the revision of the settings it was made from — by default those this render shows —
+     * and resolves to what it read back when that is what was saved, otherwise to nothing.
+     * `quiet` keeps a save that went through from saying so: only what went wrong is said.
      */
-    function useSettings(t, onAdopt) {
+    function useSettings(t, onAdopt, quiet = false) {
       const [state, setState] = useState({ phase: 'loading' })
       const [busy, setBusy] = useState(false)
       const [banner, setBanner] = useState(undefined)
@@ -590,8 +593,12 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       const saving = useRef(false)
       useEffect(() => () => { alive.current = false }, [])
 
+      // the settings last read, revision and all, as soon as they are read: what a save made
+      // before the page has re-rendered starts from (`state` is still the render's)
+      const known = useRef(undefined)
       const adopt = useCallback((data) => {
         const settings = settingsOf(data)
+        known.current = data
         setState({ phase: 'ready', data, settings })
         onAdopt?.(settings)
       }, [onAdopt])
@@ -606,7 +613,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       }, [adopt])
       useEffect(() => { load() }, [load])
 
-      const save = async (next) => {
+      const save = async (next, from = state.data.revision) => {
         if (saving.current) return
         saving.current = true
         setBusy(true)
@@ -617,19 +624,20 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
             const response = await request(SETTINGS_API, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ revision: state.data.revision, ...next }),
+              body: JSON.stringify({ revision: from, ...next }),
             })
             result = response.body ?? { ok: false, error: 'failed', message: `HTTP ${response.status}` }
           } catch (error) {
             result = { ok: false, error: 'failed', message: String(error?.message ?? error) }
           }
-          if (!alive.current) return
+          if (!alive.current && !result.ok) return
           if (result.ok) {
             // The plugin reloads with the new config; its route comes back with it.
-            setBanner({ tone: 'ok', text: t('reloading') })
+            if (!quiet) setBanner({ tone: 'ok', text: t('reloading') })
             const wanted = revisionOf(next)
             let fresh
-            for (let i = 0; i < 20 && alive.current; i++) {
+            // read back even once the page is left: a click queued behind this save goes on from it
+            for (let i = 0; i < 20; i++) {
               await new Promise((resolve) => setTimeout(resolve, 400))
               try {
                 fresh = await fetchSettings()
@@ -637,12 +645,15 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
                 if (revisionOf(settingsOf(fresh)) === wanted && fresh.closed !== true) break
               } catch { /* still reloading */ }
             }
-            if (!alive.current) return
+            const confirmed = fresh !== undefined && revisionOf(settingsOf(fresh)) === wanted && fresh.closed !== true
+            if (!alive.current) return confirmed ? fresh : undefined
             if (fresh !== undefined) adopt(fresh)
             // The save landed either way; say so plainly when what came back differs.
-            setBanner(fresh !== undefined && revisionOf(settingsOf(fresh)) === wanted && fresh.closed !== true
-              ? { tone: 'ok', text: t('saved') }
-              : { tone: 'error', text: t('savedUnconfirmed') })
+            if (confirmed) {
+              if (!quiet) setBanner({ tone: 'ok', text: t('saved') })
+              return fresh
+            }
+            setBanner({ tone: 'error', text: t('savedUnconfirmed') })
           } else if (result.error === 'stale') {
             await load()
             if (alive.current) setBanner({ tone: 'error', text: t('stale') })
@@ -664,7 +675,7 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
           if (alive.current) setBusy(false)
         }
       }
-      return { state, busy, banner, setBanner, load, save }
+      return { state, busy, banner, setBanner, load, save, known }
     }
 
     /** A host-styled switch: role=switch with aria-checked, as the host's own. */
@@ -920,11 +931,34 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
     }
 
     /**
-     * The two settings that matter most, atop the memory page, each saved as it is switched;
-     * what they mean, and the index cap, stay on the package's page.
+     * Companion mode atop the memory page, a plain switch: it turns as it is clicked and is
+     * saved behind it, and only a save that goes wrong is said (the switch then shows what the
+     * host has). A click while a save is under way is saved after it — the last one wins.
+     * What the mode means, and the index cap, stay on the package's page.
      */
     function SettingsStrip({ t }) {
-      const { state, busy, banner, load, save } = useSettings(t)
+      const { state, busy, banner, load, save, known } = useSettings(t, undefined, true)
+      // what the switch shows until the host has it, and the last click while saves run
+      const [wanted, setWanted] = useState(undefined)
+      const latest = useRef(undefined)
+      const flipping = useRef(false)
+      const flip = async (on) => {
+        latest.current = on
+        setWanted(on)
+        if (flipping.current) return
+        flipping.current = true
+        try {
+          // the first save starts from the settings last read, each after it from what the one
+          // before it read back — revision and all, and not what this render was drawn from
+          let base = known.current
+          while (base !== undefined && latest.current !== settingsOf(base).companion) {
+            base = await save({ ...settingsOf(base), companion: latest.current }, base.revision)
+          }
+        } finally {
+          flipping.current = false
+          setWanted(undefined)
+        }
+      }
       if (state.phase === 'error') {
         return h('section', { className: 'eng-strip' },
           h('p', { className: 'eng-strip-note' }, t('loadFailed')),
@@ -932,18 +966,19 @@ button.eng-row:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-ho
       }
       if (state.phase !== 'ready') return null
       const { data, settings } = state
-      const disabled = data.editable !== true || busy
-      const change = (patch) => save({ ...settings, ...patch })
+      const editable = data.editable === true
       return h('section', { className: 'eng-strip' },
         h('div', { className: 'eng-strip-item' },
           h('span', null, t('companion')),
-          h(Switch, { checked: settings.companion, disabled, label: t('companion'),
-            onChange: (on) => change({ companion: on }) })),
-        data.closed === true ? h('button', { type: 'button', className: 'eng-btn', disabled,
-          onClick: () => change({}) }, t('reopen')) : null,
+          // held only while Restore memory saves, which a click could not follow
+          h(Switch, { checked: wanted ?? settings.companion, disabled: !editable || (busy && wanted === undefined),
+            label: t('companion'),
+            onChange: flip })),
+        data.closed === true ? h('button', { type: 'button', className: 'eng-btn', disabled: !editable || busy,
+          onClick: () => save(settings) }, t('reopen')) : null,
         h('p', { className: 'eng-strip-note', role: banner ? 'status' : undefined },
-          busy ? t('saving') : banner ? banner.text
-            : data.closed === true ? t('closedSocial') : t(data.editable === true ? 'stripNote' : 'stripReadOnly')))
+          banner ? banner.text
+            : data.closed === true ? t('closedSocial') : t(editable ? 'stripNote' : 'stripReadOnly')))
     }
 
     /** The memory route's listing, read again on `load`; a reply that a later read overtook is dropped. */

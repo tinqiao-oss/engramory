@@ -26,7 +26,7 @@ dsh plugin --profile <名字> add dsh-engramory
 
 卸载把 `add` 换成 `remove`。
 
-**升级要写上版本号**，比如 `dsh plugin --profile <名字> add dsh-engramory@2.1.0`：只写名字时，pnpm 11（桌面版自带的也是）默认只装发布满 24 小时的版本。桌面版从 dsh 0.2.2 起可以在插件页点「Engramory 记忆」的「更新」；更早的版本没有这个按钮，先卸载，再搜 `dsh-engramory@<版本>` 安装。装完按提示重启 dsh（桌面版从托盘退出再打开）。记忆库和设置都会保留。
+**升级要写上版本号**，比如 `dsh plugin --profile <名字> add dsh-engramory@2.1.1`：只写名字时，pnpm 11（桌面版自带的也是）默认只装发布满 24 小时的版本。桌面版从 dsh 0.2.2 起可以在插件页点「Engramory 记忆」的「更新」；更早的版本没有这个按钮，先卸载，再搜 `dsh-engramory@<版本>` 安装。装完按提示重启 dsh（桌面版从托盘退出再打开）。记忆库和设置都会保留。
 
 兼容的 dsh 版本见 [`package.json`](https://github.com/tinqiao-oss/engramory/blob/master/adapters/dsh/plugin/package.json) 里的 `dsh.compatibility.dshReleases`，没列出的版本未经验证。`engines.dsh` 只写了下限（`>=0.2.1-alpha.5`；2.0 起不再支持 dsh 0.1），所以 dsh 出了新版也不会拒装，只是还没验证过。
 

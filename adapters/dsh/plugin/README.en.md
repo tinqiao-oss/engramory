@@ -46,7 +46,7 @@ dsh plugin --profile <name> add dsh-engramory
 To uninstall, use `remove` instead of `add`.
 
 **Name the version to upgrade**, as in `dsh plugin --profile <name> add
-dsh-engramory@2.1.0`: by name alone, pnpm 11 (the desktop app's own included) by default
+dsh-engramory@2.1.1`: by name alone, pnpm 11 (the desktop app's own included) by default
 installs only a version published at least 24 hours ago. From dsh 0.2.2 the desktop
 app's Plugins page has an *Update* for *Engramory memory*; before that there is none:
 uninstall it, then search for `dsh-engramory@<version>` and install that. Restart dsh

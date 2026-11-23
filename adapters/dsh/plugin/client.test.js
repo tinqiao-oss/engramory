@@ -49,7 +49,14 @@ function miniReact() {
     useEffect(fn, deps) {
       const [hooks, slot] = hook(() => ({}))
       const cell = hooks[slot]
-      if (!same(cell.deps, deps)) { cell.deps = deps; effects.push(fn) }
+      if (!same(cell.deps, deps)) {
+        cell.deps = deps
+        effects.push(() => {
+          cell.cleanup?.()
+          const out = fn()
+          cell.cleanup = typeof out === 'function' ? out : undefined
+        })
+      }
     },
   }
   const render = (node, path) => {
@@ -89,6 +96,11 @@ function miniReact() {
             await new Promise((resolve) => setImmediate(resolve))
             if (dirty || effects.length) draw()
           }
+        },
+        /** Leave the page: every effect's cleanup runs, and nothing is drawn again. */
+        unmount() {
+          for (const store of stores.values()) for (const cell of store.hooks) cell?.cleanup?.()
+          stores.clear()
         },
       }
     },
@@ -645,7 +657,7 @@ test('client: a listing a refresh overtook is dropped', async () => {
   assert.doesNotMatch(textOf(view.tree), /storeUser/)
 })
 
-test('client: the switches atop the memory page save as they are switched, with what they do not show', async () => {
+test('client: the switch atop the memory page saves as it is switched, saying nothing of a save that went through', async () => {
   const realTimeout = globalThis.setTimeout
   globalThis.setTimeout = (fn) => realTimeout(fn, 0)
   try {
@@ -656,16 +668,17 @@ test('client: the switches atop the memory page save as they are switched, with 
     })
     await view.settle()
     assert.equal(button(view.tree, 'reopen'), undefined) // only for a profile still set to social mode
-    const saved = async () => {
-      for (let i = 0; i < 40 && textsOf(view.tree, 'eng-strip-note')[0] !== 'saved'; i++) await view.settle()
-      assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['saved'])
-    }
     const posts = () => sent.filter((s) => s.method === 'POST').map((s) => s.body)
     switchFor(view.tree, 'companion').props.onClick()
     switchFor(view.tree, 'companion').props.onClick() // a second click before the page re-renders
-    await saved()
+    for (let i = 0; i < 10; i++) {
+      await view.settle()
+      // no saving, no saved: the switch is all there is to it
+      assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['stripNote'])
+      assert.equal(switchFor(view.tree, 'companion').props['aria-checked'], true)
+    }
     assert.deepEqual(posts(), [{ revision: 'r1', companion: true, maxLines: 150, maxBytes: 25600 }])
-    assert.equal(switchFor(view.tree, 'companion').props['aria-checked'], true)
+    assert.equal(current.companion, true)
   } finally {
     globalThis.setTimeout = realTimeout
   }
@@ -682,18 +695,133 @@ test('client: atop the memory page, a profile still set to social mode is said c
   globalThis.setTimeout = (fn) => realTimeout(fn, 0)
   try {
     let current = settingsData({ companion: true, closed: true })
+    let release
     const { view, sent } = await memoryPage({
       [`GET ${SETTINGS}`]: () => current,
-      [`POST ${SETTINGS}`]: (log) => { current = settingsData({ ...log.at(-1).body }); return { ok: true } },
+      [`POST ${SETTINGS}`]: (log) => new Promise((resolve) => {
+        release = () => { current = settingsData({ ...log.at(-1).body }); resolve({ ok: true }) }
+      }),
     })
     await view.settle()
     assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['closedSocial'])
     button(view.tree, 'reopen').props.onClick()
-    for (let i = 0; i < 40 && textsOf(view.tree, 'eng-strip-note')[0] !== 'saved'; i++) await view.settle()
+    await view.settle()
+    // the switch waits while Restore memory saves: a click could not follow that save
+    assert.equal(button(view.tree, 'reopen').props.disabled, true)
+    assert.equal(switchFor(view.tree, 'companion').props.disabled, true)
+    release()
+    for (let i = 0; i < 40 && button(view.tree, 'reopen') !== undefined; i++) await view.settle()
     assert.deepEqual(sent.filter((s) => s.method === 'POST').map((s) => s.body),
       [{ revision: 'r1', companion: true, maxLines: 200, maxBytes: 25600 }])
-    assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['saved'])
+    assert.deepEqual(textsOf(view.tree, 'eng-strip-note'), ['stripNote'])
     assert.equal(button(view.tree, 'reopen'), undefined)
+    assert.equal(switchFor(view.tree, 'companion').props.disabled, false)
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
+})
+
+test('client: atop the memory page, a click while a save is under way is saved after it; a save that fails turns the switch back and says why', async () => {
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn) => realTimeout(fn, 0)
+  try {
+    // as the host has it: the revision is the settings it holds, and a save made from any
+    // other is stale
+    let current = { companion: false, maxLines: 200, maxBytes: 25600 }
+    const revision = (settings) => JSON.stringify(settings)
+    let hold = true
+    let release
+    let fail = false
+    const { view, sent } = await memoryPage({
+      [`GET ${SETTINGS}`]: () => ({ ...current, editable: true, revision: revision(current) }),
+      [`POST ${SETTINGS}`]: (log) => {
+        const { revision: from, ...next } = log.at(-1).body
+        if (fail) return { status: 500, body: { ok: false, error: 'failed', message: 'disk full' } }
+        if (from !== revision(current)) return { status: 409, body: { ok: false, error: 'stale' } }
+        if (!hold) { current = next; return { ok: true } }
+        hold = false
+        return new Promise((resolve) => { release = () => { current = next; resolve({ ok: true }) } })
+      },
+    })
+    await view.settle()
+    const shown = () => switchFor(view.tree, 'companion').props
+    const note = () => textsOf(view.tree, 'eng-strip-note')
+
+    shown().onClick() // on: its save is held
+    await view.settle()
+    assert.equal(shown()['aria-checked'], true)
+    assert.equal(shown().disabled, false)
+    assert.deepEqual(note(), ['stripNote'])
+    shown().onClick() // off again, before that save is back
+    await view.settle()
+    assert.equal(shown()['aria-checked'], false)
+    release()
+    for (let i = 0; i < 10; i++) await view.settle()
+    const off = { companion: false, maxLines: 200, maxBytes: 25600 }
+    const on = { ...off, companion: true }
+    assert.deepEqual(sent.filter((s) => s.method === 'POST').map((s) => s.body),
+      [{ revision: revision(off), ...on }, { revision: revision(on), ...off }])
+    assert.deepEqual(current, off)
+    assert.equal(shown()['aria-checked'], false)
+    assert.deepEqual(note(), ['stripNote'])
+
+    fail = true
+    shown().onClick()
+    for (let i = 0; i < 10; i++) await view.settle()
+    assert.equal(shown()['aria-checked'], false) // what the host has
+    assert.deepEqual(note(), ['faileddisk full'])
+  } finally {
+    globalThis.setTimeout = realTimeout
+  }
+})
+
+test('client: atop the memory page, a click goes on from the settings last read — one just after a save, before the page re-renders, and one queued when the page is left', async () => {
+  const realTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn) => realTimeout(fn, 0)
+  // let requests and timers run without the page re-rendering (a timer of 0 is still a
+  // millisecond or so: rounds of setImmediate alone can end before it fires)
+  const run = async () => { for (let i = 0; i < 20; i++) await new Promise((resolve) => realTimeout(resolve, 2)) }
+  try {
+    let current = { companion: false, maxLines: 200, maxBytes: 25600 }
+    const revision = (settings) => JSON.stringify(settings)
+    const held = []
+    const { view, sent } = await memoryPage({
+      [`GET ${SETTINGS}`]: () => ({ ...current, editable: true, revision: revision(current) }),
+      [`POST ${SETTINGS}`]: (log) => {
+        const { revision: from, ...next } = log.at(-1).body
+        if (from !== revision(current)) return { status: 409, body: { ok: false, error: 'stale' } }
+        return new Promise((resolve) => held.push(() => { current = next; resolve({ ok: true }) }))
+      },
+    })
+    const posts = () => sent.filter((s) => s.method === 'POST').map((s) => s.body.companion)
+    const shown = () => switchFor(view.tree, 'companion').props
+    await view.settle()
+
+    // on, read back while the page still shows the render before; off, clicked on that render
+    shown().onClick()
+    await view.settle()
+    held.shift()()
+    await run()
+    shown().onClick()
+    await run()
+    held.shift()()
+    await view.settle()
+    assert.deepEqual(posts(), [true, false])
+    assert.equal(current.companion, false)
+    assert.equal(shown()['aria-checked'], false)
+
+    // on, off while that save is under way, and the page is left: off is still saved
+    shown().onClick()
+    await view.settle()
+    shown().onClick()
+    await view.settle()
+    view.unmount()
+    held.shift()()
+    await run()
+    held.shift()()
+    await run()
+    assert.deepEqual(posts(), [true, false, true, false])
+    assert.equal(current.companion, false)
   } finally {
     globalThis.setTimeout = realTimeout
   }

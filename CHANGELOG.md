@@ -6,6 +6,17 @@ All notable changes to Engramory. Versions from 0.1.3 onward are git tags (0.1.0
 says what it promises; before that the plugin had its own (0.1.0–0.3.0). Off Claude
 Code and dsh, expect rough edges (see SKILL.md §8 / §9).
 
+## 2.1.1 — 2026-11-23
+
+The dsh plugin's companion mode switch, atop the memory page, now just switches.
+
+- **dsh: the companion mode switch atop the memory page is a plain switch.** It turns as
+  it is clicked, and the line under it no longer says *Saving…*, *reloading* or *Saved*:
+  only a save that fails is said, and the switch then shows the settings last read back. A
+  click while a save is under way is saved after it, the last click winning, even if the
+  page is left meanwhile — before, it was dropped while the switch sat greyed out until the
+  plugin had reloaded. The settings page keeps its Save button.
+
 ## 2.1.0 — 2026-11-21
 
 The dsh plugin's memory page no longer checks npm for a newer version: from dsh 0.2.2 the
