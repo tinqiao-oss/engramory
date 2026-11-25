@@ -1,5 +1,5 @@
 /**
- * node --test adapters/dsh/plugin — the browser half (client.js).
+ * cd adapters/dsh/plugin && node --test — the browser half (client.js).
  *
  * A component that throws blanks its slot entry in dsh with nothing but a console line,
  * so the settings page is rendered here against a small stand-in for React (state,

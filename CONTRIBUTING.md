@@ -27,8 +27,9 @@ python -m pytest tests -q
 ```
 
 Each suite also runs as a plain script (`python tests/test_<name>.py`), which is how CI
-runs them. The dsh plugin's tests run with `node --test adapters/dsh/plugin` (or
-through `python tests/test_dsh_plugin.py`). Every behavioral change to a hook,
+runs them. The dsh plugin's tests run with `node --test` inside `adapters/dsh/plugin`
+(or through `python tests/test_dsh_plugin.py`): given that folder as an argument
+instead, Node 24 runs no test and still passes. Every behavioral change to a hook,
 installer, plugin or tool should come with a test.
 
 ## Guidelines

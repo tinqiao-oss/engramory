@@ -1,5 +1,5 @@
 /**
- * node --test adapters/dsh/plugin
+ * cd adapters/dsh/plugin && node --test
  *
  * Covers the guard's decision table directly. The guard is the whole point of this
  * plugin — a wrong `undefined` silently drops the cap, and a wrong refusal blocks
@@ -12,8 +12,8 @@ import assert from 'node:assert/strict'
 import { execSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs, {
-  chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync,
-  utimesSync, writeFileSync,
+  chmodSync, lstatSync, mkdirSync, mkdtempSync as makeTempDir, readdirSync, realpathSync, renameSync,
+  rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync,
 } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { homedir, hostname, tmpdir } from 'node:os'
@@ -24,6 +24,24 @@ import { apply, inject, name } from './index.js'
 
 // A move of the store waits a moment at two steps for writes already under way; not here.
 process.env.ENGRAMORY_MOVE_WAIT_MS = '0'
+
+// The temp folders a run makes are removed when it ends, as far as they will go: left behind,
+// a few hundred a run had added up to 122,000 on one machine. A link is removed, not followed.
+// Not by rmSync: on Windows, Node 24.11 reports success and leaves a non-ASCII path in place.
+const made = []
+const mkdtempSync = (prefix) => {
+  const dir = makeTempDir(prefix)
+  made.push(dir)
+  return dir
+}
+function discard(path) {
+  try {
+    if (!lstatSync(path).isDirectory()) return unlinkSync(path)
+    for (const entry of readdirSync(path)) discard(join(path, entry))
+    rmdirSync(path)
+  } catch { /* gone already, or held open: no verdict on the plugin */ }
+}
+process.on('exit', () => made.forEach(discard))
 
 // Where neither the config nor dsh names a language, the memory follows the system's:
 // pinned here, so the tests read the same on every machine.
